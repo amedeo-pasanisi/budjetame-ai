@@ -1,0 +1,75 @@
+# Budjetame
+
+A single-user personal finance app. Money lives in Wallets; every balance is derived from the Wallet's transaction history, and Net Worth is the sum of all Wallet balances.
+
+## Language
+
+**Account**:
+The single login identity in the system, seeded at setup. There is no registration path.
+_Avoid_: user, profile
+
+**Wallet**:
+Any money-holder in the system. Four types: Checking, Credit Card, Cash, Contact.
+_Avoid_: account, bank account
+
+**Contact Wallet**:
+A Wallet that represents a person or organization whose debts with the user are tracked (e.g. "Marco"). A positive balance means they owe you; a negative one means you owe them. Money moves in and out only via Transfers.
+_Avoid_: third-party account, friends account, IOU
+
+**Transaction**:
+A dated money movement recorded on one or two Wallets. Types: Expense, Income, Transfer, Opening Balance.
+_Avoid_: entry, movement, operation, record
+
+**Expense**:
+A Transaction that decreases a Wallet's balance — money leaves the user's control.
+_Avoid_: spending, outgoing, payment
+
+**Income**:
+A Transaction that increases a Wallet's balance — money comes into the user's control.
+_Avoid_: earning, incoming, deposit
+
+**Transfer**:
+A Transaction that moves money from a Source Wallet to a Destination Wallet. Net Worth never changes, it never carries a Category, and the source and destination must be different Wallets.
+_Avoid_: internal transfer, move
+
+**Category**:
+A user-defined label that groups Transactions of one type. Each Category is either expense-only or income-only and can only be attached to Transactions of that type. Names are unique case-insensitively within their type: an expense "Food" and an income "Food" can coexist.
+_Avoid_: tag, label, group
+
+**Balance**:
+The current amount of a Wallet, always computed as the sum of its Transactions, never stored.
+_Avoid_: stored balance, ledger balance
+
+**Net Worth**:
+The algebraic sum of the balances of all Wallets, including Contact Wallets and frozen ones (always €0). Transfers never change it.
+_Avoid_: total assets, equity
+
+**Frozen Wallet**:
+A Wallet deleted at balance €0. It is hidden from the UI but kept in the database; its Transactions stay viewable but can no longer be created, edited, or deleted.
+_Avoid_: deleted wallet, trashed wallet
+
+**Opening Balance**:
+A Transaction created when a Wallet is started with a nonzero initial balance (must be ≥ €0). It counts toward the Wallet's balance but never toward income/expense statistics.
+_Avoid_: initial transaction, seed entry
+
+**Geographic Location**:
+An optional set of coordinates (latitude/longitude) attached to a Transaction. The Google Maps link is built from the coordinates on the frontend; it is never stored as text.
+_Avoid_: maps link, location text
+
+## Rules
+
+- The only supported currency is EUR.
+- Cash Wallets may go negative, but any write that would do so shows a warning. Checking, Credit Card, and Contact Wallets can go negative without a warning.
+- Contact Wallets participate only in Transfers — never direct Expense/Income Transactions.
+- Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
+- A Wallet can only be frozen when its balance is exactly €0.
+- Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
+- All data is scoped to the single Account; foreign data gets a 403.
+
+## Non-goals
+
+- Registration and multi-user accounts
+- Recurring transactions; budgets (budgets may come later)
+- Multi-currency
+- Bank sync via GoCardless (deferred to a later milestone)
+- Data export

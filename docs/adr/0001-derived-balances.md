@@ -1,0 +1,3 @@
+# Balances are derived, never stored
+
+A Wallet's balance is always computed as the sum of its Transactions and is never stored as a column. This makes edits and deletions automatically correct (US 3.3's "retroactive recalculation" is a no-op), keeps balance and history in agreement by construction, and gives the future GoCardless reconciliation (US 7.2) one source of truth to compare against the bank. A stored balance column was considered and rejected: it duplicates state that history already determines and needs careful recomputation on every write. If reads ever get slow, cache the sum behind the same API — the cache is not the source of truth.
