@@ -6,6 +6,7 @@ import {
   apiErrorMessage,
   createWallet,
   fetchWallets,
+  formatEuros,
   renameWallet,
   type Wallet,
   type WalletType,
@@ -22,9 +23,6 @@ const WALLET_TYPE_OPTIONS = (Object.entries(TYPE_LABELS) as [WalletType, string]
   ([value, label]) => ({ value, label }),
 )
 
-function formatEuros(balance: string): string {
-  return `€${balance}`
-}
 
 export function WalletsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
@@ -109,6 +107,7 @@ export function WalletsScreen() {
 
       {showCreate && (
         <WalletCreateForm
+          key="new-wallet"
           onCreated={handleCreated}
           onCancel={() => setShowCreate(false)}
         />
@@ -116,6 +115,7 @@ export function WalletsScreen() {
 
       {editing !== null && (
         <WalletRenameForm
+          key={editing.id}
           wallet={editing}
           onRenamed={handleRenamed}
           onCancel={() => setEditing(null)}

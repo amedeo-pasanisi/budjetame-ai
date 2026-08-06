@@ -25,6 +25,31 @@ export type Category = {
   created_at: string
 }
 
+export type TransactionType = 'expense' | 'income' | 'opening_balance'
+
+export type Transaction = {
+  id: number
+  type: TransactionType
+  amount: string
+  date: string
+  wallet_id: number
+  category_id: number | null
+  description: string | null
+  latitude: string | null
+  longitude: string | null
+  warning: boolean
+  created_at: string
+}
+
+export type TransactionInput = {
+  type: 'expense' | 'income'
+  amount: string
+  date: string
+  walletId: number
+  categoryId: number | null
+  description: string
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -44,6 +69,11 @@ export function apiErrorMessage(
   if (error.status === 409) return conflictMessage
   if (error.status === 422) return 'Check the fields and try again.'
   return fallback
+}
+
+/** Display an amount string from the API as euros ("€100.00", "€-15.00"). */
+export function formatEuros(amount: string): string {
+  return `€${amount}`
 }
 
 export async function login(email: string, password: string): Promise<string> {
@@ -169,6 +199,73 @@ export async function deleteCategory(token: string, categoryId: number): Promise
   })
   if (!response.ok) {
     throw new ApiError('Could not delete category', response.status)
+  }
+}
+
+export async function fetchTransactions(
+  token: string,
+  walletId?: number,
+): Promise<Transaction[]> {
+  const query = walletId === undefined ? '' : `?wallet_id=${walletId}`
+  const response = await fetch(`${API_BASE}/transactions${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new ApiError('Could not load transactions', response.status)
+  }
+  return (await response.json()) as Transaction[]
+}
+
+export async function createTransaction(
+  token: string,
+  input: TransactionInput,
+): Promise<Transaction> {
+  const response = await fetch(`${API_BASE}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      type: input.type,
+      amount: input.amount,
+      date: input.date,
+      wallet_id: input.walletId,
+      category_id: input.categoryId,
+      description: input.description === '' ? null : input.description,
+    }),
+  })
+  if (!response.ok) {
+    throw new ApiError('Could not create transaction', response.status)
+  }
+  return (await response.json()) as Transaction
+}
+
+export async function updateTransaction(
+  token: string,
+  transactionId: number,
+  input: { amount: string; date: string; categoryId: number | null; description: string },
+): Promise<Transaction> {
+  const response = await fetch(`${API_BASE}/transactions/${transactionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      amount: input.amount,
+      date: input.date,
+      category_id: input.categoryId,
+      description: input.description === '' ? null : input.description,
+    }),
+  })
+  if (!response.ok) {
+    throw new ApiError('Could not update transaction', response.status)
+  }
+  return (await response.json()) as Transaction
+}
+
+export async function deleteTransaction(token: string, transactionId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/transactions/${transactionId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new ApiError('Could not delete transaction', response.status)
   }
 }
 

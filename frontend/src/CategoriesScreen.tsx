@@ -132,6 +132,7 @@ export function CategoriesScreen() {
 
       {showCreate && (
         <CategoryForm
+          key="new-category"
           onSaved={handleCreated}
           onCancel={() => setShowCreate(false)}
         />
@@ -139,6 +140,7 @@ export function CategoriesScreen() {
 
       {editing !== null && (
         <CategoryForm
+          key={editing.id}
           category={editing}
           onSaved={handleUpdated}
           onDeleted={handleDeleted}

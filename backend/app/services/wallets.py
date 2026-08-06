@@ -7,7 +7,7 @@ and the derived Balance (ADR-0001).
 
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Transaction, TransactionType, Wallet, WalletType
@@ -68,19 +68,43 @@ def rename_wallet(session: Session, wallet: Wallet, new_name: str) -> Wallet:
     return wallet
 
 
-def wallet_balances(session: Session, account_id: int) -> dict[int, Decimal]:
-    """Map every Wallet id of the Account to its derived Balance (ADR-0001).
+def _signed_amount():
+    """SQL: the signed contribution of a Transaction to its Wallet's Balance.
+    Income and Opening Balance add; Expense subtracts (ADR-0001). Transfers
+    arrive with the ticket that introduces them."""
+    return case(
+        (Transaction.type == TransactionType.EXPENSE.value, -Transaction.amount),
+        else_=Transaction.amount,
+    )
 
-    The Balance is the sum of the Wallet's Transactions, computed at read time.
-    Opening Balances contribute their amount; expense/income sign rules arrive
-    with the tickets that introduce them.
-    """
+
+def transaction_contribution(transaction: Transaction) -> Decimal:
+    """The signed contribution of one Transaction to its Wallet's Balance."""
+    if transaction.type == TransactionType.EXPENSE.value:
+        return -transaction.amount
+    return transaction.amount
+
+
+def wallet_balances(session: Session, account_id: int) -> dict[int, Decimal]:
+    """Map every Wallet id of the Account to its derived Balance (ADR-0001)."""
     rows = session.execute(
         select(
             Transaction.wallet_id,
-            func.coalesce(func.sum(Transaction.amount), Decimal("0.00")),
+            func.coalesce(func.sum(_signed_amount()), Decimal("0.00")),
         )
         .where(Transaction.account_id == account_id)
         .group_by(Transaction.wallet_id)
     ).all()
     return {wallet_id: Decimal(amount) for wallet_id, amount in rows}
+
+
+def wallet_balance(session: Session, account_id: int, wallet_id: int) -> Decimal:
+    """The derived Balance of one Wallet, read at call time."""
+    amount = session.scalar(
+        select(func.coalesce(func.sum(_signed_amount()), Decimal("0.00"))).where(
+            Transaction.account_id == account_id,
+            Transaction.wallet_id == wallet_id,
+        )
+    )
+    return Decimal(amount)
+

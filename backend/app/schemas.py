@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -10,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.models import CategoryType, WalletType
+from app.models import CategoryType, TransactionType, WalletType
 
 
 class LoginRequest(BaseModel):
@@ -105,4 +106,103 @@ class CategoryOut(BaseModel):
     icon: str | None
     color: str
     created_at: datetime
+
+
+_MAX_AMOUNT = Decimal("9999999999.99")  # matches the Numeric(12, 2) column
+
+
+def fmt_coord(value: Decimal | None) -> str | None:
+    """Canonical shortest form of a coordinate ("41.9028", not "41.902800")."""
+    if value is None:
+        return None
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _valid_rome_day(value: str) -> str:
+    """Accept only a real YYYY-MM-DD calendar day (in Europe/Rome)."""
+    datetime.strptime(value, "%Y-%m-%d")  # ValueError -> 422
+    return value
+
+
+class TransactionCreate(BaseModel):
+    """Record an Expense or Income. Date is the calendar day in Europe/Rome
+    ("YYYY-MM-DD"); the backend stores it as a UTC timestamp."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    type: Literal["expense", "income"]
+    amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
+    date: str
+    wallet_id: int
+    category_id: int | None = None
+    description: str | None = Field(default=None, max_length=500)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+
+    @field_validator("date")
+    @classmethod
+    def _date_is_a_rome_day(cls, value: str) -> str:
+        return _valid_rome_day(value)
+
+    @model_validator(mode="after")
+    def _location_is_a_pair(self) -> "TransactionCreate":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be set together")
+        return self
+
+
+class TransactionUpdate(BaseModel):
+    """Edit an Expense or Income. Type and Wallet cannot change; a field present
+    in the payload is applied even when null (clearing it); a field absent is
+    untouched."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
+    date: str | None = None
+    category_id: int | None = None
+    description: str | None = Field(default=None, max_length=500)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+
+    @field_validator("date")
+    @classmethod
+    def _date_is_a_rome_day(cls, value: str | None) -> str | None:
+        return _valid_rome_day(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> "TransactionUpdate":
+        if not self.model_fields_set:
+            raise ValueError("at least one field is required")
+        return self
+
+    @model_validator(mode="after")
+    def _location_is_a_pair(self) -> "TransactionUpdate":
+        if "latitude" in self.model_fields_set or "longitude" in self.model_fields_set:
+            if (self.latitude is None) != (self.longitude is None):
+                raise ValueError("latitude and longitude must be set together")
+        return self
+
+
+class TransactionOut(BaseModel):
+    """A Transaction as seen through the API. `warning` is the Cash negative-
+    Balance indicator (true only right after a write that made a Cash Wallet
+    negative); `date` is the calendar day in Europe/Rome."""
+
+    id: int
+    type: TransactionType
+    amount: Decimal
+    date: str
+    wallet_id: int
+    category_id: int | None
+    description: str | None
+    latitude: str | None
+    longitude: str | None
+    warning: bool
+    created_at: datetime
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
 

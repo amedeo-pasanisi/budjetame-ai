@@ -4,6 +4,7 @@ import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { LoginForm } from './LoginForm'
 import { Screen } from './Screen'
+import { TransactionsScreen } from './TransactionsScreen'
 import { WalletsScreen } from './WalletsScreen'
 
 type AuthState =
@@ -11,7 +12,7 @@ type AuthState =
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; account: Account }
 
-type Tab = 'wallets' | 'categories'
+type Tab = 'wallets' | 'transactions' | 'categories'
 
 function App() {
   const [auth, setAuth] = useState<AuthState>(() =>
@@ -98,13 +99,18 @@ function AppShell({
         <TabButton active={tab === 'wallets'} onClick={() => setTab('wallets')}>
           Wallets
         </TabButton>
+        <TabButton active={tab === 'transactions'} onClick={() => setTab('transactions')}>
+          Transactions
+        </TabButton>
         <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
           Categories
         </TabButton>
       </nav>
 
       <main className="mx-auto mt-6 max-w-sm">
-        {tab === 'wallets' ? <WalletsScreen /> : <CategoriesScreen />}
+        {tab === 'wallets' && <WalletsScreen />}
+        {tab === 'transactions' && <TransactionsScreen />}
+        {tab === 'categories' && <CategoriesScreen />}
       </main>
     </div>
   )

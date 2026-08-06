@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, func, text
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -22,6 +22,8 @@ class WalletType(str, enum.Enum):
 class TransactionType(str, enum.Enum):
     """The discriminator of the single Transaction entity."""
 
+    EXPENSE = "expense"
+    INCOME = "income"
     OPENING_BALANCE = "opening_balance"
 
 
@@ -94,6 +96,9 @@ class Transaction(Base):
     date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    description: Mapped[str | None] = mapped_column(Text)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
