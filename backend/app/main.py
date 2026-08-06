@@ -1,13 +1,30 @@
 from fastapi import FastAPI
+from sqlalchemy.orm import sessionmaker
 
+from app.auth import router as auth_router
 from app.config import settings
 from app.db import check_connection, create_db_engine
+from app.seed import seed_account
 
 
-def create_app(database_url: str | None = None) -> FastAPI:
-    """Build the application. `database_url` overrides settings for tests."""
+def create_app(
+    database_url: str | None = None,
+    *,
+    seed_email: str | None = None,
+    seed_password: str | None = None,
+) -> FastAPI:
+    """Build the application. `database_url` and seed credentials override settings for tests."""
     app = FastAPI(title="Budjetame API", version="0.1.0")
     engine = create_db_engine(database_url or settings.database_url)
+    app.state.sessionmaker = sessionmaker(bind=engine, expire_on_commit=False)
+
+    seed_account(
+        app.state.sessionmaker,
+        seed_email or settings.seed_account_email,
+        seed_password or settings.seed_account_password,
+    )
+
+    app.include_router(auth_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -17,4 +34,6 @@ def create_app(database_url: str | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+# No module-level `app = create_app()`: creating the app seeds the Account,
+# which requires a database connection. Uvicorn runs the factory directly:
+# `uvicorn app.main:create_app --factory`.

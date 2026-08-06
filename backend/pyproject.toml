@@ -5,9 +5,12 @@ description = "Backend for Budjetame, a single-user personal finance app"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
-    "fastapi>=0.115",
+    "bcrypt>=4.2",
+    "email-validator>=2.2",
+    "fastapi[standard]>=0.115",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
+    "pyjwt>=2.9",
     "sqlalchemy>=2.0",
     "uvicorn[standard]>=0.30",
 ]

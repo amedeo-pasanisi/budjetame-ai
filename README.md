@@ -32,7 +32,7 @@ docker compose up -d
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:create_app --factory --reload
 ```
 
 The API is then at <http://localhost:8000> (docs at `/docs`), health check at `/health`.

@@ -9,6 +9,10 @@ from testcontainers.community.postgres import PostgresContainer
 
 from app.main import create_app
 
+# Credentials the app seeds into the (empty) database for tests.
+SEED_EMAIL = "admin@budjetame.dev"
+SEED_PASSWORD = "correct-horse-battery-staple"
+
 
 def run_migrations(database_url: str) -> None:
     """Apply Alembic migrations to the given database."""
@@ -30,7 +34,11 @@ def database_url() -> Iterator[str]:
 @pytest.fixture
 async def client(database_url: str) -> Iterator[AsyncClient]:
     """The app driven through its HTTP seam against the real database."""
-    app = create_app(database_url)
+    app = create_app(
+        database_url,
+        seed_email=SEED_EMAIL,
+        seed_password=SEED_PASSWORD,
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client
