@@ -25,6 +25,13 @@ class TransactionType(str, enum.Enum):
     OPENING_BALANCE = "opening_balance"
 
 
+class CategoryType(str, enum.Enum):
+    """A Category groups Transactions of one type only."""
+
+    EXPENSE = "expense"
+    INCOME = "income"
+
+
 class Account(Base):
     """The single login identity, seeded at setup. There is no registration path."""
 
@@ -67,7 +74,7 @@ class Transaction(Base):
     """A dated money movement on a Wallet, discriminated by `type`.
 
     Balances are the sum of these rows (ADR-0001); the table is extended in later
-    tickets (expense/income, transfers, category, location).
+    tickets (expense/income, transfers, location).
     """
 
     __tablename__ = "transactions"
@@ -79,11 +86,46 @@ class Transaction(Base):
     wallet_id: Mapped[int] = mapped_column(
         ForeignKey("wallets.id", ondelete="CASCADE"), index=True
     )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"), index=True
+    )
     type: Mapped[str] = mapped_column(String(20))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Category(Base):
+    """A user-defined label grouping Transactions of one type.
+
+    Names are unique per (Account, Type), case-insensitively: an expense "Food"
+    and an income "Food" can coexist. Deleting a Category nulls the Category on
+    its Transactions (they become "Uncategorized"); Transactions are never deleted.
+    """
+
+    __tablename__ = "categories"
+    __table_args__ = (
+        Index(
+            "uq_categories_account_name_type_lower",
+            "account_id",
+            "type",
+            text("lower(name)"),
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(80))
+    type: Mapped[str] = mapped_column(String(20))
+    icon: Mapped[str | None] = mapped_column(String(16))
+    color: Mapped[str] = mapped_column(String(7))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

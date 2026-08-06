@@ -4,9 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.db import create_db_engine
 from app.models import Account, Transaction, TransactionType, Wallet, WalletType
-from app.security import hash_password
 
-from conftest import SEED_EMAIL, SEED_PASSWORD
+from conftest import SEED_EMAIL, SEED_PASSWORD, delete_account, insert_foreign_account
 
 
 async def _login(client: AsyncClient) -> str:
@@ -23,31 +22,18 @@ def _auth(token: str) -> dict[str, str]:
 
 def _insert_foreign_wallet(database_url: str) -> tuple[int, int]:
     """Fixture: a second Account owning a Wallet, for ADR-0003 scoping tests."""
+    account_id = insert_foreign_account(database_url, "stranger@budjetame.dev")
     engine = create_db_engine(database_url)
     with Session(engine) as session:
-        account = Account(
-            email="stranger@budjetame.dev", password_hash=hash_password("whatever")
-        )
-        session.add(account)
-        session.flush()
         wallet = Wallet(
-            account_id=account.id,
+            account_id=account_id,
             name="Stranger Wallet",
             type=WalletType.CASH.value,
         )
         session.add(wallet)
-        session.flush()
-        account_id, wallet_id = account.id, wallet.id
         session.commit()
-    return account_id, wallet_id
+        return account_id, wallet.id
 
-
-def _delete_account(database_url: str, account_id: int) -> None:
-    """Tear down the foreign fixture; wallets cascade (ondelete=CASCADE)."""
-    engine = create_db_engine(database_url)
-    with Session(engine) as session:
-        session.delete(session.get(Account, account_id))
-        session.commit()
 
 
 async def test_wallets_require_authentication(client: AsyncClient) -> None:
@@ -215,7 +201,7 @@ async def test_foreign_wallet_returns_403(client: AsyncClient, database_url: str
         )
         assert response.status_code == 403
     finally:
-        _delete_account(database_url, account_id)
+        delete_account(database_url, account_id)
 
 
 async def test_missing_wallet_returns_403(client: AsyncClient) -> None:
@@ -239,7 +225,7 @@ async def test_list_never_includes_foreign_wallets(
         names = [w["name"] for w in response.json()]
         assert "Stranger Wallet" not in names
     finally:
-        _delete_account(database_url, account_id)
+        delete_account(database_url, account_id)
 
 
 async def test_balance_is_derived_from_transactions(client: AsyncClient, database_url: str) -> None:

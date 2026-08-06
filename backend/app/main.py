@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
 from app.auth import router as auth_router
+from app.categories import router as categories_router
 from app.config import settings
 from app.db import check_connection, create_db_engine
 from app.seed import seed_account
@@ -27,6 +28,7 @@ def create_app(
 
     app.include_router(auth_router)
     app.include_router(wallets_router)
+    app.include_router(categories_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

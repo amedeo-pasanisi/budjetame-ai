@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import {
   ApiError,
   TOKEN_KEY,
+  apiErrorMessage,
   createWallet,
   fetchWallets,
   renameWallet,
@@ -21,22 +22,11 @@ const WALLET_TYPE_OPTIONS = (Object.entries(TYPE_LABELS) as [WalletType, string]
   ([value, label]) => ({ value, label }),
 )
 
-function apiMessage(error: ApiError, fallback: string): string {
-  if (error.status === 409) return 'A wallet with this name already exists.'
-  if (error.status === 422) return 'Check the fields and try again.'
-  return fallback
-}
-
 function formatEuros(balance: string): string {
   return `€${balance}`
 }
 
-type WalletsScreenProps = {
-  email: string
-  onSignOut: () => void
-}
-
-export function WalletsScreen({ email, onSignOut }: WalletsScreenProps) {
+export function WalletsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -71,86 +61,67 @@ export function WalletsScreen({ email, onSignOut }: WalletsScreenProps) {
     setEditing(null)
   }
 
-  const handleSignOut = () => {
-    localStorage.removeItem(TOKEN_KEY)
-    onSignOut()
-  }
-
   return (
-    <div className="min-h-svh bg-slate-50 px-4 py-6">
-      <header className="mx-auto flex max-w-sm items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Budjetame</h1>
-          <p className="mt-0.5 text-xs text-slate-500">{email}</p>
-        </div>
+    <>
+      <h2 className="font-semibold text-slate-900">Wallets</h2>
+
+      {loadError !== null && <p className="mb-4 mt-2 text-sm text-red-600">{loadError}</p>}
+
+      {wallets === null ? (
+        <p className="mt-3 text-sm text-slate-500">Loading wallets…</p>
+      ) : wallets.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-500">
+          No wallets yet. Add your first one to start tracking.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {wallets.map((wallet) => (
+            <li key={wallet.id}>
+              <button
+                type="button"
+                onClick={() => setEditing(wallet)}
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
+              >
+                <span>
+                  <span className="block font-medium text-slate-900">{wallet.name}</span>
+                  <span className="block text-xs text-slate-500">
+                    {TYPE_LABELS[wallet.type]}
+                  </span>
+                </span>
+                <span className="font-semibold text-slate-900">
+                  {formatEuros(wallet.balance)}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!showCreate && editing === null && (
         <button
           type="button"
-          onClick={handleSignOut}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
+          onClick={() => setShowCreate(true)}
+          className="mt-5 w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
         >
-          Sign out
+          + New wallet
         </button>
-      </header>
+      )}
 
-      <main className="mx-auto mt-6 max-w-sm">
-        {loadError !== null && <p className="mb-4 text-sm text-red-600">{loadError}</p>}
+      {showCreate && (
+        <WalletCreateForm
+          onCreated={handleCreated}
+          onCancel={() => setShowCreate(false)}
+        />
+      )}
 
-        {wallets === null ? (
-          <p className="text-sm text-slate-500">Loading wallets…</p>
-        ) : wallets.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            No wallets yet. Add your first one to start tracking.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {wallets.map((wallet) => (
-              <li key={wallet.id}>
-                <button
-                  type="button"
-                  onClick={() => setEditing(wallet)}
-                  className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
-                >
-                  <span>
-                    <span className="block font-medium text-slate-900">{wallet.name}</span>
-                    <span className="block text-xs text-slate-500">
-                      {TYPE_LABELS[wallet.type]}
-                    </span>
-                  </span>
-                  <span className="font-semibold text-slate-900">
-                    {formatEuros(wallet.balance)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {!showCreate && editing === null && (
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="mt-5 w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
-          >
-            + New wallet
-          </button>
-        )}
-
-        {showCreate && (
-          <WalletCreateForm
-            onCreated={handleCreated}
-            onCancel={() => setShowCreate(false)}
-          />
-        )}
-
-        {editing !== null && (
-          <WalletRenameForm
-            wallet={editing}
-            onRenamed={handleRenamed}
-            onCancel={() => setEditing(null)}
-          />
-        )}
-      </main>
-    </div>
+      {editing !== null && (
+        <WalletRenameForm
+          wallet={editing}
+          onRenamed={handleRenamed}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+    </>
   )
 }
 
@@ -177,7 +148,7 @@ function WalletCreateForm({ onCreated, onCancel }: WalletCreateFormProps) {
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? apiMessage(err, 'Could not create the wallet.')
+          ? apiErrorMessage(err, 'A wallet with this name already exists.', 'Could not create the wallet.')
           : 'Could not create the wallet.',
       )
     } finally {
@@ -286,7 +257,7 @@ function WalletRenameForm({ wallet, onRenamed, onCancel }: WalletRenameFormProps
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? apiMessage(err, 'Could not rename the wallet.')
+          ? apiErrorMessage(err, 'A wallet with this name already exists.', 'Could not rename the wallet.')
           : 'Could not rename the wallet.',
       )
     } finally {

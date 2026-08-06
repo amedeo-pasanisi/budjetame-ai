@@ -33,6 +33,15 @@ def _wallet_out(wallet: Wallet, balance: Decimal) -> WalletOut:
     )
 
 
+def _name_conflict(session: Session, cause: Exception) -> None:
+    """Map a duplicate-name failure to 409 — from the pre-check or the unique
+    index under a race — after rolling back the aborted transaction."""
+    session.rollback()
+    raise HTTPException(
+        status_code=409, detail="A Wallet with this name already exists"
+    ) from cause
+
+
 @router.get("", response_model=list[WalletOut])
 def list_wallets(
     account: Account = Depends(get_current_account),
@@ -59,12 +68,8 @@ def create_wallet(
             type=payload.type,
             opening_balance=payload.opening_balance,
         )
-    except (wallet_service.WalletNameTaken, IntegrityError):
-        # The pre-check catches duplicates; the unique index backstops a race.
-        session.rollback()
-        raise HTTPException(
-            status_code=409, detail="A Wallet with this name already exists"
-        )
+    except (wallet_service.WalletNameTaken, IntegrityError) as cause:
+        _name_conflict(session, cause)
     balances = wallet_service.wallet_balances(session, account.id)
     return _wallet_out(wallet, balances.get(wallet.id, Decimal("0.00")))
 
@@ -79,10 +84,7 @@ def rename_wallet(
     wallet = _owned_wallet_or_403(session, account, wallet_id)
     try:
         wallet = wallet_service.rename_wallet(session, wallet, payload.name)
-    except (wallet_service.WalletNameTaken, IntegrityError):
-        session.rollback()
-        raise HTTPException(
-            status_code=409, detail="A Wallet with this name already exists"
-        )
+    except (wallet_service.WalletNameTaken, IntegrityError) as cause:
+        _name_conflict(session, cause)
     balances = wallet_service.wallet_balances(session, account.id)
     return _wallet_out(wallet, balances.get(wallet.id, Decimal("0.00")))
