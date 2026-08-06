@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { fetchCurrentAccount, login, type Account } from './api'
+import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
 import { LoginForm } from './LoginForm'
-import { Card, Screen } from './Screen'
-
-const TOKEN_KEY = 'budjetame.token'
+import { Screen } from './Screen'
+import { WalletsScreen } from './WalletsScreen'
 
 type AuthState =
   | { kind: 'checking' }
@@ -45,13 +44,18 @@ function App() {
     setAuthCheckVersion((count) => count + 1)
   }
 
+  const handleSignOut = () => {
+    localStorage.removeItem(TOKEN_KEY)
+    setAuth({ kind: 'signedOut' })
+  }
+
   if (auth.kind === 'checking') {
     return <CheckingScreen />
   }
   if (auth.kind === 'signedOut') {
     return <LoginForm onLogin={handleLogin} />
   }
-  return <AppShell email={auth.account.email} />
+  return <AppShell email={auth.account.email} onSignOut={handleSignOut} />
 }
 
 function CheckingScreen() {
@@ -62,17 +66,14 @@ function CheckingScreen() {
   )
 }
 
-function AppShell({ email }: { email: string }) {
-  return (
-    <Screen>
-      <Card>
-        <h1 className="text-2xl font-semibold text-slate-900">Budjetame</h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Signed in as {email}. Features land here ticket by ticket.
-        </p>
-      </Card>
-    </Screen>
-  )
+function AppShell({
+  email,
+  onSignOut,
+}: {
+  email: string
+  onSignOut: () => void
+}) {
+  return <WalletsScreen email={email} onSignOut={onSignOut} />
 }
 
 export default App
