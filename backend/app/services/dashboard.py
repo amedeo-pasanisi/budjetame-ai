@@ -1,4 +1,4 @@
-"""Dashboard reporting rules (T10). Called by the HTTP layer; never from tests.
+"""Dashboard reporting rules (T10, T11, T12). Called by the HTTP layer; never from tests.
 
 The Dashboard shows Net Worth — the algebraic sum of every Wallet balance —
 and the current month's Income vs Expenses. All bucketing happens in
@@ -12,7 +12,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.dates import rome_month_bounds
+from app.dates import rome_month_bounds, to_rome_day
 from app.models import Category, Transaction, TransactionType
 
 from app.services.wallets import wallet_balances
@@ -95,3 +95,44 @@ def expenses_by_category(
         }
         for category_id, amount, name, icon, color in rows
     ]
+
+
+def expense_trend(
+    session: Session, account_id: int, from_month: str, to_month: str
+) -> list[dict]:
+    """Monthly Expense totals over the inclusive month range, oldest first,
+    with a €0.00 bucket for every month in between so the chart is a true trend
+    (US28, T12). Bucketing happens in Europe/Rome via `to_rome_day` — the app's
+    single conversion boundary (CONTEXT.md); income, Opening Balances and
+    Transfers never count."""
+    start, _ = rome_month_bounds(from_month)
+    _, end_exclusive = rome_month_bounds(to_month)
+    rows = session.execute(
+        select(Transaction.date, Transaction.amount).where(
+            Transaction.account_id == account_id,
+            Transaction.type == TransactionType.EXPENSE.value,
+            Transaction.date >= start,
+            Transaction.date < end_exclusive,
+        )
+    ).all()
+    totals: dict[str, Decimal] = {}
+    for transaction_date, amount in rows:
+        bucket = to_rome_day(transaction_date)[:7]
+        totals[bucket] = totals.get(bucket, Decimal("0.00")) + Decimal(amount)
+    return [
+        {"month": month, "expenses": totals.get(month, Decimal("0.00"))}
+        for month in _month_range(from_month, to_month)
+    ]
+
+
+def _month_range(from_month: str, to_month: str) -> list[str]:
+    """Every YYYY-MM month from `from_month` to `to_month`, inclusive."""
+    year, month = (int(part) for part in from_month.split("-"))
+    end_year, end_month = (int(part) for part in to_month.split("-"))
+    months: list[str] = []
+    while (year, month) <= (end_year, end_month):
+        months.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return months

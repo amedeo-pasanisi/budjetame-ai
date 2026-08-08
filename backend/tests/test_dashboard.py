@@ -68,12 +68,7 @@ def _current_month() -> str:
 
 def _last_day_of_current_month() -> str:
     """The last calendar day of the current Europe/Rome month, as YYYY-MM-DD."""
-    year, month = (int(part) for part in _current_month().split("-"))
-    if month == 12:
-        first_next = date(year + 1, 1, 1)
-    else:
-        first_next = date(year, month + 1, 1)
-    return (first_next - timedelta(days=1)).isoformat()
+    return _last_day(_current_month())
 
 
 def _first_day_of_next_month() -> str:
@@ -92,7 +87,7 @@ def _previous_month() -> str:
 
 def _mid_previous_month() -> str:
     """A safe calendar day (the 15th) of the previous month, as YYYY-MM-DD."""
-    return f"{_previous_month()}-15"
+    return _day_in(_previous_month())
 
 
 async def _create_category(
@@ -516,3 +511,128 @@ async def test_pie_groups_a_deleted_category_into_uncategorized(
         assert Decimal(summary["expenses"]) == Decimal("5.00")
     finally:
         delete_account(database_url, account_id)
+
+
+# --- T12: expense trend chart ---
+
+
+def _months_ago(count: int) -> str:
+    """The Europe/Rome month `count` months before the current one, YYYY-MM."""
+    year, month = (int(part) for part in _current_month().split("-"))
+    total = year * 12 + (month - 1) - count
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
+def _day_in(month: str) -> str:
+    """The 15th of the given YYYY-MM month, a safe day for every month."""
+    return f"{month}-15"
+
+
+def _last_day(month: str) -> str:
+    """The last calendar day of the given YYYY-MM month, as YYYY-MM-DD."""
+    year, m = (int(part) for part in month.split("-"))
+    if m == 12:
+        first_next = date(year + 1, 1, 1)
+    else:
+        first_next = date(year, m + 1, 1)
+    return (first_next - timedelta(days=1)).isoformat()
+
+
+async def _trend(
+    client: AsyncClient, token: str, from_month: str, to_month: str
+) -> dict:
+    response = await client.get(
+        f"/dashboard/expense-trend?from_month={from_month}&to_month={to_month}",
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def test_expense_trend_requires_authentication(client: AsyncClient) -> None:
+    response = await client.get(
+        "/dashboard/expense-trend?from_month=2026-01&to_month=2026-02"
+    )
+    assert response.status_code == 401
+
+
+async def test_expense_trend_buckets_by_month_and_zero_fills(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Monthly expenses are bucketed one bucket per month across the inclusive
+    range — a month with no expenses is still a €0.00 bucket, so the chart is a
+    true trend — and only Expense Transactions count: income and Transfers
+    never appear, nor do expenses outside the range (US28)."""
+    account_id = insert_foreign_account(database_url, "trend-bucket@budjetame.dev")
+    try:
+        token = await _login(client, email="trend-bucket@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Trend Wallet", "checking", "0.00")
+        m4, m3, m2, m1 = _months_ago(4), _months_ago(3), _months_ago(2), _months_ago(1)
+        await _create_expense(client, token, wallet, "10.00", _day_in(m3))
+        await _create_expense(client, token, wallet, "20.00", _day_in(m1))
+        await _create_expense(client, token, wallet, "7.00", _day_in(m4))  # outside the range
+        # Non-expense money movements in the range must not count.
+        await client.post(
+            "/transactions",
+            json={"type": "income", "amount": "99.00", "date": _day_in(m2), "wallet_id": wallet},
+            headers=_auth(token),
+        )
+        savings = await _create_wallet(client, token, "Trend Savings", "checking", "0.00")
+        await client.post(
+            "/transactions",
+            json={
+                "type": "transfer",
+                "amount": "50.00",
+                "date": _day_in(m2),
+                "source_wallet_id": wallet,
+                "destination_wallet_id": savings,
+            },
+            headers=_auth(token),
+        )
+
+        trend = await _trend(client, token, m3, m1)
+
+        assert trend["from_month"] == m3
+        assert trend["to_month"] == m1
+        assert [b["month"] for b in trend["months"]] == [m3, m2, m1]
+        assert [b["expenses"] for b in trend["months"]] == ["10.00", "0.00", "20.00"]
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_expense_trend_buckets_europe_rome_month_boundaries(
+    client: AsyncClient, database_url: str
+) -> None:
+    """A Transaction on the last day of a month lands in that month, and one on
+    the first day of the next month lands in the next — the Europe/Rome
+    boundaries (CONTEXT.md), so the trend never shifts a month."""
+    account_id = insert_foreign_account(database_url, "trend-boundary@budjetame.dev")
+    try:
+        token = await _login(client, email="trend-boundary@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Boundary Trend Wallet", "checking", "0.00")
+        m2, m1 = _months_ago(2), _months_ago(1)
+        await _create_expense(client, token, wallet, "10.00", _last_day(m2))
+        await _create_expense(client, token, wallet, "5.00", f"{m1}-01")
+
+        trend = await _trend(client, token, m2, m1)
+
+        assert [b["expenses"] for b in trend["months"]] == ["10.00", "5.00"]
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_expense_trend_rejects_bad_ranges(client: AsyncClient) -> None:
+    token = await _login(client)
+    m = _months_ago(1)
+
+    bad_urls = [
+        f"/dashboard/expense-trend?from_month=banana&to_month={m}",
+        f"/dashboard/expense-trend?from_month=2026-13&to_month={m}",
+        # from after to
+        f"/dashboard/expense-trend?from_month={_months_ago(2)}&to_month={_months_ago(3)}",
+        "/dashboard/expense-trend?from_month=2026-01",  # missing to_month
+        "/dashboard/expense-trend?to_month=2026-01",  # missing from_month
+    ]
+    for url in bad_urls:
+        response = await client.get(url, headers=_auth(token))
+        assert response.status_code == 422, url

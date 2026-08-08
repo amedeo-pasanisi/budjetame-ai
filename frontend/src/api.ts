@@ -45,6 +45,17 @@ export type CategoryExpense = {
   amount: string
 }
 
+export type MonthBucket = {
+  month: string
+  expenses: string
+}
+
+export type ExpenseTrend = {
+  from_month: string
+  to_month: string
+  months: MonthBucket[]
+}
+
 export type Transaction = {
   id: number
   type: TransactionType
@@ -144,6 +155,21 @@ export async function fetchDashboardSummary(
     throw new ApiError('Could not load the dashboard', response.status)
   }
   return (await response.json()) as DashboardSummary
+}
+
+export async function fetchExpenseTrend(
+  token: string,
+  fromMonth: string,
+  toMonth: string,
+): Promise<ExpenseTrend> {
+  const response = await fetch(
+    `${API_BASE}/dashboard/expense-trend?from_month=${fromMonth}&to_month=${toMonth}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!response.ok) {
+    throw new ApiError('Could not load the expense trend', response.status)
+  }
+  return (await response.json()) as ExpenseTrend
 }
 
 export async function fetchWallets(token: string, includeFrozen = false): Promise<Wallet[]> {

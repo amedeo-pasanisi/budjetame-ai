@@ -252,6 +252,29 @@ class DashboardSummary(BaseModel):
         return value.quantize(Decimal("0.01"))
 
 
+class MonthBucket(BaseModel):
+    """One bucket of the expense trend (T12): a Europe/Rome month and the
+    total expenses recorded in it."""
+
+    month: str
+    expenses: Decimal
+
+    @field_validator("expenses")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
+
+
+class ExpenseTrend(BaseModel):
+    """The expense trend over an inclusive month range (T12): one bucket per
+    month, oldest first, zero-filled for months with no expenses, bucketed in
+    Europe/Rome server-side (US28)."""
+
+    from_month: str
+    to_month: str
+    months: list[MonthBucket]
+
+
 class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet
