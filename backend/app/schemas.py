@@ -125,15 +125,20 @@ def _valid_rome_day(value: str) -> str:
 
 
 class TransactionCreate(BaseModel):
-    """Record an Expense or Income. Date is the calendar day in Europe/Rome
-    ("YYYY-MM-DD"); the backend stores it as a UTC timestamp."""
+    """Record an Expense, Income, or Transfer. Date is the calendar day in
+    Europe/Rome ("YYYY-MM-DD"); the backend stores it as a UTC timestamp.
+    Expense/Income use `wallet_id` (plus an optional matching `category_id`); a
+    Transfer uses `source_wallet_id` and `destination_wallet_id` instead and
+    never carries a Category (spec decision #6)."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    type: Literal["expense", "income"]
+    type: Literal["expense", "income", "transfer"]
     amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
     date: str
-    wallet_id: int
+    wallet_id: int | None = None
+    source_wallet_id: int | None = None
+    destination_wallet_id: int | None = None
     category_id: int | None = None
     description: str | None = Field(default=None, max_length=500)
     latitude: Decimal | None = Field(default=None, ge=-90, le=90)
@@ -150,11 +155,31 @@ class TransactionCreate(BaseModel):
             raise ValueError("latitude and longitude must be set together")
         return self
 
+    @model_validator(mode="after")
+    def _fields_match_the_type(self) -> "TransactionCreate":
+        if self.type == "transfer":
+            if self.wallet_id is not None or self.category_id is not None:
+                raise ValueError(
+                    "Transfers use source and destination Wallets and never "
+                    "carry a Category"
+                )
+            if self.source_wallet_id is None or self.destination_wallet_id is None:
+                raise ValueError("Transfers need source and destination Wallets")
+        else:
+            if self.wallet_id is None:
+                raise ValueError("wallet_id is required for Expense and Income")
+            if self.source_wallet_id is not None or self.destination_wallet_id is not None:
+                raise ValueError(
+                    "source and destination Wallets are only for Transfers"
+                )
+        return self
+
 
 class TransactionUpdate(BaseModel):
-    """Edit an Expense or Income. Type and Wallet cannot change; a field present
-    in the payload is applied even when null (clearing it); a field absent is
-    untouched."""
+    """Edit an Expense, Income, or Transfer. Type and Wallets cannot change; a
+    field present in the payload is applied even when null (clearing it); a
+    field absent is untouched. Transfers never carry a Category — the service
+    rejects a `category_id` on them."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -187,13 +212,16 @@ class TransactionUpdate(BaseModel):
 class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet
-    negative); `date` is the calendar day in Europe/Rome."""
+    negative); `date` is the calendar day in Europe/Rome. Expense/Income fill
+    `wallet_id`; a Transfer fills `source_wallet_id` and `destination_wallet_id`."""
 
     id: int
     type: TransactionType
     amount: Decimal
     date: str
-    wallet_id: int
+    wallet_id: int | None
+    source_wallet_id: int | None
+    destination_wallet_id: int | None
     category_id: int | None
     description: str | None
     latitude: str | None

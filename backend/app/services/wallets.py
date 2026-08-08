@@ -25,6 +25,10 @@ class FrozenWallet(Exception):
     """A write was attempted on a frozen Wallet (ADR-0002)."""
 
 
+class ContactWalletOpeningBalance(Exception):
+    """Contact Wallets start at €0: money moves in and out only via Transfers."""
+
+
 def name_is_taken(
     session: Session, account_id: int, name: str, *, exclude_id: int | None = None
 ) -> bool:
@@ -46,7 +50,11 @@ def create_wallet(
     type: WalletType,
     opening_balance: Decimal = Decimal("0.00"),
 ) -> Wallet:
-    """Create a Wallet, seeding an Opening Balance Transaction when nonzero."""
+    """Create a Wallet, seeding an Opening Balance Transaction when nonzero.
+    Contact Wallets start at €0: an Opening Balance would put money into them
+    without a Transfer, breaking "money moves only via Transfers" (CONTEXT.md)."""
+    if type == WalletType.CONTACT and opening_balance > 0:
+        raise ContactWalletOpeningBalance()
     if name_is_taken(session, account_id, name):
         raise WalletNameTaken(name)
     wallet = Wallet(account_id=account_id, name=name, type=type.value)
@@ -102,42 +110,56 @@ def freeze_wallet(session: Session, wallet: Wallet) -> Wallet:
     return locked
 
 
-def _signed_amount():
-    """SQL: the signed contribution of a Transaction to its Wallet's Balance.
-    Income and Opening Balance add; Expense subtracts (ADR-0001). Transfers
-    arrive with the ticket that introduces them."""
-    return case(
-        (Transaction.type == TransactionType.EXPENSE.value, -Transaction.amount),
-        else_=Transaction.amount,
+def _balance_ledger(account_id: int):
+    """The derived-Balance ledger (ADR-0001): one row per (wallet, signed
+    amount). Regular rows contribute through `wallet_id` (Expense subtracts,
+    Income and Opening Balance add); a Transfer expands into two legs — its
+    Source subtracts and its Destination adds — so Net Worth never changes."""
+    regular = select(
+        Transaction.wallet_id.label("wallet_id"),
+        case(
+            (Transaction.type == TransactionType.EXPENSE.value, -Transaction.amount),
+            else_=Transaction.amount,
+        ).label("amount"),
+    ).where(
+        Transaction.account_id == account_id,
+        Transaction.type != TransactionType.TRANSFER.value,
     )
-
-
-def transaction_contribution(transaction: Transaction) -> Decimal:
-    """The signed contribution of one Transaction to its Wallet's Balance."""
-    if transaction.type == TransactionType.EXPENSE.value:
-        return -transaction.amount
-    return transaction.amount
+    source_leg = select(
+        Transaction.source_wallet_id.label("wallet_id"),
+        (-Transaction.amount).label("amount"),
+    ).where(
+        Transaction.account_id == account_id,
+        Transaction.type == TransactionType.TRANSFER.value,
+    )
+    destination_leg = select(
+        Transaction.destination_wallet_id.label("wallet_id"),
+        Transaction.amount.label("amount"),
+    ).where(
+        Transaction.account_id == account_id,
+        Transaction.type == TransactionType.TRANSFER.value,
+    )
+    return regular.union_all(source_leg, destination_leg).subquery()
 
 
 def wallet_balances(session: Session, account_id: int) -> dict[int, Decimal]:
     """Map every Wallet id of the Account to its derived Balance (ADR-0001)."""
+    ledger = _balance_ledger(account_id)
     rows = session.execute(
         select(
-            Transaction.wallet_id,
-            func.coalesce(func.sum(_signed_amount()), Decimal("0.00")),
-        )
-        .where(Transaction.account_id == account_id)
-        .group_by(Transaction.wallet_id)
+            ledger.c.wallet_id,
+            func.coalesce(func.sum(ledger.c.amount), Decimal("0.00")),
+        ).group_by(ledger.c.wallet_id)
     ).all()
     return {wallet_id: Decimal(amount) for wallet_id, amount in rows}
 
 
 def wallet_balance(session: Session, account_id: int, wallet_id: int) -> Decimal:
     """The derived Balance of one Wallet, read at call time."""
+    ledger = _balance_ledger(account_id)
     amount = session.scalar(
-        select(func.coalesce(func.sum(_signed_amount()), Decimal("0.00"))).where(
-            Transaction.account_id == account_id,
-            Transaction.wallet_id == wallet_id,
+        select(func.coalesce(func.sum(ledger.c.amount), Decimal("0.00"))).where(
+            ledger.c.wallet_id == wallet_id
         )
     )
     return Decimal(amount)

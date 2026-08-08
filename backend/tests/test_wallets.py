@@ -127,6 +127,27 @@ async def test_create_wallet_rejects_empty_name(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+async def test_contact_wallet_rejects_a_nonzero_opening_balance(
+    client: AsyncClient,
+) -> None:
+    """Money moves in and out of Contact Wallets only via Transfers, so they
+    must start at €0 (CONTEXT.md) — an Opening Balance would bypass that."""
+    token = await _login(client)
+
+    response = await client.post(
+        "/wallets",
+        json={"name": "Iou Contact", "type": "contact", "opening_balance": "50.00"},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+    zero = await client.post(
+        "/wallets", json={"name": "Iou Contact", "type": "contact"}, headers=_auth(token)
+    )
+    assert zero.status_code == 201
+    assert zero.json()["balance"] == "0.00"
+
+
 async def test_wallet_names_are_unique_case_insensitively(client: AsyncClient) -> None:
     token = await _login(client)
     await client.post(

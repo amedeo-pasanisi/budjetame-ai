@@ -70,6 +70,11 @@ def create_wallet(
             type=payload.type,
             opening_balance=payload.opening_balance,
         )
+    except wallet_service.ContactWalletOpeningBalance:
+        raise HTTPException(
+            status_code=422,
+            detail="Contact Wallets start at €0: money moves only via Transfers",
+        )
     except (wallet_service.WalletNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
     balances = wallet_service.wallet_balances(session, account.id)

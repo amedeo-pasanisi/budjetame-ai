@@ -25,14 +25,16 @@ export type Category = {
   created_at: string
 }
 
-export type TransactionType = 'expense' | 'income' | 'opening_balance'
+export type TransactionType = 'expense' | 'income' | 'transfer' | 'opening_balance'
 
 export type Transaction = {
   id: number
   type: TransactionType
   amount: string
   date: string
-  wallet_id: number
+  wallet_id: number | null
+  source_wallet_id: number | null
+  destination_wallet_id: number | null
   category_id: number | null
   description: string | null
   latitude: string | null
@@ -41,14 +43,23 @@ export type Transaction = {
   created_at: string
 }
 
-export type TransactionInput = {
-  type: 'expense' | 'income'
-  amount: string
-  date: string
-  walletId: number
-  categoryId: number | null
-  description: string
-}
+export type TransactionInput =
+  | {
+      type: 'expense' | 'income'
+      amount: string
+      date: string
+      walletId: number
+      categoryId: number | null
+      description: string
+    }
+  | {
+      type: 'transfer'
+      amount: string
+      date: string
+      sourceWalletId: number
+      destinationWalletId: number
+      description: string
+    }
 
 export class ApiError extends Error {
   readonly status: number
@@ -230,17 +241,28 @@ export async function createTransaction(
   token: string,
   input: TransactionInput,
 ): Promise<Transaction> {
+  const base = {
+    type: input.type,
+    amount: input.amount,
+    date: input.date,
+    description: input.description === '' ? null : input.description,
+  }
+  const body =
+    input.type === 'transfer'
+      ? {
+          ...base,
+          source_wallet_id: input.sourceWalletId,
+          destination_wallet_id: input.destinationWalletId,
+        }
+      : {
+          ...base,
+          wallet_id: input.walletId,
+          category_id: input.categoryId,
+        }
   const response = await fetch(`${API_BASE}/transactions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      type: input.type,
-      amount: input.amount,
-      date: input.date,
-      wallet_id: input.walletId,
-      category_id: input.categoryId,
-      description: input.description === '' ? null : input.description,
-    }),
+    body: JSON.stringify(body),
   })
   if (!response.ok) {
     throw new ApiError('Could not create transaction', response.status)
@@ -251,17 +273,21 @@ export async function createTransaction(
 export async function updateTransaction(
   token: string,
   transactionId: number,
-  input: { amount: string; date: string; categoryId: number | null; description: string },
+  input: { amount: string; date: string; categoryId?: number | null; description: string },
 ): Promise<Transaction> {
+  const body: Record<string, unknown> = {
+    amount: input.amount,
+    date: input.date,
+    description: input.description === '' ? null : input.description,
+  }
+  // Transfers never carry a Category; omit category_id entirely for them.
+  if (input.categoryId !== undefined) {
+    body.category_id = input.categoryId
+  }
   const response = await fetch(`${API_BASE}/transactions/${transactionId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      amount: input.amount,
-      date: input.date,
-      category_id: input.categoryId,
-      description: input.description === '' ? null : input.description,
-    }),
+    body: JSON.stringify(body),
   })
   if (!response.ok) {
     throw new ApiError('Could not update transaction', response.status)

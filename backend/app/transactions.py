@@ -34,19 +34,46 @@ def _owned_transaction_or_403(
 def _transaction_out(
     session: Session, account: Account, transaction: Transaction
 ) -> TransactionOut:
-    wallet = session.get(Wallet, transaction.wallet_id)
-    if wallet is None:
-        # A Transaction's Wallet always exists; it is validated on every write.
-        raise HTTPException(status_code=403, detail="Wallet not found")
-    balance = wallet_service.wallet_balance(session, account.id, transaction.wallet_id)
-    warning = wallet.type == WalletType.CASH.value and balance < 0
+    """The API view of any Transaction. Expense/Income/Opening Balance reference
+    one Wallet; a Transfer references Source and Destination Wallets and never
+    carries a Category. `warning` is the Cash negative-Balance indicator (true
+    right after a write that left a Cash Wallet negative): for a Transfer only
+    the Source can go negative, since the Destination only gains."""
+    if transaction.type == TransactionType.TRANSFER.value:
+        if transaction.source_wallet_id is None or transaction.destination_wallet_id is None:
+            raise HTTPException(status_code=403, detail="Wallet not found")
+        source = session.get(Wallet, transaction.source_wallet_id)
+        destination = session.get(Wallet, transaction.destination_wallet_id)
+        if source is None or destination is None:
+            raise HTTPException(status_code=403, detail="Wallet not found")
+        warning_wallet = source
+        wallet_id = None
+        source_wallet_id = source.id
+        destination_wallet_id = destination.id
+        category_id = None
+    else:
+        wallet_id = transaction.wallet_id
+        if wallet_id is None:
+            raise HTTPException(status_code=403, detail="Wallet not found")
+        wallet = session.get(Wallet, wallet_id)
+        if wallet is None:
+            # A Transaction's Wallet always exists; it is validated on every write.
+            raise HTTPException(status_code=403, detail="Wallet not found")
+        warning_wallet = wallet
+        source_wallet_id = None
+        destination_wallet_id = None
+        category_id = transaction.category_id
+    balance = wallet_service.wallet_balance(session, account.id, warning_wallet.id)
+    warning = warning_wallet.type == WalletType.CASH.value and balance < 0
     return TransactionOut(
         id=transaction.id,
         type=TransactionType(transaction.type),
         amount=transaction.amount,
         date=to_rome_day(transaction.date),
-        wallet_id=transaction.wallet_id,
-        category_id=transaction.category_id,
+        wallet_id=wallet_id,
+        source_wallet_id=source_wallet_id,
+        destination_wallet_id=destination_wallet_id,
+        category_id=category_id,
         description=transaction.description,
         latitude=fmt_coord(transaction.latitude),
         longitude=fmt_coord(transaction.longitude),
@@ -66,7 +93,12 @@ def list_transactions(
         wallet = session.get(Wallet, wallet_id)
         if wallet is None or wallet.account_id != account.id:
             raise HTTPException(status_code=403, detail="Wallet not found")
-        stmt = stmt.where(Transaction.wallet_id == wallet_id)
+        # A Wallet's history includes Transfers touching it on either leg.
+        stmt = stmt.where(
+            (Transaction.wallet_id == wallet_id)
+            | (Transaction.source_wallet_id == wallet_id)
+            | (Transaction.destination_wallet_id == wallet_id)
+        )
     transactions = session.scalars(
         stmt.order_by(Transaction.date.desc(), Transaction.id.desc())
     ).all()
@@ -87,6 +119,8 @@ def create_transaction(
             amount=payload.amount,
             date=payload.date,
             wallet_id=payload.wallet_id,
+            source_wallet_id=payload.source_wallet_id,
+            destination_wallet_id=payload.destination_wallet_id,
             category_id=payload.category_id,
             description=payload.description,
             latitude=payload.latitude,

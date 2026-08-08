@@ -715,3 +715,385 @@ async def test_frozen_wallet_transactions_stay_viewable_and_net_to_zero(
         total += -amount if transaction["type"] == "expense" else amount
     assert total == Decimal("0.00")
 
+
+
+# --- T7: Transfers, Contact Wallets, IOUs ---
+
+
+async def _net_worth(client: AsyncClient, token: str) -> Decimal:
+    """Sum of all Wallet balances — the derived Net Worth (CONTEXT.md)."""
+    wallets = (await client.get("/wallets", headers=_auth(token))).json()
+    return sum((Decimal(w["balance"]) for w in wallets), Decimal("0.00"))
+
+
+async def test_create_transfer_moves_money_and_keeps_net_worth(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Transfer Checking", "checking", "100.00")
+    savings = await _create_wallet(client, token, "Transfer Savings", "checking", "0.00")
+    before = await _net_worth(client, token)
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+            "description": "Pay the card",
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["type"] == "transfer"
+    assert body["amount"] == "50.00"
+    assert body["source_wallet_id"] == checking
+    assert body["destination_wallet_id"] == savings
+    assert body["category_id"] is None
+    assert await _wallet_balance(client, token, checking) == "50.00"
+    assert await _wallet_balance(client, token, savings) == "50.00"
+    assert await _net_worth(client, token) == before
+
+
+async def test_transfer_to_contact_wallet_is_a_receivable(client: AsyncClient) -> None:
+    """Transferring €50 from Checking to a Contact Wallet ('Marco') leaves Marco
+    at +€50 — a receivable in my favor — and Contact Balances count toward Net
+    Worth (so the total includes Marco's +50)."""
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "IOU Checking", "checking", "100.00")
+    marco = await _create_wallet(client, token, "Marco", "contact", "0.00")
+    before = await _net_worth(client, token)
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": marco,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    assert await _wallet_balance(client, token, checking) == "50.00"
+    assert await _wallet_balance(client, token, marco) == "50.00"
+    # Net Worth is the sum of ALL balances, Contact included: Marco's receivable
+    # offsets the source exactly, so the total is unchanged. If Contact Balances
+    # were excluded from the sum, this Transfer would have reduced Net Worth by
+    # €50 instead.
+    assert await _net_worth(client, token) == before
+
+
+async def test_transfer_requires_different_wallets(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, "Same Wallet", "checking", "100.00")
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": wallet,
+            "destination_wallet_id": wallet,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+    assert await _wallet_balance(client, token, wallet) == "100.00"
+
+
+async def test_transfer_never_carries_a_category(client: AsyncClient) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "No Category Transfer", "checking", "100.00")
+    savings = await _create_wallet(client, token, "No Category Savings", "checking", "0.00")
+    category = await _create_category(client, token, "No Category Cat", "expense")
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+            "category_id": category,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_transfer_from_foreign_wallet_is_forbidden(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Foreign Source Checking", "checking", "100.00")
+    account_id = insert_foreign_account(database_url, "foreign-source@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            wallet = Wallet(
+                account_id=account_id, name="Their Funds", type=WalletType.CHECKING.value
+            )
+            session.add(wallet)
+            session.commit()
+            foreign_id = wallet.id
+
+        response = await client.post(
+            "/transactions",
+            json={
+                "type": "transfer",
+                "amount": "50.00",
+                "date": "2026-08-08",
+                "source_wallet_id": foreign_id,
+                "destination_wallet_id": checking,
+            },
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 403
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_transfer_to_a_frozen_wallet_is_rejected(client: AsyncClient) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Frozen Destination Checking", "checking", "100.00")
+    frozen = await _create_wallet(client, token, "Frozen Destination", "checking", "0.00")
+    await _freeze_wallet(client, token, frozen)
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": frozen,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+    assert await _wallet_balance(client, token, checking) == "100.00"
+
+
+async def test_transfer_from_a_frozen_wallet_is_rejected(client: AsyncClient) -> None:
+    token = await _login(client)
+    frozen = await _create_wallet(client, token, "Frozen Source", "checking", "0.00")
+    savings = await _create_wallet(client, token, "Frozen Source Savings", "checking", "0.00")
+    await _freeze_wallet(client, token, frozen)
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": frozen,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_transfer_making_cash_source_negative_warns_but_succeeds(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    cash = await _create_wallet(client, token, "Cash Transfer Source", "cash", "10.00")
+    savings = await _create_wallet(client, token, "Cash Transfer Savings", "checking", "0.00")
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "25.00",
+            "date": "2026-08-08",
+            "source_wallet_id": cash,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["warning"] is True
+    assert await _wallet_balance(client, token, cash) == "-15.00"
+
+
+async def test_transfer_to_cash_destination_never_warns(client: AsyncClient) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "No Warn Transfer Checking", "checking", "0.00")
+    cash = await _create_wallet(client, token, "No Warn Cash Destination", "cash", "0.00")
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "25.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": cash,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["warning"] is False
+    assert await _wallet_balance(client, token, cash) == "25.00"
+
+
+async def test_edit_transfer_updates_both_balances(client: AsyncClient) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Edit Transfer Checking", "checking", "100.00")
+    savings = await _create_wallet(client, token, "Edit Transfer Savings", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+    assert await _wallet_balance(client, token, checking) == "50.00"
+    assert await _wallet_balance(client, token, savings) == "50.00"
+
+    edited = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"amount": "20.00"},
+        headers=_auth(token),
+    )
+
+    assert edited.status_code == 200
+    assert edited.json()["amount"] == "20.00"
+    assert await _wallet_balance(client, token, checking) == "80.00"
+    assert await _wallet_balance(client, token, savings) == "20.00"
+
+
+async def test_edit_transfer_rejects_a_category(client: AsyncClient) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Edit Transfer Cat Checking", "checking", "100.00")
+    savings = await _create_wallet(client, token, "Edit Transfer Cat Savings", "checking", "0.00")
+    category = await _create_category(client, token, "Transfer Cat", "expense")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.patch(
+        f"/transactions/{created.json()['id']}",
+        json={"category_id": category},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_delete_transfer_restores_both_balances(client: AsyncClient) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Delete Transfer Checking", "checking", "100.00")
+    savings = await _create_wallet(client, token, "Delete Transfer Savings", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+
+    response = await client.delete(f"/transactions/{transaction_id}", headers=_auth(token))
+
+    assert response.status_code == 204
+    assert await _wallet_balance(client, token, checking) == "100.00"
+    assert await _wallet_balance(client, token, savings) == "0.00"
+
+
+
+
+async def test_transfer_of_a_frozen_wallet_cannot_be_edited_or_deleted(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Frozen Transfer Checking", "checking", "100.00")
+    savings = await _create_wallet(client, token, "Frozen Transfer Savings", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "100.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+    # Checking is now at €0 and can be frozen.
+    await _freeze_wallet(client, token, checking)
+
+    patch = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"amount": "5.00"},
+        headers=_auth(token),
+    )
+    delete = await client.delete(f"/transactions/{transaction_id}", headers=_auth(token))
+
+    assert patch.status_code == 422
+    assert delete.status_code == 422
+
+
+async def test_wallet_transaction_filter_includes_transfers_on_both_legs(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Filter Transfer Checking", "checking", "100.00")
+    savings = await _create_wallet(client, token, "Filter Transfer Savings", "checking", "0.00")
+    transfer = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": savings,
+        },
+        headers=_auth(token),
+    )
+    transfer_id = transfer.json()["id"]
+
+    as_source = (
+        await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
+    ).json()
+    as_destination = (
+        await client.get(f"/transactions?wallet_id={savings}", headers=_auth(token))
+    ).json()
+
+    assert transfer_id in [t["id"] for t in as_source]
+    assert transfer_id in [t["id"] for t in as_destination]

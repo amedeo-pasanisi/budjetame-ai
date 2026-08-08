@@ -27,7 +27,15 @@ function todayInRome(): string {
 function signedAmount(transaction: Transaction): string {
   if (transaction.type === 'expense') return `-€${transaction.amount}`
   if (transaction.type === 'income') return `+€${transaction.amount}`
+  // A Transfer and an Opening Balance move money without income/expense signs.
   return `€${transaction.amount}`
+}
+
+function transactionTitle(transaction: Transaction): string {
+  if (transaction.type === 'opening_balance') return 'Opening balance'
+  if (transaction.type === 'expense') return 'Expense'
+  if (transaction.type === 'income') return 'Income'
+  return 'Transfer'
 }
 
 export function TransactionsScreen() {
@@ -53,8 +61,10 @@ export function TransactionsScreen() {
 
   useEffect(reload, [token])
 
-  const walletName = (walletId: number): string =>
-    wallets?.find((w) => w.id === walletId)?.name ?? 'Frozen wallet'
+  const walletName = (walletId: number | null): string =>
+    walletId === null
+      ? 'Frozen wallet'
+      : (wallets?.find((w) => w.id === walletId)?.name ?? 'Frozen wallet')
 
   const categoryName = (categoryId: number | null): string | null => {
     if (categoryId === null) return null
@@ -108,11 +118,25 @@ export function TransactionsScreen() {
                 // A Transaction on a Wallet that is no longer in the active list
                 // belongs to a frozen Wallet (the only way a Wallet leaves the
                 // list): viewable, but neither editable nor deletable (ADR-0002).
+                // A Transfer is frozen when either leg is frozen.
                 const onFrozenWallet =
-                  wallets.find((w) => w.id === transaction.wallet_id) === undefined
+                  transaction.type === 'transfer'
+                    ? (transaction.source_wallet_id !== null &&
+                        wallets.find((w) => w.id === transaction.source_wallet_id) ===
+                          undefined) ||
+                      (transaction.destination_wallet_id !== null &&
+                        wallets.find((w) => w.id === transaction.destination_wallet_id) ===
+                          undefined)
+                    : wallets.find((w) => w.id === transaction.wallet_id) === undefined
                 const editable =
                   transaction.type !== 'opening_balance' && !onFrozenWallet
                 const category = categoryName(transaction.category_id)
+                const walletLabel =
+                  transaction.type === 'transfer'
+                    ? `${walletName(transaction.source_wallet_id)} → ${walletName(
+                        transaction.destination_wallet_id,
+                      )}`
+                    : walletName(transaction.wallet_id)
                 return (
                   <li key={transaction.id}>
                     <button
@@ -125,15 +149,11 @@ export function TransactionsScreen() {
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-slate-900">
-                          {transaction.type === 'opening_balance'
-                            ? 'Opening balance'
-                            : transaction.type === 'expense'
-                              ? 'Expense'
-                              : 'Income'}
+                          {transactionTitle(transaction)}
                           {category !== null && ` · ${category}`}
                         </span>
                         <span className="block truncate text-xs text-slate-500">
-                          {transaction.date} · {walletName(transaction.wallet_id)}
+                          {transaction.date} · {walletLabel}
                           {transaction.description !== null && transaction.description !== ''
                             ? ` · ${transaction.description}`
                             : ''}
@@ -171,11 +191,28 @@ function TransactionForm({
   onDeleted,
   onCancel,
 }: TransactionFormProps) {
-  const [type, setType] = useState<'expense' | 'income'>(editing?.type === 'income' ? 'income' : 'expense')
+  const [type, setType] = useState<'expense' | 'income' | 'transfer'>(
+    editing?.type === 'transfer'
+      ? 'transfer'
+      : editing?.type === 'income'
+        ? 'income'
+        : 'expense',
+  )
   const [amount, setAmount] = useState(editing?.amount ?? '')
   const [date, setDate] = useState(editing?.date ?? todayInRome())
-  const [walletId, setWalletId] = useState(
-    editing?.wallet_id ?? wallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type))[0]?.id,
+  const [walletId, setWalletId] = useState<number | undefined>(
+    editing?.type === 'transfer'
+      ? undefined
+      : (editing?.wallet_id ??
+        wallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type))[0]?.id),
+  )
+  const [sourceWalletId, setSourceWalletId] = useState<number | undefined>(
+    editing?.type === 'transfer' ? (editing.source_wallet_id ?? undefined) : wallets[0]?.id,
+  )
+  const [destinationWalletId, setDestinationWalletId] = useState<number | undefined>(
+    editing?.type === 'transfer'
+      ? (editing.destination_wallet_id ?? undefined)
+      : (wallets[1]?.id ?? wallets[0]?.id),
   )
   const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
   const [description, setDescription] = useState(editing?.description ?? '')
@@ -184,23 +221,32 @@ function TransactionForm({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const isEditing = editing !== null
+  const isTransfer = type === 'transfer'
   const spendableWallets = wallets.filter((w) =>
     NON_CONTACT_WALLET_TYPES.includes(w.type),
   )
   const matchingCategories = categories.filter((c) => c.type === type)
 
+  const sourceWallet = wallets.find((w) => w.id === sourceWalletId)
+  const destinationWallet = wallets.find((w) => w.id === destinationWalletId)
   const selectedWallet = wallets.find((w) => w.id === walletId)
   const amountValue = Number.parseFloat(amount)
   const hasAmount = !Number.isNaN(amountValue) && amountValue > 0
   const projectedBalance = useMemo(() => {
+    if (isTransfer) {
+      if (sourceWallet === undefined || !hasAmount) return null
+      return Number.parseFloat(sourceWallet.balance) - amountValue
+    }
     if (selectedWallet === undefined || !hasAmount) return null
     const current = Number.parseFloat(selectedWallet.balance)
     const delta = type === 'expense' ? -amountValue : amountValue
     return current + delta
-  }, [selectedWallet, hasAmount, amountValue, type])
+  }, [sourceWallet, selectedWallet, hasAmount, amountValue, type, isTransfer])
 
   const willWarn =
-    selectedWallet?.type === 'cash' && projectedBalance !== null && projectedBalance < 0
+    (isTransfer ? sourceWallet?.type === 'cash' : selectedWallet?.type === 'cash') &&
+    projectedBalance !== null &&
+    projectedBalance < 0
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -208,21 +254,30 @@ function TransactionForm({
     setError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
-      const input: TransactionInput = {
-        type,
-        amount,
-        date,
-        walletId: walletId as number,
-        categoryId,
-        description,
-      }
+      const input: TransactionInput = isTransfer
+        ? {
+            type: 'transfer',
+            amount,
+            date,
+            sourceWalletId: sourceWalletId as number,
+            destinationWalletId: destinationWalletId as number,
+            description,
+          }
+        : {
+            type,
+            amount,
+            date,
+            walletId: walletId as number,
+            categoryId,
+            description,
+          }
       const saved =
         isEditing && editing !== null
           ? await updateTransaction(token, editing.id, {
               amount,
               date,
-              categoryId,
               description,
+              ...(isTransfer ? {} : { categoryId }),
             })
           : await createTransaction(token, input)
       onSaved(saved)
@@ -270,6 +325,8 @@ function TransactionForm({
     setAmount('')
     setDate(todayInRome())
     setWalletId(wallets[0]?.id)
+    setSourceWalletId(wallets[0]?.id)
+    setDestinationWalletId(wallets[1]?.id ?? wallets[0]?.id)
     setCategoryId(null)
     setDescription('')
     setError(null)
@@ -298,6 +355,13 @@ function TransactionForm({
           onClick={() => setType('income')}
         >
           Income
+        </TypeButton>
+        <TypeButton
+          active={type === 'transfer'}
+          disabled={isEditing}
+          onClick={() => setType('transfer')}
+        >
+          Transfer
         </TypeButton>
       </div>
 
@@ -334,31 +398,71 @@ function TransactionForm({
         </div>
       </div>
 
-      <div>
-        <label htmlFor="tx-wallet" className="block text-sm font-medium text-slate-700">
-          Wallet
-        </label>
-        <select
-          id="tx-wallet"
-          required
-          disabled={isEditing}
-          value={walletId ?? ''}
-          onChange={(event) => setWalletId(Number(event.target.value))}
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
-        >
-          {spendableWallets.length === 0 && <option value="">No spendable wallets</option>}
-          {spendableWallets.map((wallet) => (
-            <option key={wallet.id} value={wallet.id}>
-              {wallet.name} ({formatEuros(wallet.balance)})
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-xs text-slate-500">
-          Contact wallets only move money through transfers.
-        </p>
-      </div>
+      {isTransfer ? (
+        <div className="grid grid-cols-2 gap-3">
+          <WalletSelect
+            id="tx-source"
+            label="From"
+            wallets={wallets}
+            value={sourceWalletId}
+            disabled={isEditing}
+            onChange={setSourceWalletId}
+          />
+          <WalletSelect
+            id="tx-destination"
+            label="To"
+            wallets={wallets}
+            value={destinationWalletId}
+            disabled={isEditing}
+            onChange={setDestinationWalletId}
+          />
+        </div>
+      ) : (
+        <div>
+          <label htmlFor="tx-wallet" className="block text-sm font-medium text-slate-700">
+            Wallet
+          </label>
+          <select
+            id="tx-wallet"
+            required
+            disabled={isEditing}
+            value={walletId ?? ''}
+            onChange={(event) => setWalletId(Number(event.target.value))}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
+          >
+            {spendableWallets.length === 0 && <option value="">No spendable wallets</option>}
+            {spendableWallets.map((wallet) => (
+              <option key={wallet.id} value={wallet.id}>
+                {wallet.name} ({formatEuros(wallet.balance)})
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            Contact wallets only move money through transfers.
+          </p>
+        </div>
+      )}
 
-      {selectedWallet !== undefined && projectedBalance !== null && (
+      {isTransfer ? (
+        sourceWallet !== undefined && destinationWallet !== undefined && hasAmount ? (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            {sourceWallet.name}: {formatEuros(sourceWallet.balance)} →{' '}
+            <span className="font-semibold">
+              {formatEuros((Number.parseFloat(sourceWallet.balance) - amountValue).toFixed(2))}
+            </span>
+            <span className="mx-1">·</span>
+            {destinationWallet.name}: {formatEuros(destinationWallet.balance)} →{' '}
+            <span className="font-semibold">
+              {formatEuros((Number.parseFloat(destinationWallet.balance) + amountValue).toFixed(2))}
+            </span>
+            {willWarn && (
+              <span className="mt-1 block text-amber-700">
+                ⚠ This will make your Cash wallet negative.
+              </span>
+            )}
+          </p>
+        ) : null
+      ) : selectedWallet !== undefined && projectedBalance !== null ? (
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
           {selectedWallet.name}: {formatEuros(selectedWallet.balance)} →{' '}
           <span className="font-semibold">{formatEuros(projectedBalance.toFixed(2))}</span>
@@ -368,29 +472,33 @@ function TransactionForm({
             </span>
           )}
         </p>
-      )}
+      ) : null}
 
-      <div>
-        <label htmlFor="tx-category" className="block text-sm font-medium text-slate-700">
-          Category
-        </label>
-        <select
-          id="tx-category"
-          value={categoryId ?? ''}
-          onChange={(event) =>
-            setCategoryId(event.target.value === '' ? null : Number(event.target.value))
-          }
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-        >
-          <option value="">None</option>
-          {matchingCategories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.icon !== null ? `${category.icon} ` : ''}
-              {category.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {isTransfer ? (
+        <p className="text-xs text-slate-500">Transfers never carry a category.</p>
+      ) : (
+        <div>
+          <label htmlFor="tx-category" className="block text-sm font-medium text-slate-700">
+            Category
+          </label>
+          <select
+            id="tx-category"
+            value={categoryId ?? ''}
+            onChange={(event) =>
+              setCategoryId(event.target.value === '' ? null : Number(event.target.value))
+            }
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+          >
+            <option value="">None</option>
+            {matchingCategories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.icon !== null ? `${category.icon} ` : ''}
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div>
         <label htmlFor="tx-description" className="block text-sm font-medium text-slate-700">
@@ -412,7 +520,15 @@ function TransactionForm({
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={submitting || !hasAmount || walletId === undefined}
+          disabled={
+            submitting ||
+            !hasAmount ||
+            (isTransfer
+              ? sourceWalletId === undefined ||
+                destinationWalletId === undefined ||
+                sourceWalletId === destinationWalletId
+              : walletId === undefined)
+          }
           className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
         >
           {submitting ? 'Saving…' : isEditing ? 'Save' : 'Save transaction'}
@@ -467,5 +583,44 @@ function TypeButton({
     >
       {children}
     </button>
+  )
+}
+
+function WalletSelect({
+  id,
+  label,
+  wallets,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string
+  label: string
+  wallets: Wallet[]
+  value: number | undefined
+  disabled: boolean
+  onChange: (walletId: number) => void
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      <select
+        id={id}
+        required
+        disabled={disabled}
+        value={value ?? ''}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
+      >
+        {wallets.length === 0 && <option value="">No wallets yet</option>}
+        {wallets.map((wallet) => (
+          <option key={wallet.id} value={wallet.id}>
+            {wallet.name} ({formatEuros(wallet.balance)})
+          </option>
+        ))}
+      </select>
+    </div>
   )
 }

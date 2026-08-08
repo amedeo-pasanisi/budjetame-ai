@@ -213,13 +213,16 @@ function WalletCreateForm({ onCreated, onCancel }: WalletCreateFormProps) {
           step="0.01"
           min="0"
           inputMode="decimal"
+          disabled={type === 'contact'}
           value={openingBalance}
           onChange={(event) => setOpeningBalance(event.target.value)}
           placeholder="0.00"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-60"
         />
         <p className="mt-1 text-xs text-slate-500">
-          Money you already have. Defaults to €0.00.
+          {type === 'contact'
+            ? 'Contact wallets start at €0 — money moves only through transfers.'
+            : 'Money you already have. Defaults to €0.00.'}
         </p>
       </div>
       {error !== null && <p className="text-sm text-red-600">{error}</p>}

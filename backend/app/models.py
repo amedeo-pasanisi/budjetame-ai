@@ -25,6 +25,7 @@ class TransactionType(str, enum.Enum):
     EXPENSE = "expense"
     INCOME = "income"
     OPENING_BALANCE = "opening_balance"
+    TRANSFER = "transfer"
 
 
 class CategoryType(str, enum.Enum):
@@ -90,7 +91,15 @@ class Transaction(Base):
     account_id: Mapped[int] = mapped_column(
         ForeignKey("accounts.id", ondelete="CASCADE"), index=True
     )
-    wallet_id: Mapped[int] = mapped_column(
+    # Expense/Income/Opening Balance reference a single Wallet; a Transfer
+    # references Source and Destination Wallets instead (spec decision #6).
+    wallet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wallets.id", ondelete="CASCADE"), index=True
+    )
+    source_wallet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wallets.id", ondelete="CASCADE"), index=True
+    )
+    destination_wallet_id: Mapped[int | None] = mapped_column(
         ForeignKey("wallets.id", ondelete="CASCADE"), index=True
     )
     category_id: Mapped[int | None] = mapped_column(
