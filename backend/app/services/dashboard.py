@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.dates import rome_month_bounds
-from app.models import Transaction, TransactionType
+from app.models import Category, Transaction, TransactionType
 
 from app.services.wallets import wallet_balances
 
@@ -52,3 +52,46 @@ def month_income_expenses(
         else:
             expenses = Decimal(total)
     return income, expenses
+
+
+def expenses_by_category(
+    session: Session, account_id: int, month: str
+) -> list[dict]:
+    """The expense pie (T11): one slice per Category for the given Europe/Rome
+    month, largest first. Expenses whose Category was deleted group into an
+    "Uncategorized" slice (category_id null — no stored color, the frontend
+    renders a neutral one), so the slices always sum to the month's total
+    expenses (US26). Income, Opening Balances and Transfers never appear —
+    only Expense Transactions are grouped."""
+    start, next_start = rome_month_bounds(month)
+    rows = session.execute(
+        select(
+            Transaction.category_id,
+            func.sum(Transaction.amount),
+            Category.name,
+            Category.icon,
+            Category.color,
+        )
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(
+            Transaction.account_id == account_id,
+            Transaction.type == TransactionType.EXPENSE.value,
+            Transaction.date >= start,
+            Transaction.date < next_start,
+        )
+        .group_by(Transaction.category_id, Category.name, Category.icon, Category.color)
+        .order_by(
+            func.sum(Transaction.amount).desc(), Transaction.category_id.nulls_last()
+        )
+    ).all()
+    return [
+        {
+            "category_id": category_id,
+            "name": name or "Uncategorized",
+            "icon": icon,
+            "color": color,
+            "amount": Decimal(amount),
+        }
+        for category_id, amount, name, icon, color in rows
+    ]

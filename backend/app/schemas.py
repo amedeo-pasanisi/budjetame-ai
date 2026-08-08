@@ -213,17 +213,38 @@ class TransactionUpdate(BaseModel):
         return self
 
 
+class CategoryExpense(BaseModel):
+    """One slice of the Dashboard's expense pie (T11): a Category's expenses
+    in the reference month. `category_id` is null for the "Uncategorized"
+    slice — expenses whose Category was deleted (spec decision #10) — and then
+    `color` is null too: the frontend renders a neutral color for it. The
+    slices always sum to the month's total expenses."""
+
+    category_id: int | None
+    name: str
+    icon: str | None
+    color: str | None
+    amount: Decimal
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
+
+
 class DashboardSummary(BaseModel):
-    """The Dashboard overview (T10): Net Worth — the algebraic sum of all
+    """The Dashboard overview: Net Worth — the algebraic sum of all
     Wallet balances, Contact and frozen (always €0) Wallets included — and the
-    current Europe/Rome month's Income and Expense totals. Opening Balance
-    Transactions never count toward the statistics; Transfers are excluded by
-    construction."""
+    reference month's (default: the current Europe/Rome month) Income and
+    Expense totals. Opening Balance Transactions never count toward the
+    statistics; Transfers are excluded by construction. `expenses_by_category`
+    is the expense pie for the same month (T11)."""
 
     net_worth: Decimal
     month: str
     income: Decimal
     expenses: Decimal
+    expenses_by_category: list[CategoryExpense]
 
     @field_validator("net_worth", "income", "expenses")
     @classmethod

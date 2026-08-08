@@ -54,8 +54,9 @@ async def _create_wallet(
     return response.json()["id"]
 
 
-async def _summary(client: AsyncClient, token: str) -> dict:
-    response = await client.get("/dashboard/summary", headers=_auth(token))
+async def _summary(client: AsyncClient, token: str, month: str | None = None) -> dict:
+    query = f"?month={month}" if month is not None else ""
+    response = await client.get(f"/dashboard/summary{query}", headers=_auth(token))
     assert response.status_code == 200
     return response.json()
 
@@ -79,6 +80,51 @@ def _first_day_of_next_month() -> str:
     """The first calendar day of the next Europe/Rome month, as YYYY-MM-DD."""
     last = date.fromisoformat(_last_day_of_current_month())
     return (last + timedelta(days=1)).isoformat()
+
+
+def _previous_month() -> str:
+    """The Europe/Rome month before the current one, as YYYY-MM."""
+    year, month = (int(part) for part in _current_month().split("-"))
+    if month == 1:
+        return f"{year - 1}-12"
+    return f"{year}-{month - 1:02d}"
+
+
+def _mid_previous_month() -> str:
+    """A safe calendar day (the 15th) of the previous month, as YYYY-MM-DD."""
+    return f"{_previous_month()}-15"
+
+
+async def _create_category(
+    client: AsyncClient, token: str, name: str, type: str
+) -> int:
+    response = await client.post(
+        "/categories",
+        json={"name": name, "type": type, "color": "#ef4444"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def _create_expense(
+    client: AsyncClient,
+    token: str,
+    wallet_id: int,
+    amount: str,
+    date: str,
+    category_id: int | None = None,
+) -> None:
+    body: dict = {
+        "type": "expense",
+        "amount": amount,
+        "date": date,
+        "wallet_id": wallet_id,
+    }
+    if category_id is not None:
+        body["category_id"] = category_id
+    response = await client.post("/transactions", json=body, headers=_auth(token))
+    assert response.status_code == 201
 
 
 async def test_dashboard_requires_authentication(client: AsyncClient) -> None:
@@ -302,5 +348,171 @@ async def test_dashboard_empty_state_for_a_fresh_account(
         assert summary["month"] == _current_month()
         for key in sorted(DECIMAL):
             assert summary[key] == "0.00", key
+        assert summary["expenses_by_category"] == []
+    finally:
+        delete_account(database_url, account_id)
+
+
+# --- T11: reference month/year and the expense pie ---
+
+
+async def test_summary_accepts_a_reference_month(client: AsyncClient) -> None:
+    """The reference month is selectable: the summary for a past month shows
+    that month's Income and Expenses and echoes it in `month`; without the
+    parameter the view is the current month (US27)."""
+    token = await _login(client)
+    baseline_past = await _summary(client, token, month=_previous_month())
+    wallet = await _create_wallet(client, token, "Ref Month Wallet", "checking", "0.00")
+    await _create_expense(client, token, wallet, "12.34", _mid_previous_month())
+    await client.post(
+        "/transactions",
+        json={
+            "type": "income",
+            "amount": "50.00",
+            "date": _last_day_of_current_month(),
+            "wallet_id": wallet,
+        },
+        headers=_auth(token),
+    )
+
+    past = await _summary(client, token, month=_previous_month())
+
+    assert past["month"] == _previous_month()
+    assert Decimal(past["expenses"]) == Decimal(baseline_past["expenses"]) + Decimal("12.34")
+    assert past["income"] == baseline_past["income"]
+
+    current = await _summary(client, token)
+    assert current["month"] == _current_month()
+
+
+async def test_summary_rejects_a_bad_month(client: AsyncClient) -> None:
+    token = await _login(client)
+
+    for month in ("banana", "2026-13", "2026-8", "2026-08-01"):
+        response = await client.get(
+            f"/dashboard/summary?month={month}", headers=_auth(token)
+        )
+
+        assert response.status_code == 422, month
+
+
+async def test_pie_sums_expenses_per_category_for_the_reference_month(
+    client: AsyncClient, database_url: str
+) -> None:
+    """The pie groups the reference month's expenses by Category; income,
+    Opening Balances and Transfers never appear in it, so the slices always sum
+    to the month's total expenses (US26). A fresh Account keeps the slice set
+    exact — the suite shares one seeded Account."""
+    account_id = insert_foreign_account(database_url, "pie-food@budjetame.dev")
+    try:
+        token = await _login(client, email="pie-food@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Pie Wallet", "checking", "0.00")
+        food = await _create_category(client, token, "Pie Food", "expense")
+        travel = await _create_category(client, token, "Pie Travel", "expense")
+        bonus = await _create_category(client, token, "Pie Bonus", "income")
+        day = _mid_previous_month()
+        await _create_expense(client, token, wallet, "10.00", day, food)
+        await _create_expense(client, token, wallet, "20.00", day, food)
+        await _create_expense(client, token, wallet, "15.00", day, travel)
+        await client.post(
+            "/transactions",
+            json={
+                "type": "income",
+                "amount": "100.00",
+                "date": day,
+                "wallet_id": wallet,
+                "category_id": bonus,
+            },
+            headers=_auth(token),
+        )
+        # A Transfer and an Opening Balance are neither Expense nor Income:
+        # they must not show up as slices.
+        savings = await _create_wallet(client, token, "Pie Savings", "checking", "0.00")
+        await client.post(
+            "/transactions",
+            json={
+                "type": "transfer",
+                "amount": "30.00",
+                "date": day,
+                "source_wallet_id": wallet,
+                "destination_wallet_id": savings,
+            },
+            headers=_auth(token),
+        )
+        await _create_wallet(client, token, "Pie OB Wallet", "checking", "50.00")
+
+        summary = await _summary(client, token, month=_previous_month())
+
+        slices = {s["name"]: s for s in summary["expenses_by_category"]}
+        assert set(slices) == {"Pie Food", "Pie Travel"}
+        assert slices["Pie Food"]["category_id"] == food
+        assert slices["Pie Food"]["amount"] == "30.00"
+        assert slices["Pie Travel"]["amount"] == "15.00"
+        assert slices["Pie Travel"]["color"] == "#ef4444"
+        # The pie always sums to the month's total expenses.
+        total = sum(
+            (Decimal(s["amount"]) for s in summary["expenses_by_category"]),
+            Decimal("0.00"),
+        )
+        assert total == Decimal(summary["expenses"]) == Decimal("45.00")
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_pie_includes_an_uncategorized_slice(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Expenses without a Category appear in an "Uncategorized" slice
+    (category_id null, neutral color) so the pie still sums to the month's
+    total expenses (US26)."""
+    account_id = insert_foreign_account(database_url, "pie-uncat@budjetame.dev")
+    try:
+        token = await _login(client, email="pie-uncat@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Uncat Pie Wallet", "checking", "0.00")
+        food = await _create_category(client, token, "Uncat Food", "expense")
+        day = _mid_previous_month()
+        await _create_expense(client, token, wallet, "7.00", day, food)
+        await _create_expense(client, token, wallet, "3.00", day)
+
+        summary = await _summary(client, token, month=_previous_month())
+
+        slices = {s["name"]: s for s in summary["expenses_by_category"]}
+        assert set(slices) == {"Uncat Food", "Uncategorized"}
+        assert slices["Uncategorized"]["category_id"] is None
+        assert slices["Uncategorized"]["amount"] == "3.00"
+        # The Uncategorized slice carries no stored color — the frontend
+        # renders a neutral one (spec decision #14: presentation stays there).
+        assert slices["Uncategorized"]["color"] is None
+        total = sum(
+            (Decimal(s["amount"]) for s in summary["expenses_by_category"]),
+            Decimal("0.00"),
+        )
+        assert total == Decimal(summary["expenses"]) == Decimal("10.00")
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_pie_groups_a_deleted_category_into_uncategorized(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Deleting a Category nulls it on its Transactions (spec decision #10);
+    those expenses then group into the "Uncategorized" slice, so the pie still
+    sums to the month's total expenses."""
+    account_id = insert_foreign_account(database_url, "pie-doomed@budjetame.dev")
+    try:
+        token = await _login(client, email="pie-doomed@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Doomed Pie Wallet", "checking", "0.00")
+        doomed = await _create_category(client, token, "Doomed", "expense")
+        await _create_expense(client, token, wallet, "5.00", _mid_previous_month(), doomed)
+
+        delete = await client.delete(f"/categories/{doomed}", headers=_auth(token))
+        assert delete.status_code == 204
+
+        summary = await _summary(client, token, month=_previous_month())
+
+        slices = {s["name"]: s for s in summary["expenses_by_category"]}
+        assert set(slices) == {"Uncategorized"}
+        assert slices["Uncategorized"]["amount"] == "5.00"
+        assert Decimal(summary["expenses"]) == Decimal("5.00")
     finally:
         delete_account(database_url, account_id)

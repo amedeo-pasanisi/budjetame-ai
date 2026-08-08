@@ -33,6 +33,16 @@ export type DashboardSummary = {
   month: string
   income: string
   expenses: string
+  expenses_by_category: CategoryExpense[]
+}
+
+export type CategoryExpense = {
+  category_id: number | null
+  name: string
+  icon: string | null
+  // null for the "Uncategorized" slice — the frontend renders a neutral color
+  color: string | null
+  amount: string
 }
 
 export type Transaction = {
@@ -122,8 +132,12 @@ export async function fetchCurrentAccount(token: string): Promise<Account> {
   return (await response.json()) as Account
 }
 
-export async function fetchDashboardSummary(token: string): Promise<DashboardSummary> {
-  const response = await fetch(`${API_BASE}/dashboard/summary`, {
+export async function fetchDashboardSummary(
+  token: string,
+  month?: string,
+): Promise<DashboardSummary> {
+  const query = month !== undefined ? `?month=${month}` : ''
+  const response = await fetch(`${API_BASE}/dashboard/summary${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) {
