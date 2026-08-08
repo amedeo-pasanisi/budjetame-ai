@@ -12,7 +12,7 @@ import {
 import {
   TransactionForm,
 } from './TransactionForm'
-import { signedAmount, transactionTitle } from './transactions'
+import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
 export function TransactionsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
@@ -133,6 +133,7 @@ export function TransactionsScreen() {
                           {transaction.description !== null && transaction.description !== ''
                             ? ` · ${transaction.description}`
                             : ''}
+                          {hasLocation(transaction) && ' · 📍'}
                         </span>
                       </span>
                       <span className="shrink-0 text-sm font-semibold text-slate-900">

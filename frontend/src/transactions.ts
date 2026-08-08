@@ -18,3 +18,7 @@ export function transactionTitle(transaction: Transaction): string {
   if (transaction.type === 'income') return 'Income'
   return 'Transfer'
 }
+
+export function hasLocation(transaction: Transaction): boolean {
+  return transaction.latitude !== null && transaction.longitude !== null
+}

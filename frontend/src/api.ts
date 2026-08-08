@@ -52,6 +52,8 @@ export type TransactionInput =
       walletId: number
       categoryId: number | null
       description: string
+      latitude: string | null
+      longitude: string | null
     }
   | {
       type: 'transfer'
@@ -60,6 +62,8 @@ export type TransactionInput =
       sourceWalletId: number
       destinationWalletId: number
       description: string
+      latitude: string | null
+      longitude: string | null
     }
 
 export class ApiError extends Error {
@@ -268,6 +272,8 @@ export async function createTransaction(
     amount: input.amount,
     date: input.date,
     description: input.description === '' ? null : input.description,
+    latitude: input.latitude,
+    longitude: input.longitude,
   }
   const body =
     input.type === 'transfer'
@@ -295,7 +301,14 @@ export async function createTransaction(
 export async function updateTransaction(
   token: string,
   transactionId: number,
-  input: { amount: string; date: string; categoryId?: number | null; description: string },
+  input: {
+    amount: string
+    date: string
+    categoryId?: number | null
+    description: string
+    latitude?: string | null
+    longitude?: string | null
+  },
 ): Promise<Transaction> {
   const body: Record<string, unknown> = {
     amount: input.amount,
@@ -306,6 +319,10 @@ export async function updateTransaction(
   if (input.categoryId !== undefined) {
     body.category_id = input.categoryId
   }
+  // The location is always sent: values set it, null clears it (the backend
+  // applies any field present in the payload).
+  body.latitude = input.latitude ?? null
+  body.longitude = input.longitude ?? null
   const response = await fetch(`${API_BASE}/transactions/${transactionId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

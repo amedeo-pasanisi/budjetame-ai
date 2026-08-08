@@ -1269,3 +1269,39 @@ async def test_history_foreign_category_filter_is_forbidden(
         assert response.status_code == 403
     finally:
         delete_account(database_url, account_id)
+
+
+# --- T9: Geographic Location on transactions ---
+
+
+async def test_edit_transaction_can_set_and_clear_a_location(client: AsyncClient) -> None:
+    """Coordinates can be attached to (and removed from) a Transaction through
+    the API; only the coordinates are stored — no Maps link ever reaches the
+    database (spec decision #11, T9)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Edit Location Wallet", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-08", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+    assert created.json()["latitude"] is None
+
+    with_location = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"latitude": "41.9028", "longitude": "12.4964"},
+        headers=_auth(token),
+    )
+    assert with_location.status_code == 200
+    assert with_location.json()["latitude"] == "41.9028"
+    assert with_location.json()["longitude"] == "12.4964"
+
+    cleared = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"latitude": None, "longitude": None},
+        headers=_auth(token),
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["latitude"] is None
+    assert cleared.json()["longitude"] is None

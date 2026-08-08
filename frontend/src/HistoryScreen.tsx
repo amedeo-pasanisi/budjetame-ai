@@ -12,7 +12,7 @@ import {
   type Wallet,
 } from './api'
 import { TransactionForm } from './TransactionForm'
-import { signedAmount, transactionTitle } from './transactions'
+import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
 const ALL_CATEGORIES = -1
 
@@ -275,6 +275,7 @@ export function HistoryScreen() {
                         {transaction.description !== null && transaction.description !== ''
                           ? ` · ${transaction.description}`
                           : ''}
+                        {hasLocation(transaction) && ' · 📍'}
                       </span>
                     </span>
                     <span className="shrink-0 text-sm font-semibold text-slate-900">

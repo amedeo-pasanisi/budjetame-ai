@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -13,6 +13,17 @@ import {
   type TransactionInput,
   type Wallet,
 } from './api'
+import { MapPicker } from './MapPicker'
+import {
+  formatLocation,
+  getGpsPosition,
+  gpsPrefillAvailable,
+  latLngFromWire,
+  latLngToWire,
+  mapLink,
+  markGpsGranted,
+  type LatLng,
+} from './location'
 import { todayInRome } from './transactions'
 
 const NON_CONTACT_WALLET_TYPES = ['checking', 'credit_card', 'cash']
@@ -61,6 +72,16 @@ export function TransactionForm({
   )
   const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
   const [description, setDescription] = useState(editing?.description ?? '')
+  const [location, setLocation] = useState<LatLng | null>(() =>
+    latLngFromWire(editing?.latitude ?? null, editing?.longitude ?? null),
+  )
+  const [showingPicker, setShowingPicker] = useState(false)
+  // Set once the user removes the location: the first-save prompt must not
+  // silently re-attach a position the user opted out of (consent, US7/T9).
+  const [locationOptedOut, setLocationOptedOut] = useState(false)
+  // Set once the user changes the location themselves, so a pending GPS prefill
+  // cannot overwrite an explicit choice.
+  const locationTouched = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -93,12 +114,48 @@ export function TransactionForm({
     projectedBalance !== null &&
     projectedBalance < 0
 
+  // GPS prefill (US18 / T9): when creating a Transaction and device-location
+  // permission is already granted, pre-fill the location from the current
+  // position so recording takes one tap. The browser never prompts here — it
+  // only prompts on the first save (below). A user-chosen or user-removed
+  // location is never overwritten by a pending prefill.
+  useEffect(() => {
+    if (isEditing) {
+      return
+    }
+    let cancelled = false
+    gpsPrefillAvailable().then((available) => {
+      if (!available || cancelled) return
+      getGpsPosition().then((position) => {
+        if (position !== null && !cancelled && !locationTouched.current) {
+          setLocation(position)
+          markGpsGranted()
+        }
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isEditing])
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitting(true)
     setError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
+      // First-save permission (US7 / T9): when creating without a location, ask
+      // for device-location permission — the browser prompts exactly once — and
+      // attach the position when granted. A location the user removed
+      // (locationOptedOut) or picked explicitly is never overridden.
+      let finalLocation = location
+      if (!isEditing && finalLocation === null && !locationOptedOut) {
+        finalLocation = await getGpsPosition()
+        if (finalLocation !== null) {
+          setLocation(finalLocation)
+          markGpsGranted()
+        }
+      }
       const input: TransactionInput = isTransfer
         ? {
             type: 'transfer',
@@ -107,6 +164,7 @@ export function TransactionForm({
             sourceWalletId: sourceWalletId as number,
             destinationWalletId: destinationWalletId as number,
             description,
+            ...latLngToWire(finalLocation),
           }
         : {
             type,
@@ -115,6 +173,7 @@ export function TransactionForm({
             walletId: walletId as number,
             categoryId,
             description,
+            ...latLngToWire(finalLocation),
           }
       const saved =
         isEditing && editing !== null
@@ -123,6 +182,7 @@ export function TransactionForm({
               date,
               description,
               ...(isTransfer ? {} : { categoryId }),
+              ...latLngToWire(location),
             })
           : await createTransaction(token, input)
       onSaved(saved)
@@ -165,6 +225,16 @@ export function TransactionForm({
     }
   }
 
+  const pickFromGps = async () => {
+    const position = await getGpsPosition()
+    if (position !== null) {
+      locationTouched.current = true
+      setLocation(position)
+      setShowingPicker(false)
+      markGpsGranted()
+    }
+  }
+
   const resetForm = () => {
     setType('expense')
     setAmount('')
@@ -174,6 +244,10 @@ export function TransactionForm({
     setDestinationWalletId(wallets[1]?.id ?? wallets[0]?.id)
     setCategoryId(null)
     setDescription('')
+    setLocation(null)
+    setShowingPicker(false)
+    setLocationOptedOut(false)
+    locationTouched.current = false
     setError(null)
   }
 
@@ -358,6 +432,73 @@ export function TransactionForm({
           placeholder="Optional note"
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
+      </div>
+
+      <div>
+        <span className="block text-sm font-medium text-slate-700">Location</span>
+        {location !== null ? (
+          <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+            <span className="text-sm text-slate-700">📍 {formatLocation(location)}</span>
+            <a
+              href={mapLink(location)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-medium text-indigo-600"
+            >
+              Open in Google Maps ↗
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                locationTouched.current = true
+                setLocationOptedOut(true)
+                setLocation(null)
+                setShowingPicker(false)
+              }}
+              className="text-sm font-medium text-red-600"
+            >
+              Remove
+            </button>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500">No location attached.</p>
+        )}
+        {showingPicker ? (
+          <div className="mt-2 space-y-2">
+            <MapPicker
+              position={location}
+              onPick={(picked) => {
+                locationTouched.current = true
+                setLocation(picked)
+                setShowingPicker(false)
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowingPicker(false)}
+              className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2 flex gap-3">
+            <button
+              type="button"
+              onClick={() => setShowingPicker(true)}
+              className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
+            >
+              {location !== null ? 'Change location' : 'Add location'}
+            </button>
+            <button
+              type="button"
+              onClick={pickFromGps}
+              className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
+            >
+              Use my location
+            </button>
+          </div>
+        )}
       </div>
 
       {error !== null && <p className="text-sm text-red-600">{error}</p>}
