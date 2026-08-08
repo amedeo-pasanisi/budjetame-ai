@@ -11,6 +11,7 @@ export type Wallet = {
   name: string
   type: WalletType
   balance: string
+  frozen: boolean
   created_at: string
 }
 
@@ -110,8 +111,9 @@ export async function fetchCurrentAccount(token: string): Promise<Account> {
   return (await response.json()) as Account
 }
 
-export async function fetchWallets(token: string): Promise<Wallet[]> {
-  const response = await fetch(`${API_BASE}/wallets`, {
+export async function fetchWallets(token: string, includeFrozen = false): Promise<Wallet[]> {
+  const query = includeFrozen ? '?include_frozen=true' : ''
+  const response = await fetch(`${API_BASE}/wallets${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) {
@@ -223,11 +225,31 @@ export async function deleteCategory(token: string, categoryId: number): Promise
   }
 }
 
+export type TransactionFilters = {
+  walletId?: number
+  categoryId?: number
+  fromDate?: string
+  toDate?: string
+}
+
 export async function fetchTransactions(
   token: string,
-  walletId?: number,
+  filters: TransactionFilters = {},
 ): Promise<Transaction[]> {
-  const query = walletId === undefined ? '' : `?wallet_id=${walletId}`
+  const params = new URLSearchParams()
+  if (filters.walletId !== undefined) {
+    params.set('wallet_id', String(filters.walletId))
+  }
+  if (filters.categoryId !== undefined) {
+    params.set('category_id', String(filters.categoryId))
+  }
+  if (filters.fromDate !== undefined && filters.fromDate !== '') {
+    params.set('from_date', filters.fromDate)
+  }
+  if (filters.toDate !== undefined && filters.toDate !== '') {
+    params.set('to_date', filters.toDate)
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : ''
   const response = await fetch(`${API_BASE}/transactions${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   })

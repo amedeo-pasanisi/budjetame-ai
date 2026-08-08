@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
+import { HistoryScreen } from './HistoryScreen'
 import { LoginForm } from './LoginForm'
 import { Screen } from './Screen'
 import { TransactionsScreen } from './TransactionsScreen'
@@ -12,7 +13,7 @@ type AuthState =
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; account: Account }
 
-type Tab = 'wallets' | 'transactions' | 'categories'
+type Tab = 'wallets' | 'transactions' | 'history' | 'categories'
 
 function App() {
   const [auth, setAuth] = useState<AuthState>(() =>
@@ -102,6 +103,9 @@ function AppShell({
         <TabButton active={tab === 'transactions'} onClick={() => setTab('transactions')}>
           Transactions
         </TabButton>
+        <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
+          History
+        </TabButton>
         <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
           Categories
         </TabButton>
@@ -110,6 +114,7 @@ function AppShell({
       <main className="mx-auto mt-6 max-w-sm">
         {tab === 'wallets' && <WalletsScreen />}
         {tab === 'transactions' && <TransactionsScreen />}
+        {tab === 'history' && <HistoryScreen />}
         {tab === 'categories' && <CategoriesScreen />}
       </main>
     </div>

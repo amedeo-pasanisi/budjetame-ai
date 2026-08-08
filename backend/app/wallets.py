@@ -29,6 +29,7 @@ def _wallet_out(wallet: Wallet, balance: Decimal) -> WalletOut:
         name=wallet.name,
         type=WalletType(wallet.type),
         balance=balance,
+        frozen=wallet.frozen,
         created_at=wallet.created_at,
     )
 
@@ -44,14 +45,17 @@ def _name_conflict(session: Session, cause: Exception) -> None:
 
 @router.get("", response_model=list[WalletOut])
 def list_wallets(
+    include_frozen: bool = False,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
 ) -> list[WalletOut]:
-    wallets = session.scalars(
-        select(Wallet)
-        .where(Wallet.account_id == account.id, Wallet.frozen.is_(False))
-        .order_by(Wallet.id)
-    ).all()
+    """Active Wallets by default; `include_frozen=true` also returns frozen
+    Wallets (with `frozen: true`) so the history screen can reach their
+    Transactions (ADR-0002, T8)."""
+    stmt = select(Wallet).where(Wallet.account_id == account.id)
+    if not include_frozen:
+        stmt = stmt.where(Wallet.frozen.is_(False))
+    wallets = session.scalars(stmt.order_by(Wallet.id)).all()
     balances = wallet_service.wallet_balances(session, account.id)
     return [_wallet_out(w, balances.get(w.id, Decimal("0.00"))) for w in wallets]
 

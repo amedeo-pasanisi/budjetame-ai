@@ -51,12 +51,16 @@ class WalletUpdate(BaseModel):
 
 
 class WalletOut(BaseModel):
-    """A Wallet as seen through the API, with its derived balance (ADR-0001)."""
+    """A Wallet as seen through the API, with its derived balance (ADR-0001)
+    and its freeze state (ADR-0002). The default wallet list hides frozen
+    Wallets; `?include_frozen=true` returns them with `frozen: true` so the
+    history screen can reach their Transactions."""
 
     id: int
     name: str
     type: WalletType
     balance: Decimal
+    frozen: bool
     created_at: datetime
 
     @field_validator("balance")

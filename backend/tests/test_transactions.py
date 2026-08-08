@@ -257,6 +257,7 @@ async def test_foreign_wallet_is_rejected(client: AsyncClient, database_url: str
             session.commit()
             wallet_id = wallet.id
 
+        engine.dispose()
         response = await client.post(
             "/transactions",
             json={"type": "expense", "amount": "10.00", "date": "2026-08-06", "wallet_id": wallet_id},
@@ -297,6 +298,7 @@ async def test_foreign_category_is_rejected(client: AsyncClient, database_url: s
             session.commit()
             category_id = category.id
 
+        engine.dispose()
         response = await client.post(
             "/transactions",
             json={
@@ -567,6 +569,7 @@ async def test_list_foreign_wallet_filter_is_forbidden(
             session.commit()
             wallet_id = wallet.id
 
+        engine.dispose()
         response = await client.get(
             f"/transactions?wallet_id={wallet_id}", headers=_auth(token)
         )
@@ -595,6 +598,7 @@ async def test_foreign_transaction_returns_403(client: AsyncClient, database_url
             session.commit()
             transaction_id = transaction.id
 
+        engine.dispose()
         patch = await client.patch(
             f"/transactions/{transaction_id}",
             json={"amount": "5.00"},
@@ -848,6 +852,7 @@ async def test_transfer_from_foreign_wallet_is_forbidden(
             session.commit()
             foreign_id = wallet.id
 
+        engine.dispose()
         response = await client.post(
             "/transactions",
             json={
@@ -1097,3 +1102,170 @@ async def test_wallet_transaction_filter_includes_transfers_on_both_legs(
 
     assert transfer_id in [t["id"] for t in as_source]
     assert transfer_id in [t["id"] for t in as_destination]
+
+
+# --- T8: Transaction history filters ---
+
+
+async def test_history_filters_by_date_range_inclusively(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "History Range Wallet", "checking", "0.00")
+    for day in ("2026-08-01", "2026-08-10", "2026-08-20"):
+        response = await client.post(
+            "/transactions",
+            json={"type": "expense", "amount": "5.00", "date": day, "wallet_id": wallet_id},
+            headers=_auth(token),
+        )
+        assert response.status_code == 201
+
+    middle = (
+        await client.get(
+            f"/transactions?wallet_id={wallet_id}&from_date=2026-08-05&to_date=2026-08-15",
+            headers=_auth(token),
+        )
+    ).json()
+    assert [t["date"] for t in middle] == ["2026-08-10"]
+
+    single_day = (
+        await client.get(
+            f"/transactions?wallet_id={wallet_id}&from_date=2026-08-20&to_date=2026-08-20",
+            headers=_auth(token),
+        )
+    ).json()
+    assert [t["date"] for t in single_day] == ["2026-08-20"]
+
+    open_ended = (
+        await client.get(
+            f"/transactions?wallet_id={wallet_id}&from_date=2026-08-11",
+            headers=_auth(token),
+        )
+    ).json()
+    assert [t["date"] for t in open_ended] == ["2026-08-20"]
+
+
+async def test_history_filters_by_category(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "History Category Wallet", "checking", "0.00")
+    food = await _create_category(client, token, "History Cat Food", "expense")
+    travel = await _create_category(client, token, "History Cat Travel", "expense")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "5.00",
+            "date": "2026-08-10",
+            "wallet_id": wallet_id,
+            "category_id": food,
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "7.00",
+            "date": "2026-08-11",
+            "wallet_id": wallet_id,
+            "category_id": travel,
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "9.00", "date": "2026-08-12", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+
+    only_food = (
+        await client.get(
+            f"/transactions?wallet_id={wallet_id}&category_id={food}", headers=_auth(token)
+        )
+    ).json()
+    assert [t["amount"] for t in only_food] == ["5.00"]
+
+
+async def test_history_combines_wallet_date_and_category_filters(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_a = await _create_wallet(client, token, "History Combine A", "checking", "0.00")
+    wallet_b = await _create_wallet(client, token, "History Combine B", "checking", "0.00")
+    food = await _create_category(client, token, "History Combine Food", "expense")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "1.00",
+            "date": "2026-08-01",
+            "wallet_id": wallet_a,
+            "category_id": food,
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "2.00",
+            "date": "2026-08-10",
+            "wallet_id": wallet_a,
+            "category_id": food,
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "3.00", "date": "2026-08-10", "wallet_id": wallet_b},
+        headers=_auth(token),
+    )
+
+    filtered = (
+        await client.get(
+            f"/transactions?wallet_id={wallet_a}&category_id={food}"
+            "&from_date=2026-08-05&to_date=2026-08-15",
+            headers=_auth(token),
+        )
+    ).json()
+
+    assert [t["amount"] for t in filtered] == ["2.00"]
+
+
+async def test_history_rejects_a_bad_date_filter(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "History Bad Date", "checking", "0.00")
+
+    response = await client.get(
+        f"/transactions?wallet_id={wallet_id}&from_date=06/08/2026", headers=_auth(token)
+    )
+
+    assert response.status_code == 422
+
+
+async def test_history_foreign_category_filter_is_forbidden(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "History Foreign Cat", "checking", "0.00")
+    account_id = insert_foreign_account(database_url, "history-spy@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            category = Category(
+                account_id=account_id,
+                name="Their History",
+                type=CategoryType.EXPENSE.value,
+                color="#000000",
+            )
+            session.add(category)
+            session.commit()
+            category_id = category.id
+
+        engine.dispose()
+        response = await client.get(
+            f"/transactions?wallet_id={wallet_id}&category_id={category_id}",
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 403
+    finally:
+        delete_account(database_url, account_id)

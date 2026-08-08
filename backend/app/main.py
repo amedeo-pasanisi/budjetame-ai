@@ -20,6 +20,7 @@ def create_app(
     app = FastAPI(title="Budjetame API", version="0.1.0")
     engine = create_db_engine(database_url or settings.database_url)
     app.state.sessionmaker = sessionmaker(bind=engine, expire_on_commit=False)
+    app.state.engine = engine  # tests dispose it at teardown to release the pool
 
     seed_account(
         app.state.sessionmaker,

@@ -46,21 +46,30 @@ async def client(database_url: str) -> Iterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client
+    # Close this test's engine pool at teardown: the container allows 100
+    # connections, and un-disposed pools across 100+ tests would exhaust it.
+    app.state.engine.dispose()
 
 
 def insert_foreign_account(database_url: str, email: str) -> int:
     """Fixture helper: a second Account, for ADR-0003 scoping tests."""
     engine = create_db_engine(database_url)
-    with Session(engine) as session:
-        account = Account(email=email, password_hash=hash_password("whatever"))
-        session.add(account)
-        session.commit()
-        return account.id
+    try:
+        with Session(engine) as session:
+            account = Account(email=email, password_hash=hash_password("whatever"))
+            session.add(account)
+            session.commit()
+            return account.id
+    finally:
+        engine.dispose()
 
 
 def delete_account(database_url: str, account_id: int) -> None:
     """Tear down a fixture Account; its owned rows cascade (ondelete=CASCADE)."""
     engine = create_db_engine(database_url)
-    with Session(engine) as session:
-        session.delete(session.get(Account, account_id))
-        session.commit()
+    try:
+        with Session(engine) as session:
+            session.delete(session.get(Account, account_id))
+            session.commit()
+    finally:
+        engine.dispose()

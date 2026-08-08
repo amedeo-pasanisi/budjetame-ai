@@ -24,18 +24,22 @@ def _insert_foreign_wallet(database_url: str) -> tuple[int, int]:
     """Fixture: a second Account owning a Wallet, for ADR-0003 scoping tests."""
     account_id = insert_foreign_account(database_url, "stranger@budjetame.dev")
     engine = create_db_engine(database_url)
-    with Session(engine) as session:
-        wallet = Wallet(
-            account_id=account_id,
-            name="Stranger Wallet",
-            type=WalletType.CASH.value,
-        )
-        session.add(wallet)
-        session.commit()
-        return account_id, wallet.id
+    try:
+        with Session(engine) as session:
+            wallet = Wallet(
+                account_id=account_id,
+                name="Stranger Wallet",
+                type=WalletType.CASH.value,
+            )
+            session.add(wallet)
+            session.commit()
+            return account_id, wallet.id
+    finally:
+        engine.dispose()
 
 
 
+    engine.dispose()
 async def test_wallets_require_authentication(client: AsyncClient) -> None:
     assert (await client.get("/wallets")).status_code == 401
     assert (
@@ -274,6 +278,7 @@ async def test_balance_is_derived_from_transactions(client: AsyncClient, databas
         )
         session.commit()
 
+    engine.dispose()
     listed = (await client.get("/wallets", headers=_auth(token))).json()
     assert next(w for w in listed if w["id"] == wallet_id)["balance"] == "125.50"
 
@@ -406,3 +411,26 @@ async def test_freezing_does_not_change_other_wallet_balances(
     }
     assert target_id not in after
     assert after[other_id] == before[other_id]
+
+
+async def test_list_wallets_can_include_frozen_wallets(client: AsyncClient) -> None:
+    """T8's history screen must be able to reach a frozen Wallet's history, so
+    `GET /wallets?include_frozen=true` returns frozen Wallets with `frozen:
+    true`. The default list stays frozen-hidden (ADR-0002)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Historic", "cash")
+    active_id = await _create_wallet_via_api(client, token, "Still Active", "cash")
+    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    assert frozen.status_code == 204
+
+    default = (await client.get("/wallets", headers=_auth(token))).json()
+    assert all(w["id"] != wallet_id for w in default)
+
+    included = (
+        await client.get("/wallets?include_frozen=true", headers=_auth(token))
+    ).json()
+    historic = next(w for w in included if w["id"] == wallet_id)
+    assert historic["frozen"] is True
+    active = next(w for w in included if w["id"] == active_id)
+    assert active["frozen"] is False
+    assert all(w["balance"] is not None for w in included)

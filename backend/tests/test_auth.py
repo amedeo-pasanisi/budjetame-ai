@@ -53,6 +53,7 @@ async def test_seeded_account_exists_exactly_once_with_a_hashed_password(
             select(Account.password_hash).where(Account.email == SEED_EMAIL)
         ).scalar_one()
 
+    engine.dispose()
     assert count == 1
     assert stored != SEED_PASSWORD
     assert bcrypt.checkpw(SEED_PASSWORD.encode(), stored.encode())

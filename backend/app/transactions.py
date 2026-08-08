@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,9 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_account
-from app.dates import to_rome_day
+from app.dates import from_rome_day, to_rome_day
 from app.deps import get_session
-from app.models import Account, Transaction, TransactionType, Wallet, WalletType
+from app.models import Account, Category, Transaction, TransactionType, Wallet, WalletType
 from app.schemas import (
     TransactionCreate,
     TransactionOut,
@@ -18,6 +19,16 @@ from app.services import transactions as transaction_service
 from app.services import wallets as wallet_service
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+
+def _rome_day_or_422(value: str) -> datetime:
+    """Parse a `YYYY-MM-DD` filter bound as a Europe/Rome day, or 422."""
+    try:
+        return from_rome_day(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail="Dates must be YYYY-MM-DD"
+        ) from None
 
 
 def _owned_transaction_or_403(
@@ -85,9 +96,15 @@ def _transaction_out(
 @router.get("", response_model=list[TransactionOut])
 def list_transactions(
     wallet_id: int | None = None,
+    category_id: int | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
 ) -> list[TransactionOut]:
+    """The history listing (T8): filters compose — a Wallet (including frozen
+    Wallets, whose history stays viewable), a Category, and a Europe/Rome
+    inclusive date range (`YYYY-MM-DD` days)."""
     stmt = select(Transaction).where(Transaction.account_id == account.id)
     if wallet_id is not None:
         wallet = session.get(Wallet, wallet_id)
@@ -99,6 +116,16 @@ def list_transactions(
             | (Transaction.source_wallet_id == wallet_id)
             | (Transaction.destination_wallet_id == wallet_id)
         )
+    if category_id is not None:
+        category = session.get(Category, category_id)
+        if category is None or category.account_id != account.id:
+            raise HTTPException(status_code=403, detail="Category not found")
+        stmt = stmt.where(Transaction.category_id == category_id)
+    if from_date is not None:
+        stmt = stmt.where(Transaction.date >= _rome_day_or_422(from_date))
+    if to_date is not None:
+        # Inclusive upper bound: strictly before the next Rome day.
+        stmt = stmt.where(Transaction.date < _rome_day_or_422(to_date) + timedelta(days=1))
     transactions = session.scalars(
         stmt.order_by(Transaction.date.desc(), Transaction.id.desc())
     ).all()

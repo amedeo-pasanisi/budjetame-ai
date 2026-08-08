@@ -318,6 +318,7 @@ async def test_delete_category_uncategorizes_its_transactions(
         session.commit()
         transaction_id = transaction.id
 
+    engine.dispose()
     response = await client.delete(f"/categories/{category_id}", headers=_auth(token))
 
     assert response.status_code == 204
@@ -343,6 +344,7 @@ async def test_foreign_category_returns_403(client: AsyncClient, database_url: s
             session.commit()
             category_id = category.id
 
+        engine.dispose()
         patch = await client.patch(
             f"/categories/{category_id}",
             json={"name": "Hijacked"},
@@ -375,6 +377,7 @@ async def test_list_never_includes_foreign_categories(
             )
             session.commit()
 
+        engine.dispose()
         response = await client.get("/categories", headers=_auth(token))
         assert response.status_code == 200
         names = [c["name"] for c in response.json()]
