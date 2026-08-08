@@ -9,6 +9,7 @@ import {
   type Transaction,
   type Wallet,
 } from './api'
+import { ImportScreen } from './ImportScreen'
 import {
   TransactionForm,
 } from './TransactionForm'
@@ -22,6 +23,7 @@ export function TransactionsScreen() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const reload = () => {
     setLoadError(null)
@@ -62,9 +64,30 @@ export function TransactionsScreen() {
 
   return (
     <>
-      <h2 className="font-semibold text-slate-900">Transactions</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-slate-900">Transactions</h2>
+        {!importing && (
+          <button
+            type="button"
+            onClick={() => setImporting(true)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
+          >
+            Import
+          </button>
+        )}
+      </div>
 
-      {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
+      {importing ? (
+        <ImportScreen
+          onBack={() => setImporting(false)}
+          onDone={() => {
+            setImporting(false)
+            reload()
+          }}
+        />
+      ) : (
+        <>
+          {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
       {savedWarning !== null && (
         <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {savedWarning}
@@ -148,5 +171,7 @@ export function TransactionsScreen() {
         </>
       )}
     </>
-  )
+  )}
+  </>
+)
 }

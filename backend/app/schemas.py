@@ -275,6 +275,110 @@ class ExpenseTrend(BaseModel):
     months: list[MonthBucket]
 
 
+class ImportRow(BaseModel):
+    """One row of an import preview (T13): the extracted template fields plus
+    the pipeline's verdict. `status` is "ok" (ready to insert), "error" (a
+    parse or rule failure, detailed in `error`), or "duplicate" (a row already
+    in the database, keyed per the spec); `row` is the file's line number (the
+    header is line 1). Fields that failed to parse are null."""
+
+    row: int
+    status: Literal["ok", "error", "duplicate"] = "ok"
+    type: str | None = None
+    date: str | None = None
+    amount: Decimal | None = None
+    wallet: str | None = None
+    source_wallet: str | None = None
+    destination_wallet: str | None = None
+    category: str | None = None
+    description: str | None = None
+    latitude: str | None = None
+    longitude: str | None = None
+    error: str | None = None
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(Decimal("0.01"))
+
+
+class ImportPreview(BaseModel):
+    """The validated extract of an uploaded file (T13): every row with its
+    verdict and the counts. Nothing is inserted by this step."""
+
+    rows: list[ImportRow]
+    ok_count: int
+    error_count: int
+    duplicate_count: int
+
+
+class ImportRowInput(BaseModel):
+    """A row the user confirmed for insertion (T13). The fields mirror the
+    template's columns as extracted — names, not ids: the backend re-resolves
+    names and re-runs every rule before anything is written."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    row: int | None = Field(default=None, ge=1)
+    type: Literal["expense", "income", "transfer"]
+    amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
+    date: str
+    wallet: str | None = None
+    source_wallet: str | None = None
+    destination_wallet: str | None = None
+    category: str | None = None
+    description: str | None = Field(default=None, max_length=500)
+    latitude: str | None = None
+    longitude: str | None = None
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal) -> Decimal:
+        """The file's amounts are euros: normalize to cents so duplicate keys
+        and the Numeric(12, 2) column agree ("12.501" lands as "12.50")."""
+        return value.quantize(Decimal("0.01"))
+
+    @field_validator("date")
+    @classmethod
+    def _date_is_a_rome_day(cls, value: str) -> str:
+        return _valid_rome_day(value)
+
+    @field_validator("latitude")
+    @classmethod
+    def _latitude_in_range(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not -90 <= Decimal(value) <= 90:
+            raise ValueError("latitude must be between -90 and 90")
+        return value
+
+    @field_validator("longitude")
+    @classmethod
+    def _longitude_in_range(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not -180 <= Decimal(value) <= 180:
+            raise ValueError("longitude must be between -180 and 180")
+        return value
+
+    @model_validator(mode="after")
+    def _location_is_a_pair(self) -> "ImportRowInput":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be set together")
+        return self
+
+
+class ImportConfirmRequest(BaseModel):
+    """The rows the user confirmed (T13): the subset of the preview they kept.
+    The insert is transactional — any invalid row rejects the whole batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[ImportRowInput]
+
+
 class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet

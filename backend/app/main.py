@@ -6,6 +6,7 @@ from app.categories import router as categories_router
 from app.config import settings
 from app.dashboard import router as dashboard_router
 from app.db import check_connection, create_db_engine
+from app.imports import router as imports_router
 from app.seed import seed_account
 from app.transactions import router as transactions_router
 from app.wallets import router as wallets_router
@@ -34,6 +35,7 @@ def create_app(
     app.include_router(categories_router)
     app.include_router(transactions_router)
     app.include_router(dashboard_router)
+    app.include_router(imports_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

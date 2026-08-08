@@ -115,6 +115,7 @@ def create_transaction(
     description: str | None = None,
     latitude: Decimal | None = None,
     longitude: Decimal | None = None,
+    commit: bool = True,
 ) -> Transaction:
     if type == TransactionType.TRANSFER.value:
         if source_wallet_id is None or destination_wallet_id is None:
@@ -163,8 +164,11 @@ def create_transaction(
             longitude=longitude,
         )
     session.add(transaction)
-    session.commit()
-    session.refresh(transaction)
+    if commit:
+        # The import pipeline (T13) calls this with commit=False to insert many
+        # rows in one transaction; the caller commits once (or rolls back).
+        session.commit()
+        session.refresh(transaction)
     return transaction
 
 

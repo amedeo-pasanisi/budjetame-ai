@@ -401,4 +401,86 @@ export async function deleteTransaction(token: string, transactionId: number): P
   }
 }
 
+// --- Import (T13): upload / validate / confirm against the fixed template ---
+
+export type ImportRowStatus = 'ok' | 'error' | 'duplicate'
+
+export type ImportRow = {
+  row: number
+  status: ImportRowStatus
+  type: string | null
+  date: string | null
+  amount: string | null
+  wallet: string | null
+  source_wallet: string | null
+  destination_wallet: string | null
+  category: string | null
+  description: string | null
+  latitude: string | null
+  longitude: string | null
+  error: string | null
+}
+
+export type ImportPreview = {
+  rows: ImportRow[]
+  ok_count: number
+  error_count: number
+  duplicate_count: number
+}
+
+/** A row the user kept, echoed back for confirmation: names, not ids — the
+ * backend re-resolves them and re-runs every rule before writing anything. */
+export type ImportRowInput = {
+  row?: number
+  type: 'expense' | 'income' | 'transfer'
+  date: string
+  amount: string
+  wallet: string | null
+  source_wallet: string | null
+  destination_wallet: string | null
+  category: string | null
+  description: string | null
+  latitude: string | null
+  longitude: string | null
+}
+
+/** The backend's error detail, when it carries one (e.g. "Unknown wallet
+ * 'X'"); the generic fallback otherwise. */
+async function detailOr(response: Response, fallback: string): Promise<string> {
+  const body = (await response.json().catch(() => null)) as { detail?: unknown } | null
+  if (body !== null && typeof body.detail === 'string' && body.detail !== '') {
+    return body.detail
+  }
+  return fallback
+}
+
+export async function previewImport(token: string, file: File): Promise<ImportPreview> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  const response = await fetch(`${API_BASE}/import/preview`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (!response.ok) {
+    throw new ApiError(await detailOr(response, 'Could not read the file'), response.status)
+  }
+  return (await response.json()) as ImportPreview
+}
+
+export async function confirmImport(
+  token: string,
+  rows: ImportRowInput[],
+): Promise<Transaction[]> {
+  const response = await fetch(`${API_BASE}/import/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ rows }),
+  })
+  if (!response.ok) {
+    throw new ApiError(await detailOr(response, 'Could not confirm the import'), response.status)
+  }
+  return (await response.json()) as Transaction[]
+}
+
 
