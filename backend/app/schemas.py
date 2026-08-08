@@ -213,6 +213,24 @@ class TransactionUpdate(BaseModel):
         return self
 
 
+class DashboardSummary(BaseModel):
+    """The Dashboard overview (T10): Net Worth — the algebraic sum of all
+    Wallet balances, Contact and frozen (always €0) Wallets included — and the
+    current Europe/Rome month's Income and Expense totals. Opening Balance
+    Transactions never count toward the statistics; Transfers are excluded by
+    construction."""
+
+    net_worth: Decimal
+    month: str
+    income: Decimal
+    expenses: Decimal
+
+    @field_validator("net_worth", "income", "expenses")
+    @classmethod
+    def _euros(cls, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
+
+
 class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet

@@ -28,6 +28,13 @@ export type Category = {
 
 export type TransactionType = 'expense' | 'income' | 'transfer' | 'opening_balance'
 
+export type DashboardSummary = {
+  net_worth: string
+  month: string
+  income: string
+  expenses: string
+}
+
 export type Transaction = {
   id: number
   type: TransactionType
@@ -113,6 +120,16 @@ export async function fetchCurrentAccount(token: string): Promise<Account> {
     throw new ApiError('Not authenticated', response.status)
   }
   return (await response.json()) as Account
+}
+
+export async function fetchDashboardSummary(token: string): Promise<DashboardSummary> {
+  const response = await fetch(`${API_BASE}/dashboard/summary`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new ApiError('Could not load the dashboard', response.status)
+  }
+  return (await response.json()) as DashboardSummary
 }
 
 export async function fetchWallets(token: string, includeFrozen = false): Promise<Wallet[]> {

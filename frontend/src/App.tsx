@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
+import { DashboardScreen } from './DashboardScreen'
 import { HistoryScreen } from './HistoryScreen'
 import { LoginForm } from './LoginForm'
 import { Screen } from './Screen'
@@ -13,7 +14,7 @@ type AuthState =
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; account: Account }
 
-type Tab = 'wallets' | 'transactions' | 'history' | 'categories'
+type Tab = 'dashboard' | 'wallets' | 'transactions' | 'history' | 'categories'
 
 function App() {
   const [auth, setAuth] = useState<AuthState>(() =>
@@ -78,10 +79,10 @@ function AppShell({
   email: string
   onSignOut: () => void
 }) {
-  const [tab, setTab] = useState<Tab>('wallets')
+  const [tab, setTab] = useState<Tab>('dashboard')
 
   return (
-    <div className="min-h-svh bg-slate-50 px-4 py-6">
+    <div className="min-h-svh bg-slate-50 px-4 pt-6 pb-24">
       <header className="mx-auto flex max-w-sm items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Budjetame</h1>
@@ -96,27 +97,38 @@ function AppShell({
         </button>
       </header>
 
-      <nav className="mx-auto mt-5 flex max-w-sm gap-2 rounded-xl border border-slate-200 bg-white p-1">
-        <TabButton active={tab === 'wallets'} onClick={() => setTab('wallets')}>
-          Wallets
-        </TabButton>
-        <TabButton active={tab === 'transactions'} onClick={() => setTab('transactions')}>
-          Transactions
-        </TabButton>
-        <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
-          History
-        </TabButton>
-        <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
-          Categories
-        </TabButton>
-      </nav>
-
       <main className="mx-auto mt-6 max-w-sm">
+        {tab === 'dashboard' && <DashboardScreen />}
         {tab === 'wallets' && <WalletsScreen />}
         {tab === 'transactions' && <TransactionsScreen />}
         {tab === 'history' && <HistoryScreen />}
         {tab === 'categories' && <CategoriesScreen />}
       </main>
+
+      {/* Five destinations no longer fit one top row on a phone, so the nav
+       * is a bottom tab bar (T10): full-width, five equal columns. */}
+      <nav className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white">
+        <div className="mx-auto grid max-w-sm grid-cols-5 gap-0.5 px-2 py-1.5">
+          <TabButton active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
+            Dashboard
+          </TabButton>
+          <TabButton active={tab === 'wallets'} onClick={() => setTab('wallets')}>
+            Wallets
+          </TabButton>
+          <TabButton
+            active={tab === 'transactions'}
+            onClick={() => setTab('transactions')}
+          >
+            Transactions
+          </TabButton>
+          <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
+            History
+          </TabButton>
+          <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
+            Categories
+          </TabButton>
+        </div>
+      </nav>
     </div>
   )
 }
@@ -134,7 +146,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
+      className={`truncate rounded-lg px-0.5 py-2 text-[11px] font-medium ${
         active ? 'bg-indigo-600 text-white' : 'text-slate-600'
       }`}
     >
