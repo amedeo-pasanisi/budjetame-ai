@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Numeric, String, Text, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -67,6 +67,11 @@ class Wallet(Base):
     )
     name: Mapped[str] = mapped_column(String(80))
     type: Mapped[str] = mapped_column(String(20))
+    # A frozen (deleted) Wallet is hidden from the UI but stays in the database;
+    # every write against it or its Transactions is rejected (ADR-0002).
+    frozen: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

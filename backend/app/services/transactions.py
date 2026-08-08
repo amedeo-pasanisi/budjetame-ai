@@ -11,6 +11,7 @@ Transactions are created by the Wallet lifecycle and are read-only here.
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dates import from_rome_day
@@ -41,6 +42,25 @@ def _owned_category_or_raise(
     return category
 
 
+def _ensure_wallet_writable(wallet: Wallet) -> None:
+    """Raise when the Wallet is frozen (ADR-0002): no new Transactions can be
+    created on it and its existing Transactions can neither be edited nor
+    deleted."""
+    if wallet.frozen:
+        raise TransactionRuleError("Frozen Wallets are read-only")
+
+
+def _locked_wallet(session: Session, wallet_id: int) -> Wallet:
+    """The Wallet row locked FOR UPDATE, so that writes on it serialize with a
+    concurrent freeze (whose Balance check must not see a stale sum)."""
+    wallet = session.scalar(
+        select(Wallet).where(Wallet.id == wallet_id).with_for_update()
+    )
+    # A Transaction's Wallet always exists: wallets are never hard-deleted
+    # (ADR-0002), and every write validates ownership first.
+    assert wallet is not None
+    return wallet
+
 def _check_category_matches(session: Session, account_id: int, category_id: int, type: str) -> None:
     category = _owned_category_or_raise(session, account_id, category_id)
     if category.type != type:
@@ -63,6 +83,8 @@ def create_transaction(
     longitude: Decimal | None = None,
 ) -> Transaction:
     wallet = _owned_wallet_or_raise(session, account_id, wallet_id)
+    wallet = _locked_wallet(session, wallet.id)
+    _ensure_wallet_writable(wallet)
     if wallet.type == WalletType.CONTACT.value:
         raise TransactionRuleError(
             "Contact Wallets only participate in Transfers"
@@ -96,6 +118,9 @@ def update_transaction(
     if transaction.type not in (TransactionType.EXPENSE.value, TransactionType.INCOME.value):
         raise TransactionRuleError("Opening Balance Transactions are read-only")
 
+    wallet = _locked_wallet(session, transaction.wallet_id)
+    _ensure_wallet_writable(wallet)
+
     if "category_id" in changes:
         category_id = changes["category_id"]
         if category_id is not None:
@@ -126,5 +151,7 @@ def update_transaction(
 def delete_transaction(session: Session, transaction: Transaction) -> None:
     if transaction.type not in (TransactionType.EXPENSE.value, TransactionType.INCOME.value):
         raise TransactionRuleError("Opening Balance Transactions are read-only")
+    wallet = _locked_wallet(session, transaction.wallet_id)
+    _ensure_wallet_writable(wallet)
     session.delete(transaction)
     session.commit()

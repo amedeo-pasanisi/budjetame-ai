@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -628,4 +630,88 @@ async def test_opening_balance_transactions_are_read_only(client: AsyncClient) -
     assert patch.status_code == 422
     assert delete.status_code == 422
     assert await _wallet_balance(client, token, wallet_id) == "100.00"
+
+
+# --- T6: writes against frozen Wallets are rejected (ADR-0002) ---
+
+
+async def _freeze_wallet(client: AsyncClient, token: str, wallet_id: int) -> None:
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    assert response.status_code == 204
+
+
+async def test_frozen_wallet_rejects_new_transactions(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Frozen Create Wallet", "checking", "0.00")
+    await _freeze_wallet(client, token, wallet_id)
+
+    response = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_frozen_wallet_transactions_cannot_be_edited_or_deleted(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Frozen Edit Wallet", "checking", "100.00")
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "30.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+    # Bring the Wallet to exactly €0 so freezing is allowed: a second expense of 70.
+    await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "70.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    await _freeze_wallet(client, token, wallet_id)
+
+    patch = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"amount": "5.00"},
+        headers=_auth(token),
+    )
+    delete = await client.delete(f"/transactions/{transaction_id}", headers=_auth(token))
+
+    assert patch.status_code == 422
+    assert delete.status_code == 422
+
+
+async def test_frozen_wallet_transactions_stay_viewable_and_net_to_zero(
+    client: AsyncClient,
+) -> None:
+    """After freezing, the Wallet is gone from the list but its Transactions are
+    still served, and they still net to €0 (ADR-0001: Balance = sum of
+    Transactions; ADR-0002: nothing can change them anymore)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Frozen View Wallet", "checking", "100.00")
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "100.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+    await _freeze_wallet(client, token, wallet_id)
+
+    listed = (
+        await client.get(f"/transactions?wallet_id={wallet_id}", headers=_auth(token))
+    ).json()
+
+    # The frozen Wallet's history stays viewable: the Opening Balance (100.00)
+    # and the Expense (100.00) both remain listed.
+    assert len(listed) == 2
+    assert any(t["id"] == transaction_id and t["type"] == "expense" for t in listed)
+    assert any(t["type"] == "opening_balance" for t in listed)
+    total = Decimal("0.00")
+    for transaction in listed:
+        amount = Decimal(transaction["amount"])
+        total += -amount if transaction["type"] == "expense" else amount
+    assert total == Decimal("0.00")
 

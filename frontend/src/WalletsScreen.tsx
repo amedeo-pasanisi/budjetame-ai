@@ -7,6 +7,7 @@ import {
   createWallet,
   fetchWallets,
   formatEuros,
+  freezeWallet,
   renameWallet,
   type Wallet,
   type WalletType,
@@ -55,6 +56,13 @@ export function WalletsScreen() {
       current === null
         ? [wallet]
         : current.map((existing) => (existing.id === wallet.id ? wallet : existing)),
+    )
+    setEditing(null)
+  }
+
+  const handleFrozen = (walletId: number) => {
+    setWallets((current) =>
+      current === null ? current : current.filter((existing) => existing.id !== walletId),
     )
     setEditing(null)
   }
@@ -114,10 +122,11 @@ export function WalletsScreen() {
       )}
 
       {editing !== null && (
-        <WalletRenameForm
+        <WalletEditForm
           key={editing.id}
           wallet={editing}
           onRenamed={handleRenamed}
+          onFrozen={handleFrozen}
           onCancel={() => setEditing(null)}
         />
       )}
@@ -235,16 +244,22 @@ function WalletCreateForm({ onCreated, onCancel }: WalletCreateFormProps) {
   )
 }
 
-type WalletRenameFormProps = {
+type WalletEditFormProps = {
   wallet: Wallet
   onRenamed: (wallet: Wallet) => void
+  onFrozen: (walletId: number) => void
   onCancel: () => void
 }
 
-function WalletRenameForm({ wallet, onRenamed, onCancel }: WalletRenameFormProps) {
+function WalletEditForm({ wallet, onRenamed, onFrozen, onCancel }: WalletEditFormProps) {
   const [name, setName] = useState(wallet.name)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [confirmingFreeze, setConfirmingFreeze] = useState(false)
+  const [freezing, setFreezing] = useState(false)
+  const [freezeError, setFreezeError] = useState<string | null>(null)
+
+  const canFreeze = Number.parseFloat(wallet.balance) === 0
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -265,12 +280,38 @@ function WalletRenameForm({ wallet, onRenamed, onCancel }: WalletRenameFormProps
     }
   }
 
+  const handleFreeze = async () => {
+    if (!canFreeze) {
+      return
+    }
+    if (!confirmingFreeze) {
+      setConfirmingFreeze(true)
+      setFreezeError(null)
+      return
+    }
+    setFreezing(true)
+    setFreezeError(null)
+    try {
+      const token = localStorage.getItem(TOKEN_KEY) ?? ''
+      await freezeWallet(token, wallet.id)
+      onFrozen(wallet.id)
+    } catch (err) {
+      setConfirmingFreeze(false)
+      setFreezeError(
+        err instanceof ApiError && err.status === 422
+          ? 'A wallet can only be frozen when its balance is exactly €0.00.'
+          : 'Could not freeze the wallet.',
+      )
+      setFreezing(false)
+    }
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
       className="mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
-      <h2 className="font-medium text-slate-900">Rename wallet</h2>
+      <h2 className="font-medium text-slate-900">Edit wallet</h2>
       <p className="text-xs text-slate-500">
         {TYPE_LABELS[wallet.type]} · type cannot be changed
       </p>
@@ -304,6 +345,33 @@ function WalletRenameForm({ wallet, onRenamed, onCancel }: WalletRenameFormProps
           className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
         >
           Cancel
+        </button>
+      </div>
+
+      <div className="border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-medium text-slate-900">Freeze wallet</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Hides the wallet and makes it read-only. Only possible at €0.00 balance;
+          its transactions stay visible.
+        </p>
+        {freezeError !== null && <p className="mt-2 text-sm text-red-600">{freezeError}</p>}
+        <button
+          type="button"
+          onClick={handleFreeze}
+          disabled={!canFreeze || freezing || submitting}
+          className={`mt-3 w-full rounded-lg border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+            confirmingFreeze
+              ? 'border-red-600 bg-red-600 text-white'
+              : 'border-red-200 text-red-600'
+          }`}
+        >
+          {freezing
+            ? 'Freezing…'
+            : !canFreeze
+              ? `Freeze requires €0.00 balance (currently ${formatEuros(wallet.balance)})`
+              : confirmingFreeze
+                ? 'Tap again to confirm freeze'
+                : 'Freeze wallet'}
         </button>
       </div>
     </form>

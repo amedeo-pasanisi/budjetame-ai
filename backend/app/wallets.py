@@ -48,7 +48,9 @@ def list_wallets(
     session: Session = Depends(get_session),
 ) -> list[WalletOut]:
     wallets = session.scalars(
-        select(Wallet).where(Wallet.account_id == account.id).order_by(Wallet.id)
+        select(Wallet)
+        .where(Wallet.account_id == account.id, Wallet.frozen.is_(False))
+        .order_by(Wallet.id)
     ).all()
     balances = wallet_service.wallet_balances(session, account.id)
     return [_wallet_out(w, balances.get(w.id, Decimal("0.00"))) for w in wallets]
@@ -84,7 +86,23 @@ def rename_wallet(
     wallet = _owned_wallet_or_403(session, account, wallet_id)
     try:
         wallet = wallet_service.rename_wallet(session, wallet, payload.name)
+    except wallet_service.FrozenWallet:
+        raise HTTPException(status_code=422, detail="Frozen Wallets are read-only")
     except (wallet_service.WalletNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
     balances = wallet_service.wallet_balances(session, account.id)
     return _wallet_out(wallet, balances.get(wallet.id, Decimal("0.00")))
+
+
+@router.delete("/{wallet_id}", status_code=204)
+def freeze_wallet(
+    wallet_id: int,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> None:
+    """Freeze (delete) a Wallet at Balance exactly €0 (ADR-0002)."""
+    wallet = _owned_wallet_or_403(session, account, wallet_id)
+    try:
+        wallet_service.freeze_wallet(session, wallet)
+    except wallet_service.WalletNotFreezable as error:
+        raise HTTPException(status_code=422, detail=str(error))

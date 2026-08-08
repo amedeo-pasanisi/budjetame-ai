@@ -54,7 +54,7 @@ export function TransactionsScreen() {
   useEffect(reload, [token])
 
   const walletName = (walletId: number): string =>
-    wallets?.find((w) => w.id === walletId)?.name ?? `Wallet #${walletId}`
+    wallets?.find((w) => w.id === walletId)?.name ?? 'Frozen wallet'
 
   const categoryName = (categoryId: number | null): string | null => {
     if (categoryId === null) return null
@@ -105,7 +105,13 @@ export function TransactionsScreen() {
           ) : (
             <ul className="mt-2 space-y-2">
               {transactions.map((transaction) => {
-                const editable = transaction.type !== 'opening_balance'
+                // A Transaction on a Wallet that is no longer in the active list
+                // belongs to a frozen Wallet (the only way a Wallet leaves the
+                // list): viewable, but neither editable nor deletable (ADR-0002).
+                const onFrozenWallet =
+                  wallets.find((w) => w.id === transaction.wallet_id) === undefined
+                const editable =
+                  transaction.type !== 'opening_balance' && !onFrozenWallet
                 const category = categoryName(transaction.category_id)
                 return (
                   <li key={transaction.id}>

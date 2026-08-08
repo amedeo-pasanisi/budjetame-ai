@@ -17,6 +17,14 @@ class WalletNameTaken(Exception):
     """A Wallet with this name (case-insensitive) already exists for the Account."""
 
 
+class WalletNotFreezable(Exception):
+    """The Wallet's Balance is not exactly €0, so it cannot be frozen (ADR-0002)."""
+
+
+class FrozenWallet(Exception):
+    """A write was attempted on a frozen Wallet (ADR-0002)."""
+
+
 def name_is_taken(
     session: Session, account_id: int, name: str, *, exclude_id: int | None = None
 ) -> bool:
@@ -59,13 +67,39 @@ def create_wallet(
 
 
 def rename_wallet(session: Session, wallet: Wallet, new_name: str) -> Wallet:
-    """Rename a Wallet. The type can never change (no parameter for it)."""
+    """Rename a Wallet. The type can never change (no parameter for it), and a
+    frozen Wallet is read-only (ADR-0002)."""
+    if wallet.frozen:
+        raise FrozenWallet()
     if name_is_taken(session, wallet.account_id, new_name, exclude_id=wallet.id):
         raise WalletNameTaken(new_name)
     wallet.name = new_name
     session.commit()
     session.refresh(wallet)
     return wallet
+
+
+def freeze_wallet(session: Session, wallet: Wallet) -> Wallet:
+    """Freeze (delete) a Wallet at Balance exactly €0 (ADR-0002). The Wallet and
+    its Transactions stay in the database; every write against it is rejected
+    afterwards, so its Balance stays €0 and Net Worth is unaffected. Freezing an
+    already-frozen Wallet is a no-op (idempotent).
+
+    The Balance check and the flag are set under a row lock on the Wallet, so a
+    concurrent Transaction write cannot commit between them and freeze a Wallet
+    at a nonzero Balance."""
+    locked = session.scalar(
+        select(Wallet).where(Wallet.id == wallet.id).with_for_update()
+    )
+    assert locked is not None
+    if wallet_balance(session, locked.account_id, locked.id) != 0:
+        raise WalletNotFreezable(
+            "Only a Wallet with balance exactly €0.00 can be frozen"
+        )
+    locked.frozen = True
+    session.commit()
+    session.refresh(locked)
+    return locked
 
 
 def _signed_amount():

@@ -140,6 +140,16 @@ export async function renameWallet(token: string, walletId: number, name: string
   return (await response.json()) as Wallet
 }
 
+export async function freezeWallet(token: string, walletId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/wallets/${walletId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new ApiError('Could not freeze wallet', response.status)
+  }
+}
+
 export async function fetchCategories(token: string): Promise<Category[]> {
   const response = await fetch(`${API_BASE}/categories`, {
     headers: { Authorization: `Bearer ${token}` },

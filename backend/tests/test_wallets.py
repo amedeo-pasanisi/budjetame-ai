@@ -255,3 +255,133 @@ async def test_balance_is_derived_from_transactions(client: AsyncClient, databas
 
     listed = (await client.get("/wallets", headers=_auth(token))).json()
     assert next(w for w in listed if w["id"] == wallet_id)["balance"] == "125.50"
+
+
+# --- T6: Wallet freeze (ADR-0002) ---
+
+
+async def _create_wallet_via_api(
+    client: AsyncClient,
+    token: str,
+    name: str,
+    type: str,
+    opening_balance: str = "0.00",
+) -> int:
+    response = await client.post(
+        "/wallets",
+        json={"name": name, "type": type, "opening_balance": opening_balance},
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_freeze_at_zero_balance_succeeds_and_hides_the_wallet(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "To Freeze", "cash")
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 204
+    listed = (await client.get("/wallets", headers=_auth(token))).json()
+    assert all(w["id"] != wallet_id for w in listed)
+
+
+async def test_freeze_is_rejected_while_balance_is_nonzero(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(
+        client, token, "Not Zero", "checking", "100.00"
+    )
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 422
+    listed = (await client.get("/wallets", headers=_auth(token))).json()
+    assert any(w["id"] == wallet_id for w in listed)
+
+
+async def test_freeze_is_allowed_when_transactions_net_to_zero(
+    client: AsyncClient,
+) -> None:
+    """A Wallet whose Transactions sum to exactly €0 (here: opening 100,
+    expense 100) can be frozen even though it has history."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(
+        client, token, "Net Zero", "checking", "100.00"
+    )
+    expense = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "100.00",
+            "date": "2026-08-06",
+            "wallet_id": wallet_id,
+        },
+        headers=_auth(token),
+    )
+    assert expense.status_code == 201
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 204
+
+
+async def test_frozen_wallet_cannot_be_renamed(client: AsyncClient) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Frozen Name", "cash")
+    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    assert frozen.status_code == 204
+
+    response = await client.patch(
+        f"/wallets/{wallet_id}", json={"name": "Renamed"}, headers=_auth(token)
+    )
+
+    assert response.status_code == 422
+
+
+async def test_freeze_foreign_wallet_returns_403(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    account_id, wallet_id = _insert_foreign_wallet(database_url)
+    try:
+        response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+        assert response.status_code == 403
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_freeze_missing_wallet_returns_403(client: AsyncClient) -> None:
+    token = await _login(client)
+
+    response = await client.delete("/wallets/999999", headers=_auth(token))
+
+    assert response.status_code == 403
+
+
+async def test_freezing_does_not_change_other_wallet_balances(
+    client: AsyncClient,
+) -> None:
+    """Net Worth is the sum of all Wallet balances; a frozen Wallet contributes
+    €0, so freezing must leave every other balance untouched (ADR-0002)."""
+    token = await _login(client)
+    other_id = await _create_wallet_via_api(
+        client, token, "Net Worth Other", "checking", "50.00"
+    )
+    target_id = await _create_wallet_via_api(client, token, "Net Worth Target", "cash")
+    before = {
+        w["id"]: w["balance"]
+        for w in (await client.get("/wallets", headers=_auth(token))).json()
+    }
+
+    frozen = await client.delete(f"/wallets/{target_id}", headers=_auth(token))
+    assert frozen.status_code == 204
+
+    after = {
+        w["id"]: w["balance"]
+        for w in (await client.get("/wallets", headers=_auth(token))).json()
+    }
+    assert target_id not in after
+    assert after[other_id] == before[other_id]
