@@ -156,6 +156,149 @@ async def test_preview_flags_duplicates_against_the_database(client: AsyncClient
     assert body["error_count"] == 0
 
 
+async def test_preview_distinguishes_expense_and_income_in_the_dedup_key(
+    client: AsyncClient,
+) -> None:
+    """The duplicate key includes the Type (documented deviation from
+    US31/ID13): a €5 Expense and a €5 Income on the same date and Wallet are
+    two different rows, not duplicates."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Type Key Checking", "checking", "0.00")
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,expense,5.00,Type Key Checking,,,,,",
+                    "2026-08-01,income,5.00,Type Key Checking,,,,,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["ok", "ok"]
+    assert body["duplicate_count"] == 0
+
+
+async def test_preview_distinguishes_expense_and_income_against_the_database(
+    client: AsyncClient,
+) -> None:
+    """The Type dimension also applies against the database: a €5 Expense in
+    the DB does not flag a €5 Income row (same date and Wallet) as a
+    duplicate, while a matching Expense row still does."""
+    token = await _login(client)
+    checking = await _create_wallet(
+        client, token, "Type Db Checking", "checking", "0.00"
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "5.00", "date": "2026-08-01",
+            "wallet_id": checking,
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,income,5.00,Type Db Checking,,,,,",
+                    "2026-08-01,expense,5.00,Type Db Checking,,,,,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["ok", "duplicate"]
+    assert body["ok_count"] == 1
+    assert body["duplicate_count"] == 1
+
+
+async def test_preview_flags_same_type_duplicates_with_a_category(
+    client: AsyncClient,
+) -> None:
+    """Two rows of the SAME type with the same date, amount, Wallet, and
+    Category ARE duplicates — the Type dimension separates Expense from Income
+    without weakening the existing key."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Same Type Checking", "checking", "0.00")
+    await _create_category(client, token, "Same Type Food", "expense")
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,expense,5.00,Same Type Checking,,,Same Type Food,,",
+                    "2026-08-01,expense,5.00,Same Type Checking,,,Same Type Food,,",
+                    "2026-08-01,income,5.00,Same Type Checking,,,,,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    # The first same-type row is the one the user keeps; its repeat is a
+    # duplicate, while the cross-type Income row with the same date, amount,
+    # and Wallet stays ok.
+    assert [row["status"] for row in body["rows"]] == ["ok", "duplicate", "ok"]
+    assert body["duplicate_count"] == 1
+    assert body["ok_count"] == 2
+
+
+async def test_confirm_inserts_cross_type_rows_with_the_same_key(
+    client: AsyncClient,
+) -> None:
+    """Confirming a €5 Expense and a €5 Income with the same date and Wallet
+    writes both — they are distinct rows, not duplicates (the key includes the
+    Type). Confirming the same rows again then duplicates in the database and
+    the batch is rejected."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Type Confirm Checking", "checking", "0.00")
+    preview = await _preview(
+        client,
+        token,
+        "2026-08-01,expense,5.00,Type Confirm Checking,,,,,",
+        "2026-08-01,income,5.00,Type Confirm Checking,,,,,",
+    )
+    assert preview["ok_count"] == 2
+
+    response = await client.post(
+        "/import/confirm",
+        json={"rows": [_to_input(row) for row in preview["rows"]]},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert len(created) == 2
+    assert {t["type"] for t in created} == {"expense", "income"}
+
+    repeated = await client.post(
+        "/import/confirm",
+        json={"rows": [_to_input(row) for row in preview["rows"]]},
+        headers=_auth(token),
+    )
+    assert repeated.status_code == 422
+
+
 async def test_preview_flags_duplicate_key_differs_by_category(
     client: AsyncClient,
 ) -> None:
@@ -309,7 +452,7 @@ async def test_preview_checks_category_type_and_wallet_rules(client: AsyncClient
     assert rows[3]["status"] == "error"
     assert "not wallet" in errors[3]
     assert rows[4]["status"] == "error"
-    assert "different wallets" in errors[4]
+    assert "different Wallets" in errors[4]
     assert rows[5]["status"] == "error"
     assert "only for Transfers" in errors[5]
     assert body["error_count"] == 6

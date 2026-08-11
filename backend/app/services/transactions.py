@@ -101,6 +101,86 @@ def _check_category_matches(session: Session, account_id: int, category_id: int,
         )
 
 
+def _check_create_rules(
+    session: Session,
+    account_id: int,
+    *,
+    type: str,
+    wallet_id: int | None,
+    source_wallet_id: int | None,
+    destination_wallet_id: int | None,
+    category_id: int | None,
+) -> tuple[Wallet, ...]:
+    """Every CONTEXT.md rule a create must satisfy, without locking or
+    inserting. Returns the Wallets the create touches (the caller locks them
+    before writing). `create_transaction` and the import pipeline's preview
+    judge a create through this one set of rules, so a typed Transaction and
+    an imported row cannot drift (T13 follow-up). The freeze rule is checked
+    here (lock-free) and again under the lock in `create_transaction`, which
+    is what serializes the write against a concurrent freeze."""
+    if type not in (
+        TransactionType.EXPENSE.value,
+        TransactionType.INCOME.value,
+        TransactionType.TRANSFER.value,
+    ):
+        raise TransactionRuleError("Type must be expense, income, or transfer")
+    if type == TransactionType.TRANSFER.value:
+        if wallet_id is not None or category_id is not None:
+            raise TransactionRuleError(
+                "Transfers use source and destination Wallets and never carry "
+                "a Category"
+            )
+        if source_wallet_id is None or destination_wallet_id is None:
+            raise TransactionRuleError("Transfers need source and destination Wallets")
+        source = _owned_wallet_or_raise(session, account_id, source_wallet_id)
+        destination = _owned_wallet_or_raise(session, account_id, destination_wallet_id)
+        if source.id == destination.id:
+            raise TransactionRuleError(
+                "Source and Destination must be different Wallets"
+            )
+        for wallet in (source, destination):
+            _ensure_wallet_writable(wallet)
+        return source, destination
+    if wallet_id is None:
+        raise TransactionRuleError("wallet_id is required for Expense and Income")
+    if source_wallet_id is not None or destination_wallet_id is not None:
+        raise TransactionRuleError(
+            "source and destination Wallets are only for Transfers"
+        )
+    wallet = _owned_wallet_or_raise(session, account_id, wallet_id)
+    _ensure_wallet_writable(wallet)
+    if wallet.type == WalletType.CONTACT.value:
+        raise TransactionRuleError("Contact Wallets only participate in Transfers")
+    if category_id is not None:
+        _check_category_matches(session, account_id, category_id, type)
+    return (wallet,)
+
+
+def validate_create(
+    session: Session,
+    account_id: int,
+    *,
+    type: str,
+    wallet_id: int | None = None,
+    source_wallet_id: int | None = None,
+    destination_wallet_id: int | None = None,
+    category_id: int | None = None,
+) -> None:
+    """Run every rule a create must satisfy, writing nothing. The import
+    pipeline's preview validates rows through this so they are judged by the
+    same rules as a typed Transaction; `create_transaction` runs the same
+    checks and then locks and inserts."""
+    _check_create_rules(
+        session,
+        account_id,
+        type=type,
+        wallet_id=wallet_id,
+        source_wallet_id=source_wallet_id,
+        destination_wallet_id=destination_wallet_id,
+        category_id=category_id,
+    )
+
+
 def create_transaction(
     session: Session,
     account_id: int,
@@ -117,18 +197,25 @@ def create_transaction(
     longitude: Decimal | None = None,
     commit: bool = True,
 ) -> Transaction:
+    # The rules are checked here (and by the import preview, through
+    # validate_create) before any lock or insert: one set of rules for every
+    # create path.
+    wallets = _check_create_rules(
+        session,
+        account_id,
+        type=type,
+        wallet_id=wallet_id,
+        source_wallet_id=source_wallet_id,
+        destination_wallet_id=destination_wallet_id,
+        category_id=category_id,
+    )
+    # Lock the touched Wallets in ascending id order and enforce the freeze
+    # rule under the lock, so the write serializes with a concurrent freeze
+    # (whose Balance check must not see a stale sum).
+    locked = _locked_wallets(session, *(wallet.id for wallet in wallets))
+    for wallet in locked.values():
+        _ensure_wallet_writable(wallet)
     if type == TransactionType.TRANSFER.value:
-        if source_wallet_id is None or destination_wallet_id is None:
-            raise TransactionRuleError("Transfers need source and destination Wallets")
-        source = _owned_wallet_or_raise(session, account_id, source_wallet_id)
-        destination = _owned_wallet_or_raise(session, account_id, destination_wallet_id)
-        if source.id == destination.id:
-            raise TransactionRuleError(
-                "Source and Destination must be different Wallets"
-            )
-        wallets = _locked_wallets(session, source.id, destination.id)
-        for wallet in wallets.values():
-            _ensure_wallet_writable(wallet)
         transaction = Transaction(
             account_id=account_id,
             type=type,
@@ -141,17 +228,6 @@ def create_transaction(
             longitude=longitude,
         )
     else:
-        if wallet_id is None:
-            raise TransactionRuleError("wallet_id is required for Expense and Income")
-        wallet = _owned_wallet_or_raise(session, account_id, wallet_id)
-        wallet = _locked_wallet(session, wallet.id)
-        _ensure_wallet_writable(wallet)
-        if wallet.type == WalletType.CONTACT.value:
-            raise TransactionRuleError(
-                "Contact Wallets only participate in Transfers"
-            )
-        if category_id is not None:
-            _check_category_matches(session, account_id, category_id, type)
         transaction = Transaction(
             account_id=account_id,
             wallet_id=wallet_id,

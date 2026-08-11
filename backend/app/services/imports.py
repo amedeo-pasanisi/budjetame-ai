@@ -4,9 +4,14 @@ wallet, source wallet, destination wallet, category, description, location),
 resolve each row against the Account, flag duplicates against the database, and
 insert the confirmed rows in one transaction.
 
-Parsing is pure (no database access). Validation and the insert apply the same
-business rules as the HTTP endpoints by reusing `services.transactions`, so a
-row an import writes behaves exactly like one typed into the form.
+Parsing is pure (no database access). Resolution maps the file's names to the
+Account's ids — unknown or frozen names are import errors here — and the
+CONTEXT.md rules themselves are enforced by `services.transactions`
+(validate_create in the preview, create_transaction at confirm), so a row an
+import writes behaves exactly like one typed into the form and the two paths
+cannot drift. Only the template-shape guards (which columns a row of a given
+Type may fill) stay here, because the service reasons in ids, not template
+columns.
 """
 
 from dataclasses import dataclass
@@ -22,7 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.dates import from_rome_day
-from app.models import Category, Transaction, TransactionType, Wallet, WalletType
+from app.models import Category, Transaction, TransactionType, Wallet
 from app.schemas import ImportRow, ImportRowInput, fmt_coord
 from app.services import transactions as transaction_service
 
@@ -276,7 +281,10 @@ def _parse_row(number: int, values: dict[str, str]) -> RawRow:
 
 def _resolve_wallet(session: Session, account_id: int, name: str) -> Wallet:
     """The Account's Wallet named `name` (unique per Account, case-insensitive),
-    or an import error naming the missing or frozen Wallet."""
+    or an import error naming the missing or frozen Wallet. The frozen check is
+    a resolution concern — the name resolved to a Wallet the import may not
+    write to — and gives a message that names the Wallet; the service's own
+    freeze rule still guards the write (validate_create / create_transaction)."""
     wallet = session.scalar(
         select(Wallet).where(
             Wallet.account_id == account_id,
@@ -326,10 +334,17 @@ def _coord(value: str | None) -> Decimal | None:
     return Decimal(value) if value is not None else None
 
 
-def _create_params(session: Session, account_id: int, raw: RawRow) -> dict[str, Any]:
-    """Resolve the row's names to ids and apply every rule from CONTEXT.md,
-    mirroring TransactionCreate's checks. Raises ImportValidationError with the
-    row's message; returns the kwargs for transaction_service.create_transaction."""
+def _resolve_row(session: Session, account_id: int, raw: RawRow) -> dict[str, Any]:
+    """Resolve the row's names to ids — the import's only job here. The
+    CONTEXT.md rules themselves are enforced by `services.transactions`
+    (validate_create / create_transaction) on the resolved ids, so a rule
+    change lands in one place and an imported row cannot drift from a typed
+    one. The guards below are template-shape rules — which COLUMNS a row of a
+    given Type may fill in the file — and stay here because the service
+    reasons in ids, not template columns.
+
+    Raises ImportValidationError with the row's message; returns the kwargs
+    for transaction_service.create_transaction / validate_create."""
     if raw.type == TransactionType.TRANSFER.value:
         if raw.wallet is not None:
             raise ImportValidationError(
@@ -337,47 +352,50 @@ def _create_params(session: Session, account_id: int, raw: RawRow) -> dict[str, 
             )
         if raw.category is not None:
             raise ImportValidationError("Transfers never carry a category")
-        if raw.source_wallet is None or raw.destination_wallet is None:
-            raise ImportValidationError(
-                "Transfer rows need source wallet and destination wallet"
-            )
-        source = _resolve_wallet(session, account_id, raw.source_wallet)
-        destination = _resolve_wallet(session, account_id, raw.destination_wallet)
-        if source.id == destination.id:
-            raise ImportValidationError(
-                "Source and destination must be different wallets"
-            )
+        source_wallet_id = (
+            _resolve_wallet(session, account_id, raw.source_wallet).id
+            if raw.source_wallet is not None
+            else None
+        )
+        destination_wallet_id = (
+            _resolve_wallet(session, account_id, raw.destination_wallet).id
+            if raw.destination_wallet is not None
+            else None
+        )
         return {
             "type": raw.type,
             "amount": raw.amount,
             "date": raw.date,
-            "source_wallet_id": source.id,
-            "destination_wallet_id": destination.id,
+            "wallet_id": None,
+            "source_wallet_id": source_wallet_id,
+            "destination_wallet_id": destination_wallet_id,
+            "category_id": None,
             "description": raw.description,
             "latitude": _coord(raw.latitude),
             "longitude": _coord(raw.longitude),
         }
-    if raw.wallet is None:
-        raise ImportValidationError("Expense and income rows need a wallet")
     if raw.source_wallet is not None or raw.destination_wallet is not None:
         raise ImportValidationError(
             "source and destination wallets are only for Transfers"
         )
-    if raw.type not in (
-        TransactionType.EXPENSE.value,
-        TransactionType.INCOME.value,
-    ):
-        raise ImportValidationError("Type must be expense, income, or transfer")
-    wallet = _resolve_wallet(session, account_id, raw.wallet)
-    if wallet.type == WalletType.CONTACT.value:
-        raise ImportValidationError("Contact Wallets only participate in Transfers")
-    category = _resolve_category(session, account_id, raw.category, type=raw.type)
+    wallet_id = None
+    if raw.wallet is not None:
+        wallet_id = _resolve_wallet(session, account_id, raw.wallet).id
+    category_id = None
+    if raw.category is not None and raw.type is not None:
+        category = _resolve_category(
+            session, account_id, raw.category, type=raw.type
+        )
+        assert category is not None  # a non-blank name either resolves or raises
+        category_id = category.id
     return {
         "type": raw.type,
         "amount": raw.amount,
         "date": raw.date,
-        "wallet_id": wallet.id,
-        "category_id": category.id if category is not None else None,
+        "wallet_id": wallet_id,
+        "source_wallet_id": None,
+        "destination_wallet_id": None,
+        "category_id": category_id,
         "description": raw.description,
         "latitude": _coord(raw.latitude),
         "longitude": _coord(raw.longitude),
@@ -387,9 +405,12 @@ def _create_params(session: Session, account_id: int, raw: RawRow) -> dict[str, 
 def _is_duplicate(
     session: Session, account_id: int, params: dict[str, Any]
 ) -> bool:
-    """A row already in the database, keyed per the spec: expense/income rows by
-    date + amount + wallet + category, transfer rows by date + amount + source +
-    destination. Opening Balance rows never match (they are not expense/income)."""
+    """A row already in the database. Expense/income rows key on date + amount
+    + type + wallet + category; transfer rows on date + amount + source +
+    destination. The Type is part of the expense/income key — a deliberate
+    deviation from the spec's literal key (US31/ID13), which lacks it and
+    would make a €5 Expense and a €5 Income on the same Wallet and Category
+    collide. Opening Balance rows never match (they are not expense/income)."""
     day = from_rome_day(params["date"])
     stmt = (
         select(Transaction.id)
@@ -409,9 +430,7 @@ def _is_duplicate(
         )
     else:
         stmt = stmt.where(
-            Transaction.type.in_(
-                [TransactionType.EXPENSE.value, TransactionType.INCOME.value]
-            ),
+            Transaction.type == params["type"],
             Transaction.wallet_id == params["wallet_id"],
         )
         if params["category_id"] is None:
@@ -422,10 +441,11 @@ def _is_duplicate(
 
 
 def _duplicate_key(params: dict[str, Any]) -> tuple:
-    """The documented duplicate key, as a comparable tuple: expense/income rows
-    key on date + amount + wallet + category, transfer rows on date + amount +
-    source + destination (T13). The amount is quantized so "12.5" and "12.50"
-    key identically."""
+    """The duplicate key, as a comparable tuple — keyed exactly as
+    `_is_duplicate` queries it, including the Type dimension (the US31/ID13
+    deviation rationale lives there). The in-file `seen` set uses this so a
+    row repeated in the file is flagged like one already in the database. The
+    amount is quantized so "12.5" and "12.50" key identically."""
     amount = params["amount"].quantize(Decimal("0.01"))
     if params["type"] == TransactionType.TRANSFER.value:
         return (
@@ -436,7 +456,7 @@ def _duplicate_key(params: dict[str, Any]) -> tuple:
             params["destination_wallet_id"],
         )
     return (
-        "expense/income",
+        params["type"],
         params["date"],
         amount,
         params["wallet_id"],
@@ -476,8 +496,21 @@ def preview_rows(
             row.error = raw.error
         else:
             try:
-                params = _create_params(session, account_id, raw)
-            except ImportValidationError as error:
+                params = _resolve_row(session, account_id, raw)
+                transaction_service.validate_create(
+                    session,
+                    account_id,
+                    type=params["type"],
+                    wallet_id=params["wallet_id"],
+                    source_wallet_id=params["source_wallet_id"],
+                    destination_wallet_id=params["destination_wallet_id"],
+                    category_id=params["category_id"],
+                )
+            except (
+                ImportValidationError,
+                transaction_service.TransactionRuleError,
+                transaction_service.NotOwned,
+            ) as error:
                 row.status = "error"
                 row.error = str(error)
             else:
@@ -513,7 +546,7 @@ def confirm_rows(
                 latitude=item.latitude,
                 longitude=item.longitude,
             )
-            params = _create_params(session, account_id, raw)
+            params = _resolve_row(session, account_id, raw)
             if _is_duplicate(session, account_id, params):
                 raise ImportValidationError(
                     f"Row {item.row or '?'} duplicates an existing transaction"

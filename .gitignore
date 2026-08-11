@@ -20,3 +20,6 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+budget_import.csv
+.pi-subagents
