@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -15,7 +14,7 @@ from app.schemas import (
     TransactionUpdate,
     fmt_coord,
 )
-from app.services import transactions as transaction_service
+from app.services import scoping, transactions as transaction_service
 from app.services import wallets as wallet_service
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -36,10 +35,10 @@ def _owned_transaction_or_403(
 ) -> Transaction:
     """The Account's Transaction, or 403 — including for transactions that don't
     exist, so foreign data is never distinguishable from absent data (ADR-0003)."""
-    transaction = session.get(Transaction, transaction_id)
-    if transaction is None or transaction.account_id != account.id:
-        raise HTTPException(status_code=403, detail="Transaction not found")
-    return transaction
+    try:
+        return scoping.owned_or_raise(session, Transaction, account.id, transaction_id)
+    except scoping.NotOwned:
+        raise HTTPException(status_code=403, detail="Transaction not found") from None
 
 
 def _transaction_out(
@@ -107,9 +106,10 @@ def list_transactions(
     inclusive date range (`YYYY-MM-DD` days)."""
     stmt = select(Transaction).where(Transaction.account_id == account.id)
     if wallet_id is not None:
-        wallet = session.get(Wallet, wallet_id)
-        if wallet is None or wallet.account_id != account.id:
-            raise HTTPException(status_code=403, detail="Wallet not found")
+        try:
+            scoping.owned_or_raise(session, Wallet, account.id, wallet_id)
+        except scoping.NotOwned:
+            raise HTTPException(status_code=403, detail="Wallet not found") from None
         # A Wallet's history includes Transfers touching it on either leg.
         stmt = stmt.where(
             (Transaction.wallet_id == wallet_id)
@@ -117,9 +117,10 @@ def list_transactions(
             | (Transaction.destination_wallet_id == wallet_id)
         )
     if category_id is not None:
-        category = session.get(Category, category_id)
-        if category is None or category.account_id != account.id:
-            raise HTTPException(status_code=403, detail="Category not found")
+        try:
+            scoping.owned_or_raise(session, Category, account.id, category_id)
+        except scoping.NotOwned:
+            raise HTTPException(status_code=403, detail="Category not found") from None
         stmt = stmt.where(Transaction.category_id == category_id)
     if from_date is not None:
         stmt = stmt.where(Transaction.date >= _rome_day_or_422(from_date))
@@ -153,7 +154,7 @@ def create_transaction(
             latitude=payload.latitude,
             longitude=payload.longitude,
         )
-    except transaction_service.NotOwned:
+    except scoping.NotOwned:
         raise HTTPException(status_code=403, detail="Wallet or Category not found")
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
@@ -175,7 +176,7 @@ def update_transaction(
             transaction,
             changes=payload.model_dump(exclude_unset=True),
         )
-    except transaction_service.NotOwned:
+    except scoping.NotOwned:
         raise HTTPException(status_code=403, detail="Wallet or Category not found")
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))

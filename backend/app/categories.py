@@ -7,7 +7,7 @@ from app.auth import get_current_account
 from app.deps import get_session
 from app.models import Account, Category, CategoryType
 from app.schemas import CategoryCreate, CategoryOut, CategoryUpdate
-from app.services import categories as category_service
+from app.services import categories as category_service, scoping
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
@@ -17,10 +17,10 @@ def _owned_category_or_403(
 ) -> Category:
     """The Account's Category, or 403 — including for categories that don't exist,
     so foreign data is never distinguishable from absent data (ADR-0003)."""
-    category = session.get(Category, category_id)
-    if category is None or category.account_id != account.id:
-        raise HTTPException(status_code=403, detail="Category not found")
-    return category
+    try:
+        return scoping.owned_or_raise(session, Category, account.id, category_id)
+    except scoping.NotOwned:
+        raise HTTPException(status_code=403, detail="Category not found") from None
 
 
 def _category_out(category: Category) -> CategoryOut:

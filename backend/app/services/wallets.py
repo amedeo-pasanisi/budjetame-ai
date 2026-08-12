@@ -11,6 +11,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Transaction, TransactionType, Wallet, WalletType
+from app.services import scoping
 
 
 class WalletNameTaken(Exception):
@@ -29,19 +30,6 @@ class ContactWalletOpeningBalance(Exception):
     """Contact Wallets start at €0: money moves in and out only via Transfers."""
 
 
-def name_is_taken(
-    session: Session, account_id: int, name: str, *, exclude_id: int | None = None
-) -> bool:
-    """True when another Wallet of the Account already has `name`, case-insensitively."""
-    stmt = select(Wallet.id).where(
-        Wallet.account_id == account_id,
-        func.lower(Wallet.name) == func.lower(name),
-    )
-    if exclude_id is not None:
-        stmt = stmt.where(Wallet.id != exclude_id)
-    return session.scalar(stmt) is not None
-
-
 def create_wallet(
     session: Session,
     account_id: int,
@@ -55,7 +43,7 @@ def create_wallet(
     without a Transfer, breaking "money moves only via Transfers" (CONTEXT.md)."""
     if type == WalletType.CONTACT and opening_balance > 0:
         raise ContactWalletOpeningBalance()
-    if name_is_taken(session, account_id, name):
+    if scoping.name_is_taken(session, Wallet, account_id, name):
         raise WalletNameTaken(name)
     wallet = Wallet(account_id=account_id, name=name, type=type.value)
     session.add(wallet)
@@ -79,7 +67,9 @@ def rename_wallet(session: Session, wallet: Wallet, new_name: str) -> Wallet:
     frozen Wallet is read-only (ADR-0002)."""
     if wallet.frozen:
         raise FrozenWallet()
-    if name_is_taken(session, wallet.account_id, new_name, exclude_id=wallet.id):
+    if scoping.name_is_taken(
+        session, Wallet, wallet.account_id, new_name, exclude_id=wallet.id
+    ):
         raise WalletNameTaken(new_name)
     wallet.name = new_name
     session.commit()

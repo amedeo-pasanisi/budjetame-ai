@@ -9,7 +9,6 @@ Transactions of its Type; Opening Balance Transactions are created by the
 Wallet lifecycle and are read-only here.
 """
 
-from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -17,30 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.dates import from_rome_day
 from app.models import Category, Transaction, TransactionType, Wallet, WalletType
-
-
-class NotOwned(Exception):
-    """A referenced Wallet, Category, or Transaction belongs to another Account."""
+from app.services.scoping import owned_or_raise
 
 
 class TransactionRuleError(Exception):
     """A CONTEXT.md rule rejects the write; maps to 422 with the message."""
-
-
-def _owned_wallet_or_raise(session: Session, account_id: int, wallet_id: int) -> Wallet:
-    wallet = session.get(Wallet, wallet_id)
-    if wallet is None or wallet.account_id != account_id:
-        raise NotOwned()
-    return wallet
-
-
-def _owned_category_or_raise(
-    session: Session, account_id: int, category_id: int
-) -> Category:
-    category = session.get(Category, category_id)
-    if category is None or category.account_id != account_id:
-        raise NotOwned()
-    return category
 
 
 def _ensure_wallet_writable(wallet: Wallet) -> None:
@@ -94,7 +74,7 @@ def _ensure_transaction_wallets_writable(
         _ensure_wallet_writable(wallet)
 
 def _check_category_matches(session: Session, account_id: int, category_id: int, type: str) -> None:
-    category = _owned_category_or_raise(session, account_id, category_id)
+    category = owned_or_raise(session, Category, account_id, category_id)
     if category.type != type:
         raise TransactionRuleError(
             "A Category attaches only to Transactions of its Type"
@@ -132,8 +112,8 @@ def _check_create_rules(
             )
         if source_wallet_id is None or destination_wallet_id is None:
             raise TransactionRuleError("Transfers need source and destination Wallets")
-        source = _owned_wallet_or_raise(session, account_id, source_wallet_id)
-        destination = _owned_wallet_or_raise(session, account_id, destination_wallet_id)
+        source = owned_or_raise(session, Wallet, account_id, source_wallet_id)
+        destination = owned_or_raise(session, Wallet, account_id, destination_wallet_id)
         if source.id == destination.id:
             raise TransactionRuleError(
                 "Source and Destination must be different Wallets"
@@ -147,7 +127,7 @@ def _check_create_rules(
         raise TransactionRuleError(
             "source and destination Wallets are only for Transfers"
         )
-    wallet = _owned_wallet_or_raise(session, account_id, wallet_id)
+    wallet = owned_or_raise(session, Wallet, account_id, wallet_id)
     _ensure_wallet_writable(wallet)
     if wallet.type == WalletType.CONTACT.value:
         raise TransactionRuleError("Contact Wallets only participate in Transfers")

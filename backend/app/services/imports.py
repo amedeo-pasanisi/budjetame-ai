@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from app.dates import from_rome_day
 from app.models import Category, Transaction, TransactionType, Wallet
 from app.schemas import ImportRow, ImportRowInput, fmt_coord
-from app.services import transactions as transaction_service
+from app.services import scoping, transactions as transaction_service
 
 # Matches the Numeric(12, 2) column and TransactionCreate._MAX_AMOUNT.
 _MAX_AMOUNT = Decimal("9999999999.99")
@@ -509,7 +509,7 @@ def preview_rows(
             except (
                 ImportValidationError,
                 transaction_service.TransactionRuleError,
-                transaction_service.NotOwned,
+                scoping.NotOwned,
             ) as error:
                 row.status = "error"
                 row.error = str(error)
@@ -562,7 +562,7 @@ def confirm_rows(
         raise
     except (
         transaction_service.TransactionRuleError,
-        transaction_service.NotOwned,
+        scoping.NotOwned,
     ) as error:
         session.rollback()
         raise ImportValidationError(str(error)) from error

@@ -6,34 +6,15 @@ FK on Transactions is ON DELETE SET NULL, so deleting a Category leaves its
 Transactions uncategorized; Transactions are never deleted).
 """
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Category, CategoryType
+from app.services import scoping
 
 
 class CategoryNameTaken(Exception):
     """A Category with this name (case-insensitive) already exists for the Account
     and Type."""
-
-
-def name_is_taken(
-    session: Session,
-    account_id: int,
-    name: str,
-    type: CategoryType,
-    *,
-    exclude_id: int | None = None,
-) -> bool:
-    """True when another Category of the Account and Type has `name`, case-insensitively."""
-    stmt = select(Category.id).where(
-        Category.account_id == account_id,
-        Category.type == type.value,
-        func.lower(Category.name) == func.lower(name),
-    )
-    if exclude_id is not None:
-        stmt = stmt.where(Category.id != exclude_id)
-    return session.scalar(stmt) is not None
 
 
 def create_category(
@@ -45,7 +26,7 @@ def create_category(
     color: str,
     icon: str | None = None,
 ) -> Category:
-    if name_is_taken(session, account_id, name, type):
+    if scoping.name_is_taken(session, Category, account_id, name, type_value=type.value):
         raise CategoryNameTaken(name)
     category = Category(
         account_id=account_id,
@@ -69,10 +50,13 @@ def update_category(
     color: str | None = None,
 ) -> Category:
     """Apply the provided changes. `icon=None` means unchanged; pass \"\" to clear it."""
-    new_name = name if name is not None else category.name
-    new_type = CategoryType(category.type)
-    if name is not None and name_is_taken(
-        session, category.account_id, name, new_type, exclude_id=category.id
+    if name is not None and scoping.name_is_taken(
+        session,
+        Category,
+        category.account_id,
+        name,
+        type_value=category.type,
+        exclude_id=category.id,
     ):
         raise CategoryNameTaken(name)
     if name is not None:

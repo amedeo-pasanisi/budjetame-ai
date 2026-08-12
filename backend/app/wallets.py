@@ -9,7 +9,7 @@ from app.auth import get_current_account
 from app.deps import get_session
 from app.models import Account, Wallet, WalletType
 from app.schemas import WalletCreate, WalletOut, WalletUpdate
-from app.services import wallets as wallet_service
+from app.services import scoping, wallets as wallet_service
 
 router = APIRouter(prefix="/wallets", tags=["wallets"])
 
@@ -17,10 +17,10 @@ router = APIRouter(prefix="/wallets", tags=["wallets"])
 def _owned_wallet_or_403(session: Session, account: Account, wallet_id: int) -> Wallet:
     """The Account's Wallet, or 403 — including for wallets that don't exist, so
     foreign data is never distinguishable from absent data (ADR-0003)."""
-    wallet = session.get(Wallet, wallet_id)
-    if wallet is None or wallet.account_id != account.id:
-        raise HTTPException(status_code=403, detail="Wallet not found")
-    return wallet
+    try:
+        return scoping.owned_or_raise(session, Wallet, account.id, wallet_id)
+    except scoping.NotOwned:
+        raise HTTPException(status_code=403, detail="Wallet not found") from None
 
 
 def _wallet_out(wallet: Wallet, balance: Decimal) -> WalletOut:
