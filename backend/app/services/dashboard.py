@@ -12,7 +12,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.dates import rome_month_bounds, to_rome_day
+from app.dates import Month, rome_month_bounds, to_rome_month
 from app.models import Category, Transaction, TransactionType
 
 from app.services.wallets import wallet_balances
@@ -26,7 +26,7 @@ def net_worth(session: Session, account_id: int) -> Decimal:
 
 
 def month_income_expenses(
-    session: Session, account_id: int, month: str
+    session: Session, account_id: int, month: Month
 ) -> tuple[Decimal, Decimal]:
     """The Account's Income and Expense totals in the given Europe/Rome month.
     Opening Balance Transactions are excluded from the statistics (CONTEXT.md);
@@ -55,7 +55,7 @@ def month_income_expenses(
 
 
 def expenses_by_category(
-    session: Session, account_id: int, month: str
+    session: Session, account_id: int, month: Month
 ) -> list[dict]:
     """The expense pie (T11): one slice per Category for the given Europe/Rome
     month, largest first. Expenses whose Category was deleted group into an
@@ -98,11 +98,11 @@ def expenses_by_category(
 
 
 def expense_trend(
-    session: Session, account_id: int, from_month: str, to_month: str
+    session: Session, account_id: int, from_month: Month, to_month: Month
 ) -> list[dict]:
     """Monthly Expense totals over the inclusive month range, oldest first,
     with a €0.00 bucket for every month in between so the chart is a true trend
-    (US28, T12). Bucketing happens in Europe/Rome via `to_rome_day` — the app's
+    (US28, T12). Bucketing happens in Europe/Rome via `to_rome_month` — the app's
     single conversion boundary (CONTEXT.md); income, Opening Balances and
     Transfers never count."""
     start, _ = rome_month_bounds(from_month)
@@ -115,24 +115,21 @@ def expense_trend(
             Transaction.date < end_exclusive,
         )
     ).all()
-    totals: dict[str, Decimal] = {}
+    totals: dict[Month, Decimal] = {}
     for transaction_date, amount in rows:
-        bucket = to_rome_day(transaction_date)[:7]
+        bucket = to_rome_month(transaction_date)
         totals[bucket] = totals.get(bucket, Decimal("0.00")) + Decimal(amount)
     return [
-        {"month": month, "expenses": totals.get(month, Decimal("0.00"))}
+        {"month": month.iso, "expenses": totals.get(month, Decimal("0.00"))}
         for month in _month_range(from_month, to_month)
     ]
 
 
-def _month_range(from_month: str, to_month: str) -> list[str]:
-    """Every YYYY-MM month from `from_month` to `to_month`, inclusive."""
-    year, month = (int(part) for part in from_month.split("-"))
-    end_year, end_month = (int(part) for part in to_month.split("-"))
-    months: list[str] = []
-    while (year, month) <= (end_year, end_month):
-        months.append(f"{year:04d}-{month:02d}")
-        month += 1
-        if month > 12:
-            month, year = 1, year + 1
+def _month_range(from_month: Month, to_month: Month) -> list[Month]:
+    """Every Month from `from_month` to `to_month`, inclusive."""
+    months: list[Month] = []
+    month = from_month
+    while month <= to_month:
+        months.append(month)
+        month = month.next()
     return months
