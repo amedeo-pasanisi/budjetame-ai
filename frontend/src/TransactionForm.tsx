@@ -6,13 +6,21 @@ import {
   apiErrorMessage,
   createTransaction,
   deleteTransaction,
-  formatEuros,
   updateTransaction,
   type Category,
   type Transaction,
   type TransactionInput,
   type Wallet,
 } from './api'
+import {
+  CategoryField,
+  TransferBalancePreview,
+  TransferWalletFields,
+  TypeSelector,
+  WalletBalancePreview,
+  WalletField,
+  type TransactionFormType,
+} from './transactionFields'
 import { MapPicker } from './MapPicker'
 import {
   formatLocation,
@@ -24,9 +32,7 @@ import {
   markGpsGranted,
   type LatLng,
 } from './location'
-import { todayInRome } from './transactions'
-
-const NON_CONTACT_WALLET_TYPES = ['checking', 'credit_card', 'cash']
+import { NON_CONTACT_WALLET_TYPES, todayInRome } from './transactions'
 
 type TransactionFormProps = {
   wallets: Wallet[]
@@ -47,7 +53,7 @@ export function TransactionForm({
   onDeleted,
   onCancel,
 }: TransactionFormProps) {
-  const [type, setType] = useState<'expense' | 'income' | 'transfer'>(
+  const [type, setType] = useState<TransactionFormType>(
     editing?.type === 'transfer'
       ? 'transfer'
       : editing?.type === 'income'
@@ -88,10 +94,6 @@ export function TransactionForm({
 
   const isEditing = editing !== null
   const isTransfer = type === 'transfer'
-  const spendableWallets = wallets.filter((w) =>
-    NON_CONTACT_WALLET_TYPES.includes(w.type),
-  )
-  const matchingCategories = categories.filter((c) => c.type === type)
 
   const sourceWallet = wallets.find((w) => w.id === sourceWalletId)
   const destinationWallet = wallets.find((w) => w.id === destinationWalletId)
@@ -260,29 +262,7 @@ export function TransactionForm({
         {isEditing ? 'Edit transaction' : 'New transaction'}
       </h3>
 
-      <div className="flex gap-2">
-        <TypeButton
-          active={type === 'expense'}
-          disabled={isEditing}
-          onClick={() => setType('expense')}
-        >
-          Expense
-        </TypeButton>
-        <TypeButton
-          active={type === 'income'}
-          disabled={isEditing}
-          onClick={() => setType('income')}
-        >
-          Income
-        </TypeButton>
-        <TypeButton
-          active={type === 'transfer'}
-          disabled={isEditing}
-          onClick={() => setType('transfer')}
-        >
-          Transfer
-        </TypeButton>
-      </div>
+      <TypeSelector active={type} disabled={isEditing} onSelect={setType} />
 
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -318,105 +298,44 @@ export function TransactionForm({
       </div>
 
       {isTransfer ? (
-        <div className="grid grid-cols-2 gap-3">
-          <WalletSelect
-            id="tx-source"
-            label="From"
-            wallets={wallets}
-            value={sourceWalletId}
-            disabled={isEditing}
-            onChange={setSourceWalletId}
-          />
-          <WalletSelect
-            id="tx-destination"
-            label="To"
-            wallets={wallets}
-            value={destinationWalletId}
-            disabled={isEditing}
-            onChange={setDestinationWalletId}
-          />
-        </div>
+        <TransferWalletFields
+          wallets={wallets}
+          sourceWalletId={sourceWalletId}
+          destinationWalletId={destinationWalletId}
+          disabled={isEditing}
+          onSourceChange={setSourceWalletId}
+          onDestinationChange={setDestinationWalletId}
+        />
       ) : (
-        <div>
-          <label htmlFor="tx-wallet" className="block text-sm font-medium text-slate-700">
-            Wallet
-          </label>
-          <select
-            id="tx-wallet"
-            required
-            disabled={isEditing}
-            value={walletId ?? ''}
-            onChange={(event) => setWalletId(Number(event.target.value))}
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
-          >
-            {spendableWallets.length === 0 && <option value="">No spendable wallets</option>}
-            {spendableWallets.map((wallet) => (
-              <option key={wallet.id} value={wallet.id}>
-                {wallet.name} ({formatEuros(wallet.balance)})
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-slate-500">
-            Contact wallets only move money through transfers.
-          </p>
-        </div>
+        <WalletField wallets={wallets} value={walletId} disabled={isEditing} onChange={setWalletId} />
       )}
 
       {isTransfer ? (
         sourceWallet !== undefined && destinationWallet !== undefined && hasAmount ? (
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            {sourceWallet.name}: {formatEuros(sourceWallet.balance)} →{' '}
-            <span className="font-semibold">
-              {formatEuros((Number.parseFloat(sourceWallet.balance) - amountValue).toFixed(2))}
-            </span>
-            <span className="mx-1">·</span>
-            {destinationWallet.name}: {formatEuros(destinationWallet.balance)} →{' '}
-            <span className="font-semibold">
-              {formatEuros((Number.parseFloat(destinationWallet.balance) + amountValue).toFixed(2))}
-            </span>
-            {willWarn && (
-              <span className="mt-1 block text-amber-700">
-                ⚠ This will make your Cash wallet negative.
-              </span>
-            )}
-          </p>
+          <TransferBalancePreview
+            source={sourceWallet}
+            destination={destinationWallet}
+            amount={amountValue}
+            willWarn={willWarn}
+          />
         ) : null
       ) : selectedWallet !== undefined && projectedBalance !== null ? (
-        <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-          {selectedWallet.name}: {formatEuros(selectedWallet.balance)} →{' '}
-          <span className="font-semibold">{formatEuros(projectedBalance.toFixed(2))}</span>
-          {willWarn && (
-            <span className="mt-1 block text-amber-700">
-              ⚠ This will make your Cash wallet negative.
-            </span>
-          )}
-        </p>
+        <WalletBalancePreview
+          wallet={selectedWallet}
+          projectedBalance={projectedBalance}
+          willWarn={willWarn}
+        />
       ) : null}
 
       {isTransfer ? (
         <p className="text-xs text-slate-500">Transfers never carry a category.</p>
       ) : (
-        <div>
-          <label htmlFor="tx-category" className="block text-sm font-medium text-slate-700">
-            Category
-          </label>
-          <select
-            id="tx-category"
-            value={categoryId ?? ''}
-            onChange={(event) =>
-              setCategoryId(event.target.value === '' ? null : Number(event.target.value))
-            }
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-          >
-            <option value="">None</option>
-            {matchingCategories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.icon !== null ? `${category.icon} ` : ''}
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <CategoryField
+          categories={categories}
+          type={type}
+          value={categoryId}
+          onChange={setCategoryId}
+        />
       )}
 
       <div>
@@ -544,69 +463,5 @@ export function TransactionForm({
         </button>
       )}
     </form>
-  )
-}
-
-function TypeButton({
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  active: boolean
-  disabled: boolean
-  onClick: () => void
-  children: string
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
-        active ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
-      } disabled:opacity-60`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function WalletSelect({
-  id,
-  label,
-  wallets,
-  value,
-  disabled,
-  onChange,
-}: {
-  id: string
-  label: string
-  wallets: Wallet[]
-  value: number | undefined
-  disabled: boolean
-  onChange: (walletId: number) => void
-}) {
-  return (
-    <div>
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-        {label}
-      </label>
-      <select
-        id={id}
-        required
-        disabled={disabled}
-        value={value ?? ''}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
-      >
-        {wallets.length === 0 && <option value="">No wallets yet</option>}
-        {wallets.map((wallet) => (
-          <option key={wallet.id} value={wallet.id}>
-            {wallet.name} ({formatEuros(wallet.balance)})
-          </option>
-        ))}
-      </select>
-    </div>
   )
 }

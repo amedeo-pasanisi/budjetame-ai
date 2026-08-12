@@ -1,5 +1,9 @@
 import type { Transaction } from './api'
 
+/** Expense/Income move money in and out of one Wallet; only Transfer touches
+ * Contact Wallets (CONTEXT.md). */
+export const NON_CONTACT_WALLET_TYPES = ['checking', 'credit_card', 'cash']
+
 /** Today's date in the app's single fixed timezone (CONTEXT.md: Europe/Rome). */
 export function todayInRome(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date())
