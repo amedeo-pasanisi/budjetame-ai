@@ -1,3 +1,9 @@
+"""Auth (US4). Everything here asserts through the HTTP seam except
+`test_seeded_account_exists_exactly_once_with_a_hashed_password` — the suite's
+single deliberate exception to the "assert only on API responses and observable
+state" rule, documented in that test (issue #19).
+"""
+
 import bcrypt
 from httpx import AsyncClient
 from sqlalchemy import func, select
@@ -46,6 +52,17 @@ async def test_login_rejects_a_malformed_email(client: AsyncClient) -> None:
 async def test_seeded_account_exists_exactly_once_with_a_hashed_password(
     client: AsyncClient, database_url: str
 ) -> None:
+    """US4: the seeded Account exists exactly once and its password is stored
+    only as a bcrypt hash, never as the plaintext.
+
+    This is the suite's single deliberate exception to the "assert only on API
+    responses and observable state" rule (issue #19): no API path exposes the
+    stored hash, so the HTTP seam cannot distinguish hashed storage from
+    plaintext storage — and US4 must be locked. That the hash *verifies* (the
+    seed password logs in) is already locked through the seam by
+    `test_login_issues_a_bearer_token_for_seeded_credentials`; only the
+    not-plaintext property needs this database read.
+    """
     engine = create_db_engine(database_url)
     with engine.connect() as conn:
         count = conn.execute(select(func.count()).select_from(Account)).scalar_one()

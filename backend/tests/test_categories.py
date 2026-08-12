@@ -322,10 +322,12 @@ async def test_delete_category_uncategorizes_its_transactions(
     response = await client.delete(f"/categories/{category_id}", headers=_auth(token))
 
     assert response.status_code == 204
-    with Session(engine) as session:
-        remaining = session.get(Transaction, transaction_id)
-        assert remaining is not None
-        assert remaining.category_id is None
+    # The Transaction survives the Category delete, uncategorized — asserted
+    # through the API seam: it is still listed, with category_id null.
+    listing = (await client.get("/transactions", headers=_auth(token))).json()
+    rows = [t for t in listing if t["id"] == transaction_id]
+    assert len(rows) == 1
+    assert rows[0]["category_id"] is None
 
 
 async def test_foreign_category_returns_403(client: AsyncClient, database_url: str) -> None:
