@@ -6,7 +6,7 @@ from app.deps import get_session
 from app.models import Account
 from app.schemas import ImportConfirmRequest, ImportPreview, TransactionOut
 from app.services import imports as import_service
-from app.transactions import _transaction_out
+from app.transactions import _transaction_out, _write_warning
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -49,4 +49,12 @@ def confirm_import(
         created = import_service.confirm_rows(session, account.id, payload.rows)
     except import_service.ImportValidationError as error:
         raise HTTPException(status_code=422, detail=str(error))
-    return [_transaction_out(session, account, transaction) for transaction in created]
+    return [
+        _transaction_out(
+            session,
+            account,
+            transaction,
+            warning=_write_warning(session, account, transaction),
+        )
+        for transaction in created
+    ]

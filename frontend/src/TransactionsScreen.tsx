@@ -51,15 +51,20 @@ export function TransactionsScreen() {
 
   const handleSaved = (transaction: Transaction) => {
     setEditing(null)
+    reload()
+    // Set after reload(): reload clears the banner, and the last write in the
+    // batch wins — so the warning renders above the reloaded list.
     if (transaction.warning) {
       setSavedWarning('Saved — this made a Cash wallet negative.')
     }
-    reload()
   }
 
-  const handleDeleted = () => {
+  const handleDeleted = (warning: boolean) => {
     setEditing(null)
     reload()
+    if (warning) {
+      setSavedWarning('Deleted — this made a Cash wallet negative.')
+    }
   }
 
   return (

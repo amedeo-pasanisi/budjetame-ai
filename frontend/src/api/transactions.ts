@@ -141,10 +141,20 @@ export async function updateTransaction(
   return (await response.json()) as Transaction
 }
 
-export async function deleteTransaction(token: string, transactionId: number): Promise<void> {
-  await request(`/transactions/${transactionId}`, {
+export type TransactionDeleteResult = {
+  /** True when the delete left a Cash Wallet balance negative (US10/ID8):
+   * the indicator belongs to writes — delete included — never to reads. */
+  warning: boolean
+}
+
+export async function deleteTransaction(
+  token: string,
+  transactionId: number,
+): Promise<TransactionDeleteResult> {
+  const response = await request(`/transactions/${transactionId}`, {
     method: 'DELETE',
     token,
     errorMessage: 'Could not delete transaction',
   })
+  return (await response.json()) as TransactionDeleteResult
 }

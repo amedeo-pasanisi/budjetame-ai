@@ -39,7 +39,7 @@ type TransactionFormProps = {
   categories: Category[]
   editing: Transaction | null
   onSaved: (transaction: Transaction) => void
-  onDeleted: () => void
+  onDeleted: (warning: boolean) => void
   onCancel: () => void
 }
 
@@ -215,8 +215,8 @@ export function TransactionForm({
     setError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
-      await deleteTransaction(token, editing.id)
-      onDeleted()
+      const result = await deleteTransaction(token, editing.id)
+      onDeleted(result.warning)
     } catch (err) {
       setError(
         err instanceof ApiError

@@ -30,6 +30,9 @@ export function HistoryScreen() {
   const [toDate, setToDate] = useState('')
   const [categoryId, setCategoryId] = useState<number>(ALL_CATEGORIES)
   const [editing, setEditing] = useState<Transaction | null>(null)
+  // The Cash negative-Balance warning from the last write, when it carries one
+  // (US10/ID8: the indicator belongs to writes — delete included).
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -118,6 +121,7 @@ export function HistoryScreen() {
       return
     }
     setLoadError(null)
+    setNotice(null)
     fetchTransactions(token, filters())
       .then(setTransactions)
       .catch(() => setLoadError('Could not reload transactions.'))
@@ -128,9 +132,14 @@ export function HistoryScreen() {
     reloadTransactions()
   }
 
-  const handleDeleted = () => {
+  const handleDeleted = (warning: boolean) => {
     setEditing(null)
     reloadTransactions()
+    // Set after reload(): reload clears the banner, and the last write in the
+    // batch wins — so the warning renders above the reloaded list.
+    if (warning) {
+      setNotice('Deleted — this made a Cash wallet negative.')
+    }
   }
 
   return (
@@ -138,6 +147,11 @@ export function HistoryScreen() {
       <h2 className="font-semibold text-slate-900">History</h2>
 
       {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
+      {notice !== null && (
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {notice}
+        </p>
+      )}
 
       {wallets === null || categories === null ? (
         <p className="mt-3 text-sm text-slate-500">Loading…</p>

@@ -404,3 +404,11 @@ class TransactionOut(BaseModel):
     def _amount_in_euros(cls, value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.01"))
 
+
+class TransactionDeleteOut(BaseModel):
+    """The result of a Transaction delete (US10/ID8): `warning` is the Cash
+    negative-Balance indicator, true exactly when the delete left a Cash
+    Wallet negative. Reads never carry the indicator — it belongs to writes."""
+
+    warning: bool
+

@@ -390,8 +390,120 @@ async def test_delete_transaction_updates_the_balance(client: AsyncClient) -> No
 
     response = await client.delete(f"/transactions/{transaction_id}", headers=_auth(token))
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    # Deleting an Expense raises the balance — no Cash Wallet is pushed negative.
+    assert response.json()["warning"] is False
     assert await _wallet_balance(client, token, wallet_id) == "100.00"
+
+
+async def test_delete_making_cash_negative_returns_warning(client: AsyncClient) -> None:
+    """US10/ID8: the delete response carries the indicator exactly when the
+    delete leaves a Cash Wallet negative — deleting an Income undoes its
+    credit, which can push the wallet below €0."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Delete Cash Warning", "cash", "0.00")
+    income = await client.post(
+        "/transactions",
+        json={"type": "income", "amount": "100.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "130.00", "date": "2026-08-07", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    assert await _wallet_balance(client, token, wallet_id) == "-30.00"
+
+    delete = await client.delete(
+        f"/transactions/{income.json()['id']}", headers=_auth(token)
+    )
+
+    assert delete.status_code == 200
+    assert delete.json()["warning"] is True
+    assert await _wallet_balance(client, token, wallet_id) == "-130.00"
+
+
+async def test_delete_that_does_not_make_cash_negative_has_no_warning(
+    client: AsyncClient,
+) -> None:
+    """Deleting an Expense raises the Wallet's balance — never what the delete
+    pushes negative — so the delete response has no indicator (US10/ID8)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Delete No Warn Cash", "cash", "50.00")
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "20.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+
+    delete = await client.delete(
+        f"/transactions/{created.json()['id']}", headers=_auth(token)
+    )
+
+    assert delete.status_code == 200
+    assert delete.json()["warning"] is False
+    assert await _wallet_balance(client, token, wallet_id) == "50.00"
+
+
+async def test_delete_of_a_transfer_making_the_destination_negative_warns(
+    client: AsyncClient,
+) -> None:
+    """Deleting a Transfer undoes the Destination's credit — the Destination is
+    the wallet a Transfer delete can push negative, not the Source (US10/ID8)."""
+    token = await _login(client)
+    cash = await _create_wallet(client, token, "Delete Transfer Dest Cash", "cash", "0.00")
+    checking = await _create_wallet(
+        client, token, "Delete Transfer Source Checking", "checking", "100.00"
+    )
+    await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "80.00", "date": "2026-08-06", "wallet_id": cash},
+        headers=_auth(token),
+    )
+    transfer = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "50.00",
+            "date": "2026-08-08",
+            "source_wallet_id": checking,
+            "destination_wallet_id": cash,
+        },
+        headers=_auth(token),
+    )
+    assert await _wallet_balance(client, token, cash) == "-30.00"
+
+    delete = await client.delete(
+        f"/transactions/{transfer.json()['id']}", headers=_auth(token)
+    )
+
+    assert delete.status_code == 200
+    assert delete.json()["warning"] is True
+    assert await _wallet_balance(client, token, cash) == "-80.00"
+
+
+async def test_list_transactions_never_carries_the_warning(client: AsyncClient) -> None:
+    """The indicator belongs to the write (ID8): a Transaction on a
+    currently-negative Cash Wallet reads back with warning False — the read
+    does not re-assert the write's warning."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Read No Warn Cash", "cash", "10.00")
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "25.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    # The write itself warns — the wallet is negative right now.
+    assert created.json()["warning"] is True
+    assert await _wallet_balance(client, token, wallet_id) == "-15.00"
+
+    listing = (await client.get("/transactions", headers=_auth(token))).json()
+    rows = [t for t in listing if t["wallet_id"] == wallet_id]
+    # The wallet's rows (the Opening Balance and the Expense) read back without
+    # the indicator — it belongs to the write, never to reads.
+    assert len(rows) == 2
+    assert all(t["warning"] is False for t in rows)
+    assert next(t for t in rows if t["id"] == created.json()["id"])["warning"] is False
 
 
 async def test_edit_transaction_rejects_type_and_wallet_changes(client: AsyncClient) -> None:
@@ -1035,7 +1147,8 @@ async def test_delete_transfer_restores_both_balances(client: AsyncClient) -> No
 
     response = await client.delete(f"/transactions/{transaction_id}", headers=_auth(token))
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["warning"] is False
     assert await _wallet_balance(client, token, checking) == "100.00"
     assert await _wallet_balance(client, token, savings) == "0.00"
 

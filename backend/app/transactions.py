@@ -10,6 +10,7 @@ from app.deps import get_session
 from app.models import Account, Category, Transaction, TransactionType, Wallet, WalletType
 from app.schemas import (
     TransactionCreate,
+    TransactionDeleteOut,
     TransactionOut,
     TransactionUpdate,
     fmt_coord,
@@ -42,13 +43,14 @@ def _owned_transaction_or_403(
 
 
 def _transaction_out(
-    session: Session, account: Account, transaction: Transaction
+    session: Session, account: Account, transaction: Transaction, *, warning: bool
 ) -> TransactionOut:
     """The API view of any Transaction. Expense/Income/Opening Balance reference
     one Wallet; a Transfer references Source and Destination Wallets and never
-    carries a Category. `warning` is the Cash negative-Balance indicator (true
-    right after a write that left a Cash Wallet negative): for a Transfer only
-    the Source can go negative, since the Destination only gains."""
+    carries a Category. `warning` — the Cash negative-Balance indicator — is
+    passed by the caller: writes (create, update, delete, import) compute it
+    from the resulting Balance; reads always pass False, because the indicator
+    belongs to the write, never to reads (US10/ID8)."""
     if transaction.type == TransactionType.TRANSFER.value:
         if transaction.source_wallet_id is None or transaction.destination_wallet_id is None:
             raise HTTPException(status_code=403, detail="Wallet not found")
@@ -56,7 +58,6 @@ def _transaction_out(
         destination = session.get(Wallet, transaction.destination_wallet_id)
         if source is None or destination is None:
             raise HTTPException(status_code=403, detail="Wallet not found")
-        warning_wallet = source
         wallet_id = None
         source_wallet_id = source.id
         destination_wallet_id = destination.id
@@ -69,12 +70,9 @@ def _transaction_out(
         if wallet is None:
             # A Transaction's Wallet always exists; it is validated on every write.
             raise HTTPException(status_code=403, detail="Wallet not found")
-        warning_wallet = wallet
         source_wallet_id = None
         destination_wallet_id = None
         category_id = transaction.category_id
-    balance = wallet_service.wallet_balance(session, account.id, warning_wallet.id)
-    warning = warning_wallet.type == WalletType.CASH.value and balance < 0
     return TransactionOut(
         id=transaction.id,
         type=TransactionType(transaction.type),
@@ -90,6 +88,41 @@ def _transaction_out(
         warning=warning,
         created_at=transaction.created_at,
     )
+
+
+def _cash_wallet_negative(session: Session, account: Account, wallet_id: int) -> bool:
+    """True when the Wallet is a Cash Wallet whose derived Balance is negative
+    right now (US10/ID8: the indicator belongs to the write, never to reads)."""
+    wallet = session.get(Wallet, wallet_id)
+    assert wallet is not None  # validated on every write
+    balance = wallet_service.wallet_balance(session, account.id, wallet.id)
+    return wallet.type == WalletType.CASH.value and balance < 0
+
+
+def _write_warning(session: Session, account: Account, transaction: Transaction) -> bool:
+    """The indicator for a create/update response: whether the write left a Cash
+    Wallet negative. For a Transfer only the Source can go negative — the
+    Destination only gains."""
+    if transaction.type == TransactionType.TRANSFER.value:
+        wallet_id = transaction.source_wallet_id
+    else:
+        wallet_id = transaction.wallet_id
+    assert wallet_id is not None  # validated on every write
+    return _cash_wallet_negative(session, account, wallet_id)
+
+
+def _delete_warning(session: Session, account: Account, transaction: Transaction) -> bool:
+    """The indicator for a delete response: whether the delete left a Cash
+    Wallet negative. Deleting undoes the row — an Income delete drops the
+    Wallet's Balance and a Transfer delete drops the Destination (the Source
+    gains back what it sent) — so those are the wallets a delete can push
+    negative."""
+    if transaction.type == TransactionType.TRANSFER.value:
+        wallet_id = transaction.destination_wallet_id
+    else:
+        wallet_id = transaction.wallet_id
+    assert wallet_id is not None  # validated on every write
+    return _cash_wallet_negative(session, account, wallet_id)
 
 
 @router.get("", response_model=list[TransactionOut])
@@ -130,7 +163,9 @@ def list_transactions(
     transactions = session.scalars(
         stmt.order_by(Transaction.date.desc(), Transaction.id.desc())
     ).all()
-    return [_transaction_out(session, account, t) for t in transactions]
+    # Reads never carry the Cash negative-Balance indicator (US10/ID8): it
+    # belongs to the write that changed the Balance.
+    return [_transaction_out(session, account, t, warning=False) for t in transactions]
 
 
 @router.post("", response_model=TransactionOut, status_code=201)
@@ -158,7 +193,12 @@ def create_transaction(
         raise HTTPException(status_code=403, detail="Wallet or Category not found")
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
-    return _transaction_out(session, account, transaction)
+    return _transaction_out(
+        session,
+        account,
+        transaction,
+        warning=_write_warning(session, account, transaction),
+    )
 
 
 @router.patch("/{transaction_id}", response_model=TransactionOut)
@@ -180,17 +220,26 @@ def update_transaction(
         raise HTTPException(status_code=403, detail="Wallet or Category not found")
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
-    return _transaction_out(session, account, transaction)
+    return _transaction_out(
+        session,
+        account,
+        transaction,
+        warning=_write_warning(session, account, transaction),
+    )
 
 
-@router.delete("/{transaction_id}", status_code=204)
+@router.delete("/{transaction_id}", response_model=TransactionDeleteOut)
 def delete_transaction(
     transaction_id: int,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> None:
+) -> TransactionDeleteOut:
+    """Delete a Transaction (US10/ID8): the response carries the Cash
+    negative-Balance indicator — true exactly when the delete left a Cash
+    Wallet negative; reads never carry it."""
     transaction = _owned_transaction_or_403(session, account, transaction_id)
     try:
         transaction_service.delete_transaction(session, transaction)
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
+    return TransactionDeleteOut(warning=_delete_warning(session, account, transaction))
