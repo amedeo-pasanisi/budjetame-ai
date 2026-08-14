@@ -1,6 +1,9 @@
+import base64
+import binascii
+import json
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +15,7 @@ from app.schemas import (
     TransactionCreate,
     TransactionDeleteOut,
     TransactionOut,
+    TransactionPage,
     TransactionUpdate,
     fmt_coord,
 )
@@ -125,18 +129,62 @@ def _delete_warning(session: Session, account: Account, transaction: Transaction
     return _cash_wallet_negative(session, account, wallet_id)
 
 
-@router.get("", response_model=list[TransactionOut])
+_PAGE_LIMIT_DEFAULT = 50
+_PAGE_LIMIT_MAX = 100
+
+
+def _encode_cursor(date: datetime, transaction_id: int) -> str:
+    """The opaque cursor naming the (date, id) a page ended at. Clients never
+    parse it — they hand it back verbatim to fetch the next page."""
+    payload = json.dumps(
+        {"d": date.isoformat(), "i": transaction_id}, separators=(",", ":")
+    )
+    return base64.urlsafe_b64encode(payload.encode("ascii")).decode("ascii")
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, int]:
+    """The (date, id) an opaque cursor names, or 422 for any malformed token.
+
+    A cursor is well-formed only when it decodes to a JSON object carrying a
+    timezone-aware timestamp `d` and an integer `i`; anything else — garbage
+    bytes, wrong types, a naive timestamp — is malformed and rejected
+    outright (the token is opaque to clients, so there is nothing to guess).
+    """
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+        date = datetime.fromisoformat(payload["d"])
+        transaction_id = payload["i"]
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, binascii.Error):
+        raise HTTPException(status_code=422, detail="Invalid cursor") from None
+    if (
+        not isinstance(transaction_id, int)
+        or isinstance(transaction_id, bool)
+        or date.tzinfo is None
+    ):
+        raise HTTPException(status_code=422, detail="Invalid cursor")
+    return date, transaction_id
+
+
+@router.get("", response_model=TransactionPage)
 def list_transactions(
     wallet_id: int | None = None,
     category_id: int | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
+    limit: int = Query(default=_PAGE_LIMIT_DEFAULT, ge=1, le=_PAGE_LIMIT_MAX),
+    cursor: str | None = None,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> list[TransactionOut]:
-    """The history listing (T8): filters compose — a Wallet (including frozen
-    Wallets, whose history stays viewable), a Category, and a Europe/Rome
-    inclusive date range (`YYYY-MM-DD` days)."""
+) -> TransactionPage:
+    """The ledger listing, newest first, one page at a time (cursor paging).
+
+    Filters compose — a Wallet (including frozen Wallets, whose history stays
+    viewable), a Category, and a Europe/Rome inclusive date range
+    (`YYYY-MM-DD` days) — with the paging: a page is the first `limit` rows
+    strictly after the cursor's (date, id), so rows inserted mid-scroll (e.g.
+    by Import) can never duplicate or skip already-fetched rows. `next_cursor`
+    is null exactly when no further rows remain.
+    """
     stmt = select(Transaction).where(Transaction.account_id == account.id)
     if wallet_id is not None:
         try:
@@ -160,12 +208,28 @@ def list_transactions(
     if to_date is not None:
         # Inclusive upper bound: strictly before the next Rome day.
         stmt = stmt.where(Transaction.date < _rome_day_or_422(to_date) + timedelta(days=1))
-    transactions = session.scalars(
-        stmt.order_by(Transaction.date.desc(), Transaction.id.desc())
+    if cursor is not None:
+        cursor_date, cursor_id = _decode_cursor(cursor)
+        # Keyset boundary (date desc, id desc): only rows strictly older than
+        # the cursor's row — the boundary never moves, so a mid-scroll insert
+        # can neither duplicate nor skip rows across pages.
+        stmt = stmt.where(
+            (Transaction.date < cursor_date)
+            | ((Transaction.date == cursor_date) & (Transaction.id < cursor_id))
+        )
+    # One extra row tells whether a next page exists, so `next_cursor` is null
+    # exactly when nothing remains — the client never fetches an empty page.
+    rows = session.scalars(
+        stmt.order_by(Transaction.date.desc(), Transaction.id.desc()).limit(limit + 1)
     ).all()
+    page = rows[:limit]
+    next_cursor = _encode_cursor(page[-1].date, page[-1].id) if len(rows) > limit else None
     # Reads never carry the Cash negative-Balance indicator (US10/ID8): it
     # belongs to the write that changed the Balance.
-    return [_transaction_out(session, account, t, warning=False) for t in transactions]
+    return TransactionPage(
+        items=[_transaction_out(session, account, t, warning=False) for t in page],
+        next_cursor=next_cursor,
+    )
 
 
 @router.post("", response_model=TransactionOut, status_code=201)

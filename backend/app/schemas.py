@@ -405,6 +405,16 @@ class TransactionOut(BaseModel):
         return value.quantize(Decimal("0.01"))
 
 
+class TransactionPage(BaseModel):
+    """One page of the Transactions list (cursor paging): the page's rows,
+    newest first, and the opaque `next_cursor` for the next page — null
+    exactly when this is the last page (no further fetch will ever return
+    rows). Clients hand `next_cursor` back verbatim; they never parse it."""
+
+    items: list[TransactionOut]
+    next_cursor: str | None
+
+
 class TransactionDeleteOut(BaseModel):
     """The result of a Transaction delete (US10/ID8): `warning` is the Cash
     negative-Balance indicator, true exactly when the delete left a Cash

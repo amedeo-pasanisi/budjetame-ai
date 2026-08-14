@@ -615,7 +615,7 @@ async def test_confirm_rejects_an_invalid_row_and_inserts_nothing(
     # Nothing was inserted: the Wallet has no Transactions and its balance is 0.
     transactions = (
         await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
-    ).json()
+    ).json()["items"]
     assert transactions == []
     assert await _wallet_balance(client, token, checking) == "0.00"
 
@@ -650,7 +650,7 @@ async def test_confirm_is_transactional_when_a_middle_row_fails(
     # Neither Wallet gained a Transaction; the batch rolled back entirely.
     assert (
         await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
-    ).json() == []
+    ).json()["items"] == []
     assert await _wallet_balance(client, token, checking) == "0.00"
     assert await _wallet_balance(client, token, savings) == "0.00"
 
@@ -681,7 +681,7 @@ async def test_confirm_rejects_rows_already_in_the_database(client: AsyncClient)
     # Only the pre-existing expense remains on the Wallet.
     transactions = (
         await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
-    ).json()
+    ).json()["items"]
     assert len(transactions) == 1
 
 

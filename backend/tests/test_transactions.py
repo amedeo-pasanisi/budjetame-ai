@@ -1,4 +1,7 @@
+import base64
+from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -59,6 +62,31 @@ async def _wallet_balance(
 ) -> str:
     wallets = (await client.get("/wallets", headers=_auth(token))).json()
     return next(w["balance"] for w in wallets if w["id"] == wallet_id)
+
+
+async def _list_page(
+    client: AsyncClient, token: str, **params: str | int | None
+) -> dict[str, Any]:
+    """One page of the Transactions list — the { items, next_cursor } envelope.
+    None values are dropped (httpx would send them as the literal "None")."""
+    query = {k: v for k, v in params.items() if v is not None}
+    response = await client.get("/transactions", params=query, headers=_auth(token))
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _list_all(
+    client: AsyncClient, token: str, **params: str | int | None
+) -> list[dict]:
+    """Every Transaction matching the params, walked page by page."""
+    items: list[dict] = []
+    cursor: str | None = None
+    while True:
+        page = await _list_page(client, token, cursor=cursor, **params)
+        items.extend(page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return items
 
 
 async def test_transactions_require_authentication(client: AsyncClient) -> None:
@@ -497,7 +525,7 @@ async def test_list_transactions_never_carries_the_warning(client: AsyncClient) 
     assert created.json()["warning"] is True
     assert await _wallet_balance(client, token, wallet_id) == "-15.00"
 
-    listing = (await client.get("/transactions", headers=_auth(token))).json()
+    listing = await _list_all(client, token)
     rows = [t for t in listing if t["wallet_id"] == wallet_id]
     # The wallet's rows (the Opening Balance and the Expense) read back without
     # the indicator — it belongs to the write, never to reads.
@@ -651,18 +679,14 @@ async def test_list_transactions_is_newest_first_and_filters_by_wallet(
         headers=_auth(token),
     )
 
-    all_transactions = (await client.get("/transactions", headers=_auth(token))).json()
+    all_transactions = await _list_all(client, token)
     assert len(all_transactions) >= 3
 
-    only_a = (
-        await client.get(f"/transactions?wallet_id={wallet_a}", headers=_auth(token))
-    ).json()
+    only_a = await _list_all(client, token, wallet_id=wallet_a)
     assert [t["date"] for t in only_a] == ["2026-08-06", "2026-08-01"]
     assert all(t["wallet_id"] == wallet_a for t in only_a)
 
-    only_b = (
-        await client.get(f"/transactions?wallet_id={wallet_b}", headers=_auth(token))
-    ).json()
+    only_b = await _list_all(client, token, wallet_id=wallet_b)
     assert [t["date"] for t in only_b] == ["2026-08-03"]
 
 
@@ -733,7 +757,7 @@ async def test_opening_balance_transactions_are_read_only(client: AsyncClient) -
         headers=_auth(token),
     )
     wallet_id = created.json()["id"]
-    transactions = (await client.get("/transactions", headers=_auth(token))).json()
+    transactions = await _list_all(client, token)
     opening = next(t for t in transactions if t["wallet_id"] == wallet_id)
 
     patch = await client.patch(
@@ -816,9 +840,7 @@ async def test_frozen_wallet_transactions_stay_viewable_and_net_to_zero(
     transaction_id = created.json()["id"]
     await _freeze_wallet(client, token, wallet_id)
 
-    listed = (
-        await client.get(f"/transactions?wallet_id={wallet_id}", headers=_auth(token))
-    ).json()
+    listed = await _list_all(client, token, wallet_id=wallet_id)
 
     # The frozen Wallet's history stays viewable: the Opening Balance (100.00)
     # and the Expense (100.00) both remain listed.
@@ -1206,12 +1228,8 @@ async def test_wallet_transaction_filter_includes_transfers_on_both_legs(
     )
     transfer_id = transfer.json()["id"]
 
-    as_source = (
-        await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
-    ).json()
-    as_destination = (
-        await client.get(f"/transactions?wallet_id={savings}", headers=_auth(token))
-    ).json()
+    as_source = await _list_all(client, token, wallet_id=checking)
+    as_destination = await _list_all(client, token, wallet_id=savings)
 
     assert transfer_id in [t["id"] for t in as_source]
     assert transfer_id in [t["id"] for t in as_destination]
@@ -1231,28 +1249,25 @@ async def test_history_filters_by_date_range_inclusively(client: AsyncClient) ->
         )
         assert response.status_code == 201
 
-    middle = (
-        await client.get(
-            f"/transactions?wallet_id={wallet_id}&from_date=2026-08-05&to_date=2026-08-15",
-            headers=_auth(token),
-        )
-    ).json()
+    middle = await _list_all(
+        client,
+        token,
+        wallet_id=wallet_id,
+        from_date="2026-08-05",
+        to_date="2026-08-15",
+    )
     assert [t["date"] for t in middle] == ["2026-08-10"]
 
-    single_day = (
-        await client.get(
-            f"/transactions?wallet_id={wallet_id}&from_date=2026-08-20&to_date=2026-08-20",
-            headers=_auth(token),
-        )
-    ).json()
+    single_day = await _list_all(
+        client,
+        token,
+        wallet_id=wallet_id,
+        from_date="2026-08-20",
+        to_date="2026-08-20",
+    )
     assert [t["date"] for t in single_day] == ["2026-08-20"]
 
-    open_ended = (
-        await client.get(
-            f"/transactions?wallet_id={wallet_id}&from_date=2026-08-11",
-            headers=_auth(token),
-        )
-    ).json()
+    open_ended = await _list_all(client, token, wallet_id=wallet_id, from_date="2026-08-11")
     assert [t["date"] for t in open_ended] == ["2026-08-20"]
 
 
@@ -1289,11 +1304,9 @@ async def test_history_filters_by_category(client: AsyncClient) -> None:
         headers=_auth(token),
     )
 
-    only_food = (
-        await client.get(
-            f"/transactions?wallet_id={wallet_id}&category_id={food}", headers=_auth(token)
-        )
-    ).json()
+    only_food = await _list_all(
+        client, token, wallet_id=wallet_id, category_id=food
+    )
     assert [t["amount"] for t in only_food] == ["5.00"]
 
 
@@ -1332,13 +1345,14 @@ async def test_history_combines_wallet_date_and_category_filters(
         headers=_auth(token),
     )
 
-    filtered = (
-        await client.get(
-            f"/transactions?wallet_id={wallet_a}&category_id={food}"
-            "&from_date=2026-08-05&to_date=2026-08-15",
-            headers=_auth(token),
-        )
-    ).json()
+    filtered = await _list_all(
+        client,
+        token,
+        wallet_id=wallet_a,
+        category_id=food,
+        from_date="2026-08-05",
+        to_date="2026-08-15",
+    )
 
     assert [t["amount"] for t in filtered] == ["2.00"]
 
@@ -1418,3 +1432,231 @@ async def test_edit_transaction_can_set_and_clear_a_location(client: AsyncClient
     assert cleared.status_code == 200
     assert cleared.json()["latitude"] is None
     assert cleared.json()["longitude"] is None
+
+
+# --- Cursor pagination (#30) ---
+
+
+async def _create_expense(
+    client: AsyncClient, token: str, wallet_id: int, amount: str, date: str
+) -> int:
+    response = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": amount, "date": date, "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_list_returns_the_paged_envelope(client: AsyncClient) -> None:
+    """The list endpoint serves { items, next_cursor }, never a bare array."""
+    token = await _login(client)
+
+    page = await _list_page(client, token)
+
+    assert set(page.keys()) == {"items", "next_cursor"}
+    assert isinstance(page["items"], list)
+    assert page["next_cursor"] is None or isinstance(page["next_cursor"], str)
+
+
+async def test_list_limit_returns_at_most_n_items_and_a_cursor(
+    client: AsyncClient,
+) -> None:
+    """limit defaults to 50; the envelope carries an opaque next_cursor until
+    the last page, which has next_cursor null."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Page Size Wallet", "checking", "0.00")
+    base = date(2026, 1, 1)
+    for offset in range(55):  # 55 expenses: 2026-01-01 .. 2026-02-24
+        await _create_expense(
+            client, token, wallet_id, "5.00", f"{base + timedelta(days=offset):%Y-%m-%d}"
+        )
+
+    first = await _list_page(client, token, wallet_id=wallet_id)
+    assert len(first["items"]) == 50
+    assert first["next_cursor"] is not None
+
+    second = await _list_page(
+        client, token, wallet_id=wallet_id, cursor=first["next_cursor"]
+    )
+    assert len(second["items"]) == 5
+    assert second["next_cursor"] is None
+
+
+async def test_list_pages_follow_strictly_before_ordering(
+    client: AsyncClient,
+) -> None:
+    """A page walk is contiguous and newest-first: every row appears exactly
+    once, and the cursor boundary is exclusive (each page starts strictly
+    after the previous page's last row)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Ordered Pages Wallet", "checking", "0.00")
+    ids = [
+        await _create_expense(client, token, wallet_id, "5.00", f"2026-08-0{day}")
+        for day in range(1, 8)  # 2026-08-01 .. 2026-08-07
+    ]
+
+    pages: list[list[dict]] = []
+    cursor: str | None = None
+    while True:
+        page = await _list_page(client, token, wallet_id=wallet_id, limit=3, cursor=cursor)
+        pages.append(page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+
+    assert [len(p) for p in pages] == [3, 3, 1]
+    assert [t["id"] for p in pages for t in p] == list(reversed(ids))
+    assert [t["date"] for t in pages[0]] == ["2026-08-07", "2026-08-06", "2026-08-05"]
+    assert [t["date"] for t in pages[1]] == ["2026-08-04", "2026-08-03", "2026-08-02"]
+    assert [t["date"] for t in pages[2]] == ["2026-08-01"]
+
+
+async def test_list_breaks_same_date_ties_by_id_desc(client: AsyncClient) -> None:
+    """(date, id) is the sort key: same-day rows page in id-descending order
+    with no overlap or gaps across the walk."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Tiebreak Pages Wallet", "checking", "0.00")
+    ids = [
+        await _create_expense(client, token, wallet_id, "5.00", "2026-08-06")
+        for _ in range(5)
+    ]
+
+    pages: list[list[dict]] = []
+    cursor: str | None = None
+    while True:
+        page = await _list_page(client, token, wallet_id=wallet_id, limit=2, cursor=cursor)
+        pages.append(page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+
+    assert [len(p) for p in pages] == [2, 2, 1]
+    assert [t["id"] for p in pages for t in p] == list(reversed(ids))
+
+
+async def test_list_cursor_survives_a_mid_scroll_insert(client: AsyncClient) -> None:
+    """The Import scenario: rows inserted after page 1 was fetched neither
+    duplicate nor skip already-fetched rows — a newer row lands in page 1's
+    region (found on refetch), an older row lands in the final page."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Insert Pages Wallet", "checking", "0.00")
+    for day in range(1, 6):  # 2026-08-01 .. 2026-08-05
+        await _create_expense(client, token, wallet_id, "5.00", f"2026-08-0{day}")
+
+    first = await _list_page(client, token, wallet_id=wallet_id, limit=2)
+    assert [t["date"] for t in first["items"]] == ["2026-08-05", "2026-08-04"]
+    cursor = first["next_cursor"]
+    assert cursor is not None
+
+    # Mid-scroll inserts: one newer than everything fetched, one older.
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-06")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-07-30")
+
+    second = await _list_page(client, token, wallet_id=wallet_id, limit=2, cursor=cursor)
+    assert [t["date"] for t in second["items"]] == ["2026-08-03", "2026-08-02"]
+    third = await _list_page(
+        client, token, wallet_id=wallet_id, limit=2, cursor=second["next_cursor"]
+    )
+    assert [t["date"] for t in third["items"]] == ["2026-08-01", "2026-07-30"]
+    assert third["next_cursor"] is None
+
+
+async def test_list_filters_compose_with_paging(client: AsyncClient) -> None:
+    """Wallet, Category, and date-range filters all compose with the cursor:
+    each walk returns exactly the filtered rows, in order, no duplicates."""
+    token = await _login(client)
+    wallet_a = await _create_wallet(client, token, "Compose Pages A", "checking", "0.00")
+    wallet_b = await _create_wallet(client, token, "Compose Pages B", "checking", "0.00")
+    food = await _create_category(client, token, "Compose Pages Food", "expense")
+    for day in range(1, 8):  # 7 on A, 3 on B
+        await _create_expense(client, token, wallet_a, "5.00", f"2026-08-0{day}")
+    for day in range(1, 4):
+        await _create_expense(client, token, wallet_b, "5.00", f"2026-08-0{day}")
+    # The two newest of A's rows carry the Food Category.
+    a_rows = await _list_all(client, token, wallet_id=wallet_a)
+    for row in a_rows[:2]:
+        await client.patch(
+            f"/transactions/{row['id']}",
+            json={"category_id": food},
+            headers=_auth(token),
+        )
+
+    # Wallet walk never leaks B's rows; the walk matches the single fetch.
+    walked = await _list_all(client, token, wallet_id=wallet_a, limit=3)
+    assert len(walked) == 7
+    assert all(t["wallet_id"] == wallet_a for t in walked)
+    assert [t["id"] for t in walked] == [
+        t["id"] for t in await _list_all(client, token, wallet_id=wallet_a)
+    ]
+
+    # Wallet + Category.
+    only_food = await _list_all(
+        client, token, wallet_id=wallet_a, category_id=food, limit=2
+    )
+    assert [t["date"] for t in only_food] == ["2026-08-07", "2026-08-06"]
+    assert all(t["category_id"] == food for t in only_food)
+
+    # Wallet + inclusive date range.
+    ranged = await _list_all(
+        client,
+        token,
+        wallet_id=wallet_a,
+        from_date="2026-08-03",
+        to_date="2026-08-05",
+        limit=2,
+    )
+    assert [t["date"] for t in ranged] == ["2026-08-05", "2026-08-04", "2026-08-03"]
+
+
+async def test_list_rejects_a_malformed_cursor(client: AsyncClient) -> None:
+    """The cursor is opaque: anything that does not decode to exactly a
+    timezone-aware (date, id) pair is a 422 — never guessed at."""
+    token = await _login(client)
+    bad_cursors = [
+        "not-base64!",
+        "####",
+        base64.urlsafe_b64encode(b"not json").decode(),
+        base64.urlsafe_b64encode(b"{}").decode(),
+        base64.urlsafe_b64encode(b'{"d": 1, "i": 2}').decode(),
+        base64.urlsafe_b64encode(b'{"d": "not-a-date", "i": 1}').decode(),
+        base64.urlsafe_b64encode(b'{"d": "2026-08-06", "i": "x"}').decode(),
+        base64.urlsafe_b64encode(b'{"d": "2026-08-06", "i": 1}').decode(),  # naive date
+        base64.urlsafe_b64encode(b'{"d": "2026-08-06T00:00:00+00:00", "i": 1.5}').decode(),
+        base64.urlsafe_b64encode(b'{"d": "2026-08-06T00:00:00+00:00", "i": true}').decode(),
+    ]
+    for cursor in bad_cursors:
+        response = await client.get(
+            "/transactions", params={"cursor": cursor}, headers=_auth(token)
+        )
+        assert response.status_code == 422, cursor
+
+
+async def test_list_rejects_an_invalid_limit(client: AsyncClient) -> None:
+    token = await _login(client)
+
+    for limit in ("0", "-1", "101", "abc", "1.5"):
+        response = await client.get(
+            "/transactions", params={"limit": limit}, headers=_auth(token)
+        )
+        assert response.status_code == 422, limit
+
+
+async def test_list_returns_a_well_formed_cursor_round_trip(
+    client: AsyncClient,
+) -> None:
+    """A cursor issued by the server walks the next page: decoding is the
+    inverse of encoding, through the HTTP seam."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Round Trip Wallet", "checking", "0.00")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-01")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-02")
+
+    first = await _list_page(client, token, wallet_id=wallet_id, limit=1)
+    assert [t["date"] for t in first["items"]] == ["2026-08-02"]
+    second = await _list_page(
+        client, token, wallet_id=wallet_id, limit=1, cursor=first["next_cursor"]
+    )
+    assert [t["date"] for t in second["items"]] == ["2026-08-01"]
+    assert second["next_cursor"] is None

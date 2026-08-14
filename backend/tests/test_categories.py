@@ -324,7 +324,7 @@ async def test_delete_category_uncategorizes_its_transactions(
     assert response.status_code == 204
     # The Transaction survives the Category delete, uncategorized — asserted
     # through the API seam: it is still listed, with category_id null.
-    listing = (await client.get("/transactions", headers=_auth(token))).json()
+    listing = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     rows = [t for t in listing if t["id"] == transaction_id]
     assert len(rows) == 1
     assert rows[0]["category_id"] is None
