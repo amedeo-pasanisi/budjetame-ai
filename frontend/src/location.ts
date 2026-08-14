@@ -4,6 +4,10 @@
 
 export type LatLng = { lat: number; lng: number }
 
+/** Default map center when nothing is picked yet (Europe/Rome), shared by
+ * the Leaflet and Google map pickers. */
+export const DEFAULT_MAP_CENTER: LatLng = { lat: 41.9028, lng: 12.4964 }
+
 /** The Google Maps link for a coordinate pair — built at render time, never
  * persisted (US17: "never stored as text"). */
 export function mapLink(position: LatLng): string {

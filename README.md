@@ -47,6 +47,13 @@ npm run dev
 
 The app is then at <http://localhost:5173>.
 
+The Transaction-form map picker defaults to the free Leaflet/OpenStreetMap map
+(`VITE_MAP_PROVIDER=leaflet`, no key needed). To use a real Google Map with
+place search instead, run `frontend/scripts/google-maps-wizard.sh` — it walks
+you through the one-time Google Cloud setup (billing account + API key) and
+writes `frontend/.env` (`VITE_MAP_PROVIDER=google` + the key). See
+`frontend/.env.example` for the variables.
+
 ## Tests
 
 ```bash
