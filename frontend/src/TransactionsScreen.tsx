@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
+  PAGE_LIMIT,
   fetchCategories,
   fetchTransactions,
   fetchWallets,
@@ -22,24 +23,97 @@ export function TransactionsScreen() {
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [categories, setCategories] = useState<Category[] | null>(null)
   const [transactions, setTransactions] = useState<Transaction[] | null>(null)
+  // The accumulated list pages one at a time: the sentinel at the bottom of
+  // the list (IntersectionObserver) fetches the next page while scrolling.
+  // Null while the first page is still loading.
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState<FormDraft | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
 
+  // Generation counter: any write (save/delete/import) resets the list to the
+  // first page; a further page still in flight when that happens must not
+  // append its pre-reset rows.
+  const generation = useRef(0)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+
   const reload = () => {
+    generation.current += 1
     setLoadError(null)
     setSavedWarning(null)
     Promise.all([fetchWallets(token), fetchCategories(token), fetchTransactions(token)])
-      .then(([walletData, categoryData, transactionData]) => {
+      .then(([walletData, categoryData, page]) => {
         setWallets(walletData)
         setCategories(categoryData)
-        setTransactions(transactionData)
+        setTransactions(page.items)
+        setNextCursor(page.next_cursor)
       })
       .catch(() => setLoadError('Could not load your data.'))
   }
 
   useEffect(reload, [token])
+
+  const loadMore = () => {
+    if (nextCursor === null || loadingMore) {
+      return
+    }
+    const gen = generation.current
+    setLoadingMore(true)
+    fetchTransactions(token, {}, PAGE_LIMIT, nextCursor)
+      .then((page) => {
+        if (gen !== generation.current) {
+          return
+        }
+        setTransactions((current) => {
+          if (current === null) {
+            return page.items
+          }
+          // The backend's keyset cursor never returns overlapping pages; the
+          // id-set is a defensive guard (StrictMode double-effects, stale
+          // responses).
+          const seen = new Set(current.map((transaction) => transaction.id))
+          return [
+            ...current,
+            ...page.items.filter((transaction) => !seen.has(transaction.id)),
+          ]
+        })
+        setNextCursor(page.next_cursor)
+      })
+      .catch(() => {
+        if (gen === generation.current) {
+          setLoadError('Could not load more transactions.')
+        }
+      })
+      .finally(() => setLoadingMore(false))
+  }
+
+  // The observer callback must see the latest loadMore without re-observing
+  // on every render; the effect re-runs only when the page boundary changes
+  // (a re-observe fires the initial callback again, which auto-fills when the
+  // sentinel is still visible). A failed loadMore never auto-retries: the
+  // sentinel only re-fires on a real intersection change.
+  const loadMoreRef = useRef(loadMore)
+  loadMoreRef.current = loadMore
+
+  useEffect(() => {
+    const node = sentinelRef.current
+    if (node === null || nextCursor === null) {
+      return
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMoreRef.current()
+        }
+      },
+      // Fetch before the sentinel reaches the viewport edge.
+      { rootMargin: '300px 0px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [nextCursor])
 
   const walletName = (walletId: number | null): string =>
     walletId === null
@@ -115,7 +189,7 @@ export function TransactionsScreen() {
             <p className="mt-3 text-sm text-slate-500">Loading…</p>
           ) : (
             <>
-              <h3 className="mt-8 text-sm font-medium text-slate-700">Recent transactions</h3>
+              <h3 className="mt-8 text-sm font-medium text-slate-700">All transactions</h3>
               {transactions.length === 0 ? (
                 <p className="mt-2 text-sm text-slate-500">Nothing here yet.</p>
               ) : (
@@ -174,6 +248,14 @@ export function TransactionsScreen() {
                     )
                   })}
                 </ul>
+              )}
+              {nextCursor !== null && (
+                <div
+                  ref={sentinelRef}
+                  className="flex items-center justify-center py-3 text-xs text-slate-500"
+                >
+                  {loadingMore ? 'Loading more…' : ''}
+                </div>
               )}
             </>
           )}

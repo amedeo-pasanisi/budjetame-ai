@@ -49,10 +49,23 @@ export type TransactionFilters = {
   toDate?: string
 }
 
+/** The paged ledger response (issue #30): one page of rows, newest first, and
+ * the opaque cursor for the next page — null on the last page. Clients hand
+ * the cursor back verbatim; they never parse it. */
+export type TransactionPage = {
+  items: Transaction[]
+  next_cursor: string | null
+}
+
+/** Page size for the ledger, matching the backend default (issue #30). */
+export const PAGE_LIMIT = 50
+
 export async function fetchTransactions(
   token: string,
   filters: TransactionFilters = {},
-): Promise<Transaction[]> {
+  limit: number = PAGE_LIMIT,
+  cursor: string | null = null,
+): Promise<TransactionPage> {
   const params = new URLSearchParams()
   if (filters.walletId !== undefined) {
     params.set('wallet_id', String(filters.walletId))
@@ -66,12 +79,34 @@ export async function fetchTransactions(
   if (filters.toDate !== undefined && filters.toDate !== '') {
     params.set('to_date', filters.toDate)
   }
-  const query = params.size > 0 ? `?${params.toString()}` : ''
+  params.set('limit', String(limit))
+  if (cursor !== null) {
+    params.set('cursor', cursor)
+  }
+  const query = `?${params.toString()}`
   const response = await request(`/transactions${query}`, {
     token,
     errorMessage: 'Could not load transactions',
   })
-  return (await response.json()) as Transaction[]
+  return (await response.json()) as TransactionPage
+}
+
+/** Every page of the ledger, concatenated. Only the History screen needs the
+ * whole list (it shows a Wallet's complete history, which can exceed one
+ * page); the Transactions tab pages lazily. Goes away with the History screen
+ * in the merge (issue #33). */
+export async function fetchAllTransactions(
+  token: string,
+  filters: TransactionFilters = {},
+): Promise<Transaction[]> {
+  const all: Transaction[] = []
+  let cursor: string | null = null
+  do {
+    const page = await fetchTransactions(token, filters, PAGE_LIMIT, cursor)
+    all.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor !== null)
+  return all
 }
 
 export async function createTransaction(

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import {
   TOKEN_KEY,
+  fetchAllTransactions,
   fetchCategories,
-  fetchTransactions,
   fetchWallets,
   formatEuros,
   type Category,
@@ -73,7 +73,7 @@ export function HistoryScreen() {
     let cancelled = false
     setLoadError(null)
     setEditing(null)
-    fetchTransactions(token, filters())
+    fetchAllTransactions(token, filters())
       .then((data) => {
         if (!cancelled) setTransactions(data)
       })
@@ -122,7 +122,7 @@ export function HistoryScreen() {
     }
     setLoadError(null)
     setNotice(null)
-    fetchTransactions(token, filters())
+    fetchAllTransactions(token, filters())
       .then(setTransactions)
       .catch(() => setLoadError('Could not reload transactions.'))
   }

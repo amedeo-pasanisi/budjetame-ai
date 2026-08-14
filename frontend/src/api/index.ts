@@ -29,9 +29,12 @@ export {
   type Transaction,
   type TransactionFilters,
   type TransactionInput,
+  type TransactionPage,
   type TransactionType,
+  PAGE_LIMIT,
   createTransaction,
   deleteTransaction,
+  fetchAllTransactions,
   fetchTransactions,
   updateTransaction,
 } from './transactions'
