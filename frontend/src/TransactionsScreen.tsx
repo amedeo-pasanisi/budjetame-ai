@@ -1,23 +1,31 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   PAGE_LIMIT,
   fetchCategories,
   fetchTransactions,
   fetchWallets,
+  formatEuros,
   TOKEN_KEY,
   type Category,
   type Transaction,
+  type TransactionFilters,
   type Wallet,
 } from './api'
 import { ImportScreen } from './ImportScreen'
 import { TransactionModal } from './TransactionModal'
 import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
+const ALL_CATEGORIES = -1
+
 /** The modal form's draft: create (no Transaction) or edit (a Transaction).
  * Null means the modal is closed (US8–US10). */
 type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
 
+/** The merged ledger (issue #33): the History tab's filters live in a
+ * collapsible bar (closed by default) over the paged all-transactions list.
+ * Any filter change refetches the first page with it applied; the bar and
+ * its values reset when the screen unmounts (tab switch). */
 export function TransactionsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
@@ -33,17 +41,43 @@ export function TransactionsScreen() {
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
 
-  // Generation counter: any write (save/delete/import) resets the list to the
-  // first page; a further page still in flight when that happens must not
-  // append its pre-reset rows.
+  // Filters bar (issue #33): closed by default; every change refetches the
+  // first page. Empty wallet/date/category values mean "all" (the tab keeps
+  // its role as the full ledger).
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filterWalletId, setFilterWalletId] = useState<number | undefined>(undefined)
+  const [filterFromDate, setFilterFromDate] = useState('')
+  const [filterToDate, setFilterToDate] = useState('')
+  const [filterCategoryId, setFilterCategoryId] = useState<number>(ALL_CATEGORIES)
+
+  const filters = useCallback((): TransactionFilters => {
+    const result: TransactionFilters = {}
+    if (filterWalletId !== undefined) result.walletId = filterWalletId
+    if (filterCategoryId !== ALL_CATEGORIES) result.categoryId = filterCategoryId
+    if (filterFromDate !== '') result.fromDate = filterFromDate
+    if (filterToDate !== '') result.toDate = filterToDate
+    return result
+  }, [filterWalletId, filterCategoryId, filterFromDate, filterToDate])
+
+  const filtersActive = Object.keys(filters()).length > 0
+
+  // Generation counter: any write (save/delete/import) or filter change
+  // resets the list to the first page; a further page still in flight when
+  // that happens must not append its pre-reset rows.
   const generation = useRef(0)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
-  const reload = () => {
+  const reload = useCallback(() => {
     generation.current += 1
     setLoadError(null)
     setSavedWarning(null)
-    Promise.all([fetchWallets(token), fetchCategories(token), fetchTransactions(token)])
+    // Frozen Wallets are included (issue #33): the Wallet filter lists them
+    // and their rows stay viewable but read-only.
+    Promise.all([
+      fetchWallets(token, true),
+      fetchCategories(token),
+      fetchTransactions(token, filters()),
+    ])
       .then(([walletData, categoryData, page]) => {
         setWallets(walletData)
         setCategories(categoryData)
@@ -51,9 +85,10 @@ export function TransactionsScreen() {
         setNextCursor(page.next_cursor)
       })
       .catch(() => setLoadError('Could not load your data.'))
-  }
+  }, [token, filters])
 
-  useEffect(reload, [token])
+  // Any filter change refetches with it applied and resets to the first page.
+  useEffect(reload, [reload])
 
   const loadMore = () => {
     if (nextCursor === null || loadingMore) {
@@ -61,7 +96,7 @@ export function TransactionsScreen() {
     }
     const gen = generation.current
     setLoadingMore(true)
-    fetchTransactions(token, {}, PAGE_LIMIT, nextCursor)
+    fetchTransactions(token, filters(), PAGE_LIMIT, nextCursor)
       .then((page) => {
         if (gen !== generation.current) {
           return
@@ -115,6 +150,8 @@ export function TransactionsScreen() {
     return () => observer.disconnect()
   }, [nextCursor])
 
+  const selectedWallet = wallets?.find((w) => w.id === filterWalletId)
+
   const walletName = (walletId: number | null): string =>
     walletId === null
       ? 'Frozen wallet'
@@ -123,6 +160,26 @@ export function TransactionsScreen() {
   const categoryName = (categoryId: number | null): string | null => {
     if (categoryId === null) return null
     return categories?.find((c) => c.id === categoryId)?.name ?? null
+  }
+
+  // Frozen-Wallet Transactions are viewable but not editable/deletable
+  // (ADR-0002). A Transfer is frozen when either leg is frozen — a Wallet can
+  // freeze after the Transfer exists, so the check must cover both legs.
+  const onFrozenWallet = (transaction: Transaction): boolean => {
+    if (transaction.type === 'transfer') {
+      const source = wallets?.find((w) => w.id === transaction.source_wallet_id)
+      const destination = wallets?.find(
+        (w) => w.id === transaction.destination_wallet_id,
+      )
+      return (
+        source === undefined ||
+        source.frozen ||
+        destination === undefined ||
+        destination.frozen
+      )
+    }
+    const wallet = wallets?.find((w) => w.id === transaction.wallet_id)
+    return wallet === undefined || wallet.frozen
   }
 
   const handleSaved = (transaction: Transaction) => {
@@ -185,79 +242,159 @@ export function TransactionsScreen() {
             </p>
           )}
 
+          <div className="mt-8 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-slate-700">All transactions</h3>
+            <button
+              type="button"
+              aria-expanded={filtersOpen}
+              onClick={() => setFiltersOpen((open) => !open)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600"
+            >
+              Filters {filtersOpen ? '▾' : '▸'}
+            </button>
+          </div>
+
+          {filtersOpen && (
+            <div className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div>
+                <label htmlFor="filters-wallet" className="block text-sm font-medium text-slate-700">
+                  Wallet
+                </label>
+                <select
+                  id="filters-wallet"
+                  value={filterWalletId ?? ''}
+                  onChange={(event) =>
+                    setFilterWalletId(
+                      event.target.value === '' ? undefined : Number(event.target.value),
+                    )
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="">All wallets</option>
+                  {wallets?.map((wallet) => (
+                    <option key={wallet.id} value={wallet.id}>
+                      {wallet.name}
+                      {wallet.frozen ? ' · Frozen' : ''} ({formatEuros(wallet.balance)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="filters-from" className="block text-sm font-medium text-slate-700">
+                    From
+                  </label>
+                  <input
+                    id="filters-from"
+                    type="date"
+                    value={filterFromDate}
+                    onChange={(event) => setFilterFromDate(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="filters-to" className="block text-sm font-medium text-slate-700">
+                    To
+                  </label>
+                  <input
+                    id="filters-to"
+                    type="date"
+                    value={filterToDate}
+                    onChange={(event) => setFilterToDate(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="filters-category" className="block text-sm font-medium text-slate-700">
+                  Category
+                </label>
+                <select
+                  id="filters-category"
+                  value={filterCategoryId}
+                  onChange={(event) => setFilterCategoryId(Number(event.target.value))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value={ALL_CATEGORIES}>All categories</option>
+                  {categories?.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.icon !== null ? `${category.icon} ` : ''}
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {selectedWallet?.frozen && (
+            <p className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+              This wallet is frozen — its history is viewable but read-only.
+            </p>
+          )}
+
           {wallets === null || categories === null || transactions === null ? (
             <p className="mt-3 text-sm text-slate-500">Loading…</p>
+          ) : transactions.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">
+              {filtersActive
+                ? 'No transactions match these filters.'
+                : 'Nothing here yet.'}
+            </p>
           ) : (
-            <>
-              <h3 className="mt-8 text-sm font-medium text-slate-700">All transactions</h3>
-              {transactions.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">Nothing here yet.</p>
-              ) : (
-                <ul className="mt-2 space-y-2">
-                  {transactions.map((transaction) => {
-                    // A Transaction on a Wallet that is no longer in the active list
-                    // belongs to a frozen Wallet (the only way a Wallet leaves the
-                    // list): viewable, but neither editable nor deletable (ADR-0002).
-                    // A Transfer is frozen when either leg is frozen.
-                    const onFrozenWallet =
-                      transaction.type === 'transfer'
-                        ? (transaction.source_wallet_id !== null &&
-                            wallets.find((w) => w.id === transaction.source_wallet_id) ===
-                              undefined) ||
-                          (transaction.destination_wallet_id !== null &&
-                            wallets.find((w) => w.id === transaction.destination_wallet_id) ===
-                              undefined)
-                        : wallets.find((w) => w.id === transaction.wallet_id) === undefined
-                    const editable =
-                      transaction.type !== 'opening_balance' && !onFrozenWallet
-                    const category = categoryName(transaction.category_id)
-                    const walletLabel =
-                      transaction.type === 'transfer'
-                        ? `${walletName(transaction.source_wallet_id)} → ${walletName(
-                            transaction.destination_wallet_id,
-                          )}`
-                        : walletName(transaction.wallet_id)
-                    return (
-                      <li key={transaction.id}>
-                        <button
-                          type="button"
-                          disabled={!editable}
-                          onClick={() => setForm({ kind: 'edit', transaction })}
-                          className={`flex w-full items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm ${
-                            editable ? '' : 'opacity-70'
-                          }`}
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-medium text-slate-900">
-                              {transactionTitle(transaction)}
-                              {category !== null && ` · ${category}`}
-                            </span>
-                            <span className="block truncate text-xs text-slate-500">
-                              {transaction.date} · {walletLabel}
-                              {transaction.description !== null && transaction.description !== ''
-                                ? ` · ${transaction.description}`
-                                : ''}
-                              {hasLocation(transaction) && ' · 📍'}
-                            </span>
-                          </span>
-                          <span className="shrink-0 text-sm font-semibold text-slate-900">
-                            {signedAmount(transaction)}
-                          </span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {nextCursor !== null && (
-                <div
-                  ref={sentinelRef}
-                  className="flex items-center justify-center py-3 text-xs text-slate-500"
-                >
-                  {loadingMore ? 'Loading more…' : ''}
-                </div>
-              )}
-            </>
+            <ul className="mt-2 space-y-2">
+              {transactions.map((transaction) => {
+                const editable =
+                  transaction.type !== 'opening_balance' &&
+                  !onFrozenWallet(transaction)
+                const category = categoryName(transaction.category_id)
+                const walletLabel =
+                  transaction.type === 'transfer'
+                    ? `${walletName(transaction.source_wallet_id)} → ${walletName(
+                        transaction.destination_wallet_id,
+                      )}`
+                    : walletName(transaction.wallet_id)
+                return (
+                  <li key={transaction.id}>
+                    <button
+                      type="button"
+                      disabled={!editable}
+                      onClick={() => setForm({ kind: 'edit', transaction })}
+                      className={`flex w-full items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm ${
+                        editable ? '' : 'opacity-70'
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-slate-900">
+                          {transactionTitle(transaction)}
+                          {category !== null && ` · ${category}`}
+                        </span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {transaction.date} · {walletLabel}
+                          {transaction.description !== null && transaction.description !== ''
+                            ? ` · ${transaction.description}`
+                            : ''}
+                          {hasLocation(transaction) && ' · 📍'}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold text-slate-900">
+                        {signedAmount(transaction)}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {nextCursor !== null && (
+            <div
+              ref={sentinelRef}
+              className="flex items-center justify-center py-3 text-xs text-slate-500"
+            >
+              {loadingMore ? 'Loading more…' : ''}
+            </div>
           )}
         </>
       )}

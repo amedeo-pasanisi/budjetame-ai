@@ -1,10 +1,9 @@
 /** The paged list client (issue #31): fetchTransactions hands the envelope
- * through and puts the page size and cursor on the query string; the History
- * screen's fetchAllTransactions walks every page until the cursor runs out. */
+ * through and puts the page size and cursor on the query string. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { request } from './transport'
-import { fetchAllTransactions, fetchTransactions, PAGE_LIMIT } from './transactions'
+import { fetchTransactions, PAGE_LIMIT } from './transactions'
 
 vi.mock('./transport', () => ({
   request: vi.fn(),
@@ -66,23 +65,6 @@ describe('fetchTransactions', () => {
 
     expect(requestMock).toHaveBeenCalledWith(
       `/transactions?limit=${PAGE_LIMIT}`,
-      expect.anything(),
-    )
-  })
-})
-
-describe('fetchAllTransactions', () => {
-  it('walks every page until the cursor runs out', async () => {
-    requestMock
-      .mockResolvedValueOnce(jsonResponse({ items: [transaction], next_cursor: 'c1' }))
-      .mockResolvedValueOnce(jsonResponse({ items: [{ ...transaction, id: 2 }], next_cursor: null }))
-
-    const all = await fetchAllTransactions('token')
-
-    expect(all.map((t) => t.id)).toEqual([1, 2])
-    expect(requestMock).toHaveBeenNthCalledWith(
-      2,
-      '/transactions?limit=50&cursor=c1',
       expect.anything(),
     )
   })

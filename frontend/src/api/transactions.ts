@@ -91,24 +91,6 @@ export async function fetchTransactions(
   return (await response.json()) as TransactionPage
 }
 
-/** Every page of the ledger, concatenated. Only the History screen needs the
- * whole list (it shows a Wallet's complete history, which can exceed one
- * page); the Transactions tab pages lazily. Goes away with the History screen
- * in the merge (issue #33). */
-export async function fetchAllTransactions(
-  token: string,
-  filters: TransactionFilters = {},
-): Promise<Transaction[]> {
-  const all: Transaction[] = []
-  let cursor: string | null = null
-  do {
-    const page = await fetchTransactions(token, filters, PAGE_LIMIT, cursor)
-    all.push(...page.items)
-    cursor = page.next_cursor
-  } while (cursor !== null)
-  return all
-}
-
 export async function createTransaction(
   token: string,
   input: TransactionInput,

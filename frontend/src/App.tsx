@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react'
 import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
-import { HistoryScreen } from './HistoryScreen'
 import { LoginForm } from './LoginForm'
 import { Screen } from './Screen'
 import { TransactionsScreen } from './TransactionsScreen'
@@ -14,7 +13,7 @@ type AuthState =
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; account: Account }
 
-type Tab = 'dashboard' | 'wallets' | 'transactions' | 'history' | 'categories'
+type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories'
 
 function App() {
   const [auth, setAuth] = useState<AuthState>(() =>
@@ -101,14 +100,14 @@ function AppShell({
         {tab === 'dashboard' && <DashboardScreen />}
         {tab === 'wallets' && <WalletsScreen />}
         {tab === 'transactions' && <TransactionsScreen />}
-        {tab === 'history' && <HistoryScreen />}
         {tab === 'categories' && <CategoriesScreen />}
       </main>
 
-      {/* Five destinations no longer fit one top row on a phone, so the nav
-       * is a bottom tab bar (T10): full-width, five equal columns. */}
+      {/* The History tab merged into Transactions (issue #33): four
+       * destinations fit one bottom row on a phone (T10), full-width, four
+       * equal columns. */}
       <nav className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-sm grid-cols-5 gap-0.5 px-2 py-1.5">
+        <div className="mx-auto grid max-w-sm grid-cols-4 gap-0.5 px-2 py-1.5">
           <TabButton active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
             Dashboard
           </TabButton>
@@ -120,9 +119,6 @@ function AppShell({
             onClick={() => setTab('transactions')}
           >
             Transactions
-          </TabButton>
-          <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
-            History
           </TabButton>
           <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
             Categories

@@ -1,8 +1,10 @@
-/** Transactions tab paging (issue #31): the first page renders, the sentinel
- * at the bottom loads the next page (IntersectionObserver), pages accumulate
- * without duplicates, and any write resets the list to the first page. The
- * API client and the map picker are mocked; the real form is driven like a
- * user would (click, type, submit) for the reset-on-write path. */
+/** Transactions tab paging and filters (issues #31/#33): the first page
+ * renders, the sentinel at the bottom loads the next page
+ * (IntersectionObserver), pages accumulate without duplicates, any write
+ * resets the list to the first page, and the merged History filters bar
+ * (toggle, Frozen Wallet dropdown, refetch-on-filter) works. The API client
+ * and the map picker are mocked; the real form is driven like a user would
+ * (click, type, submit) for the reset-on-write path. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -67,6 +69,15 @@ const wallet: Wallet = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+const frozenWallet: Wallet = {
+  id: 2,
+  name: 'Old Card',
+  type: 'credit_card',
+  balance: '0.00',
+  frozen: true,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 const baseTransaction: Transaction = {
   id: 1,
   type: 'expense',
@@ -119,7 +130,7 @@ describe('TransactionsScreen infinite scroll', () => {
       await screen.findByRole('heading', { name: 'All transactions' }),
     ).toBeInTheDocument()
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
-    expect(fetchTransactionsMock).toHaveBeenCalledWith('')
+    expect(fetchTransactionsMock).toHaveBeenCalledWith('', {})
   })
 
   it('loads the next page when the sentinel enters the viewport, without duplicates', async () => {
@@ -165,9 +176,110 @@ describe('TransactionsScreen infinite scroll', () => {
 
     // The list reloads from the first page: the accumulated page 2 is gone
     // (the reload call carries no cursor).
-    await waitFor(() => expect(fetchTransactionsMock).toHaveBeenLastCalledWith(''))
+    await waitFor(() => expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}))
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
     expect(screen.queryByText(/Rent/)).not.toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  })
+})
+
+describe('TransactionsScreen merged filters (issue #33)', () => {
+  it('keeps the filter bar closed by default and toggles it', async () => {
+    render(<TransactionsScreen />)
+
+    const toggle = await screen.findByRole('button', { name: /filters/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByLabelText('Wallet')).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByLabelText('Wallet')).toBeInTheDocument()
+    expect(screen.getByLabelText('From')).toBeInTheDocument()
+    expect(screen.getByLabelText('To')).toBeInTheDocument()
+    expect(screen.getByLabelText('Category')).toBeInTheDocument()
+  })
+
+  it('lists active and Frozen Wallets in the Wallet dropdown, marked and with balances', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    render(<TransactionsScreen />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /filters/i }))
+    const select = await screen.findByLabelText('Wallet')
+    const options = Array.from(select.querySelectorAll('option')).map(
+      (option) => option.textContent,
+    )
+    expect(options).toEqual([
+      'All wallets',
+      'Cash (€100.00)',
+      'Old Card · Frozen (€0.00)',
+    ])
+    // Frozen Wallets are fetched explicitly so the dropdown can offer them.
+    expect(fetchWalletsMock).toHaveBeenCalledWith('', true)
+  })
+
+  it('selecting a Frozen Wallet shows the read-only banner and refetches the first page with the filter applied', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    const frozenLunch = { ...baseTransaction, id: 4, wallet_id: 2, description: 'Frozen lunch' }
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.walletId === 2 ? { items: [frozenLunch], next_cursor: null } : page1,
+    )
+    render(<TransactionsScreen />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+
+    expect(
+      await screen.findByText('This wallet is frozen — its history is viewable but read-only.'),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    // First page reset: the unfiltered row is gone, the filtered one shown.
+    expect(await screen.findByText(/Frozen lunch/)).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+  })
+
+  it('changing a date filter refetches with it and shows the filtered empty state', async () => {
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.fromDate === '2026-01-01' ? { items: [], next_cursor: null } : page1,
+    )
+    render(<TransactionsScreen />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('From'), { target: { value: '2026-01-01' } })
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { fromDate: '2026-01-01' }),
+    )
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+  })
+
+  it('resets filters when the screen unmounts (a tab switch)', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    const { unmount } = render(<TransactionsScreen />)
+    await screen.findByText(/Coffee/)
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+
+    unmount()
+    fetchTransactionsMock.mockClear()
+    render(<TransactionsScreen />)
+
+    await screen.findByText(/Coffee/)
+    // Fresh mount: bar closed, no wallet selected, unfiltered first page.
+    expect(screen.getByRole('button', { name: /filters/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.queryByLabelText('Wallet')).not.toBeInTheDocument()
+    expect(fetchTransactionsMock).toHaveBeenCalledWith('', {})
   })
 })

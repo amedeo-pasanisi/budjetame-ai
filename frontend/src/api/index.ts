@@ -34,7 +34,6 @@ export {
   PAGE_LIMIT,
   createTransaction,
   deleteTransaction,
-  fetchAllTransactions,
   fetchTransactions,
   updateTransaction,
 } from './transactions'

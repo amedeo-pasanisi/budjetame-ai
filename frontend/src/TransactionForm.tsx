@@ -48,8 +48,8 @@ type TransactionFormProps = {
 
 /** The create/edit/delete form for a Transaction (Expense, Income, or
  * Transfer), hosted in the modal shell (TransactionModal) by the
- * Transactions tab and the History screen. Cancel — like the shell's
- * backdrop and Escape — abandons the draft without saving. */
+ * Transactions tab. Cancel — like the shell's backdrop and Escape —
+ * abandons the draft without saving. */
 export function TransactionForm({
   wallets,
   categories,
