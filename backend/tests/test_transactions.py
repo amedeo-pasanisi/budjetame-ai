@@ -1434,6 +1434,202 @@ async def test_edit_transaction_can_set_and_clear_a_location(client: AsyncClient
     assert cleared.json()["longitude"] is None
 
 
+# --- Place reference (#32) ---
+
+
+async def test_create_transaction_persists_place_fields_and_list_returns_them(
+    client: AsyncClient,
+) -> None:
+    """A Place reference (name + provider id) rides along with the
+    coordinates (ADR-0005): persisted on create, present in the create
+    response and in the ledger listing."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Place Create Wallet", "checking", "0.00")
+
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "12.50",
+            "date": "2026-08-10",
+            "wallet_id": wallet_id,
+            "latitude": "41.9028",
+            "longitude": "12.4964",
+            "place_name": "Esselunga",
+            "place_id": "ChIJ9T_5iuTKj4ARehL6mcm9_jI",
+        },
+        headers=_auth(token),
+    )
+
+    assert created.status_code == 201
+    assert created.json()["place_name"] == "Esselunga"
+    assert created.json()["place_id"] == "ChIJ9T_5iuTKj4ARehL6mcm9_jI"
+
+    listed = await _list_all(client, token)
+    row = next(t for t in listed if t["id"] == created.json()["id"])
+    assert row["place_name"] == "Esselunga"
+    assert row["place_id"] == "ChIJ9T_5iuTKj4ARehL6mcm9_jI"
+
+
+async def test_create_transfer_persists_place_fields(client: AsyncClient) -> None:
+    """A Transfer carries the same optional Place reference as any other
+    Transaction."""
+    token = await _login(client)
+    source = await _create_wallet(client, token, "Place Transfer Source", "checking", "0.00")
+    destination = await _create_wallet(
+        client, token, "Place Transfer Dest", "checking", "0.00"
+    )
+
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "20.00",
+            "date": "2026-08-10",
+            "source_wallet_id": source,
+            "destination_wallet_id": destination,
+            "latitude": "41.9028",
+            "longitude": "12.4964",
+            "place_name": "ATM Roma Termini",
+            "place_id": "ChIJm8Jk6vTL4j4R2q6Qn8X8wT0",
+        },
+        headers=_auth(token),
+    )
+
+    assert created.status_code == 201
+    assert created.json()["place_name"] == "ATM Roma Termini"
+    assert created.json()["place_id"] == "ChIJm8Jk6vTL4j4R2q6Qn8X8wT0"
+
+
+async def test_patch_with_null_clears_the_place_fields(client: AsyncClient) -> None:
+    """A PATCH carrying place_name: null / place_id: null clears the stored
+    Place; the coordinates survive (a Place never outlives its re-pick)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Place Clear Wallet", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "10.00",
+            "date": "2026-08-10",
+            "wallet_id": wallet_id,
+            "latitude": "41.9028",
+            "longitude": "12.4964",
+            "place_name": "Esselunga",
+            "place_id": "ChIJ9T_5iuTKj4ARehL6mcm9_jI",
+        },
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+
+    cleared = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"place_name": None, "place_id": None},
+        headers=_auth(token),
+    )
+
+    assert cleared.status_code == 200
+    assert cleared.json()["place_name"] is None
+    assert cleared.json()["place_id"] is None
+    assert cleared.json()["latitude"] == "41.9028"  # coordinates survive
+    assert cleared.json()["longitude"] == "12.4964"
+
+
+async def test_patch_without_place_fields_leaves_them_intact(
+    client: AsyncClient,
+) -> None:
+    """A PATCH touching only amount, date, or coordinates never disturbs a
+    stored Place."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Place Keep Wallet", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "10.00",
+            "date": "2026-08-10",
+            "wallet_id": wallet_id,
+            "latitude": "41.9028",
+            "longitude": "12.4964",
+            "place_name": "Esselunga",
+            "place_id": "ChIJ9T_5iuTKj4ARehL6mcm9_jI",
+        },
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+
+    for patch in (
+        {"amount": "11.00"},
+        {"date": "2026-08-11"},
+        {"latitude": "45.4642", "longitude": "9.1900"},
+    ):
+        response = await client.patch(
+            f"/transactions/{transaction_id}", json=patch, headers=_auth(token)
+        )
+        assert response.status_code == 200
+        assert response.json()["place_name"] == "Esselunga"
+        assert response.json()["place_id"] == "ChIJ9T_5iuTKj4ARehL6mcm9_jI"
+
+
+async def test_patch_can_set_the_place_fields(client: AsyncClient) -> None:
+    """A PATCH can attach a Place to a Transaction that has none."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Place Set Wallet", "checking", "0.00")
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-10", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+    assert created.json()["place_name"] is None
+
+    with_place = await client.patch(
+        f"/transactions/{transaction_id}",
+        json={"place_name": "Esselunga", "place_id": "ChIJ9T_5iuTKj4ARehL6mcm9_jI"},
+        headers=_auth(token),
+    )
+    assert with_place.status_code == 200
+    assert with_place.json()["place_name"] == "Esselunga"
+    assert with_place.json()["place_id"] == "ChIJ9T_5iuTKj4ARehL6mcm9_jI"
+
+
+async def test_over_length_place_values_are_rejected(client: AsyncClient) -> None:
+    """Place names and ids are bounded (Google place_ids run to 255
+    characters): anything longer is a 422, on create and on patch."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Place Length Wallet", "checking", "0.00")
+    too_long = "x" * 256
+
+    for field in ("place_name", "place_id"):
+        response = await client.post(
+            "/transactions",
+            json={
+                "type": "expense",
+                "amount": "10.00",
+                "date": "2026-08-10",
+                "wallet_id": wallet_id,
+                field: too_long,
+            },
+            headers=_auth(token),
+        )
+        assert response.status_code == 422, field
+
+    created = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-10", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    transaction_id = created.json()["id"]
+
+    for field in ("place_name", "place_id"):
+        response = await client.patch(
+            f"/transactions/{transaction_id}",
+            json={field: too_long},
+            headers=_auth(token),
+        )
+        assert response.status_code == 422, field
+
+
 # --- Cursor pagination (#30) ---
 
 

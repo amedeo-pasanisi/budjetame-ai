@@ -28,7 +28,15 @@ def run_migrations(database_url: str) -> None:
 
 @pytest.fixture(scope="session")
 def database_url() -> Iterator[str]:
-    """A real Postgres instance (Docker) with migrations applied."""
+    """A real Postgres instance with migrations applied. By default a
+    testcontainers Postgres in Docker; TEST_DATABASE_URL overrides it with an
+    existing server (e.g. on machines without Docker), migrated fresh here.
+    Either way the database is disposable: tests assume a fresh seed."""
+    if os.environ.get("TEST_DATABASE_URL"):
+        url = os.environ["TEST_DATABASE_URL"]
+        run_migrations(url)
+        yield url
+        return
     with PostgresContainer("postgres:16-alpine") as postgres:
         url = postgres.get_connection_url(driver="psycopg")
         run_migrations(url)

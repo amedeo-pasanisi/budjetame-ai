@@ -114,6 +114,11 @@ class CategoryOut(BaseModel):
 
 _MAX_AMOUNT = Decimal("9999999999.99")  # matches the Numeric(12, 2) column
 
+# Google place_ids run to 255 characters; the name is capped at the same
+# generous bound (ADR-0005). The columns are unbounded TEXT — like
+# `description`, the API enforces the length.
+_MAX_PLACE_LENGTH = 255
+
 
 def fmt_coord(value: Decimal | None) -> str | None:
     """Canonical shortest form of a coordinate ("41.9028", not "41.902800")."""
@@ -133,7 +138,8 @@ class TransactionCreate(BaseModel):
     Europe/Rome ("YYYY-MM-DD"); the backend stores it as a UTC timestamp.
     Expense/Income use `wallet_id` (plus an optional matching `category_id`); a
     Transfer uses `source_wallet_id` and `destination_wallet_id` instead and
-    never carries a Category (spec decision #6)."""
+    never carries a Category (spec decision #6). `place_name`/`place_id` are
+    the optional Place reference, carried alongside the coordinates (ADR-0005)."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -147,6 +153,12 @@ class TransactionCreate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     latitude: Decimal | None = Field(default=None, ge=-90, le=90)
     longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+    place_name: str | None = Field(
+        default=None, min_length=1, max_length=_MAX_PLACE_LENGTH
+    )
+    place_id: str | None = Field(
+        default=None, min_length=1, max_length=_MAX_PLACE_LENGTH
+    )
 
     @field_validator("date")
     @classmethod
@@ -183,7 +195,8 @@ class TransactionUpdate(BaseModel):
     """Edit an Expense, Income, or Transfer. Type and Wallets cannot change; a
     field present in the payload is applied even when null (clearing it); a
     field absent is untouched. Transfers never carry a Category — the service
-    rejects a `category_id` on them."""
+    rejects a `category_id` on them. A `place_name`/`place_id` present in the
+    payload replaces the Place reference; null clears it (ADR-0005)."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -193,6 +206,12 @@ class TransactionUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     latitude: Decimal | None = Field(default=None, ge=-90, le=90)
     longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+    place_name: str | None = Field(
+        default=None, min_length=1, max_length=_MAX_PLACE_LENGTH
+    )
+    place_id: str | None = Field(
+        default=None, min_length=1, max_length=_MAX_PLACE_LENGTH
+    )
 
     @field_validator("date")
     @classmethod
@@ -383,7 +402,8 @@ class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet
     negative); `date` is the calendar day in Europe/Rome. Expense/Income fill
-    `wallet_id`; a Transfer fills `source_wallet_id` and `destination_wallet_id`."""
+    `wallet_id`; a Transfer fills `source_wallet_id` and `destination_wallet_id`.
+    `place_name`/`place_id` are the optional Place reference (ADR-0005)."""
 
     id: int
     type: TransactionType
@@ -396,6 +416,8 @@ class TransactionOut(BaseModel):
     description: str | None
     latitude: str | None
     longitude: str | None
+    place_name: str | None
+    place_id: str | None
     warning: bool
     created_at: datetime
 

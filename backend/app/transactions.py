@@ -89,6 +89,8 @@ def _transaction_out(
         description=transaction.description,
         latitude=fmt_coord(transaction.latitude),
         longitude=fmt_coord(transaction.longitude),
+        place_name=transaction.place_name,
+        place_id=transaction.place_id,
         warning=warning,
         created_at=transaction.created_at,
     )
@@ -252,6 +254,8 @@ def create_transaction(
             description=payload.description,
             latitude=payload.latitude,
             longitude=payload.longitude,
+            place_name=payload.place_name,
+            place_id=payload.place_id,
         )
     except scoping.NotOwned:
         raise HTTPException(status_code=403, detail="Wallet or Category not found")

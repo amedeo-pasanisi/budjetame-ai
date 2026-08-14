@@ -175,6 +175,8 @@ def create_transaction(
     description: str | None = None,
     latitude: Decimal | None = None,
     longitude: Decimal | None = None,
+    place_name: str | None = None,
+    place_id: str | None = None,
     commit: bool = True,
 ) -> Transaction:
     # The rules are checked here (and by the import preview, through
@@ -206,6 +208,8 @@ def create_transaction(
             description=description,
             latitude=latitude,
             longitude=longitude,
+            place_name=place_name,
+            place_id=place_id,
         )
     else:
         transaction = Transaction(
@@ -218,6 +222,8 @@ def create_transaction(
             description=description,
             latitude=latitude,
             longitude=longitude,
+            place_name=place_name,
+            place_id=place_id,
         )
     session.add(transaction)
     if commit:
@@ -264,6 +270,14 @@ def update_transaction(
             )
         transaction.latitude = latitude
         transaction.longitude = longitude
+    # The Place reference follows the same contract: a field present in the
+    # payload is applied even when null (clearing it); a field absent is
+    # untouched, so a coordinates-only PATCH never disturbs a stored Place
+    # (ADR-0005).
+    if "place_name" in changes:
+        transaction.place_name = changes["place_name"]
+    if "place_id" in changes:
+        transaction.place_id = changes["place_id"]
 
     session.commit()
     session.refresh(transaction)

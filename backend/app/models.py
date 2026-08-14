@@ -113,6 +113,11 @@ class Transaction(Base):
     description: Mapped[str | None] = mapped_column(Text)
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    # An optional Place reference (ADR-0005): the name from a name-search pick
+    # plus the provider's opaque reference id (e.g. a Google place_id). Written
+    # and cleared together; never without coordinates (frontend invariant).
+    place_name: Mapped[str | None] = mapped_column(Text)
+    place_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
