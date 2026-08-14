@@ -29,8 +29,10 @@ import {
   gpsPrefillAvailable,
   latLngFromWire,
   latLngToWire,
+  locationOptOutActive,
   mapLink,
   markGpsGranted,
+  markLocationOptOut,
   type LatLng,
 } from './location'
 import { NON_CONTACT_WALLET_TYPES, todayInRome } from './transactions'
@@ -87,7 +89,9 @@ export function TransactionForm({
   const [showingPicker, setShowingPicker] = useState(false)
   // Set once the user removes the location: the first-save prompt must not
   // silently re-attach a position the user opted out of (consent, US7/T9).
-  const [locationOptedOut, setLocationOptedOut] = useState(false)
+  // Seeded from the session flag (issue #25) so the opt-out survives the tab
+  // switch that unmounts the form; manual add paths never consult it.
+  const [locationOptedOut, setLocationOptedOut] = useState(() => locationOptOutActive())
   // Set once the user changes the location themselves, so a pending GPS prefill
   // cannot overwrite an explicit choice.
   const locationTouched = useRef(false)
@@ -150,7 +154,7 @@ export function TransactionForm({
   // only prompts on the first save (below). A user-chosen or user-removed
   // location is never overwritten by a pending prefill.
   useEffect(() => {
-    if (isEditing) {
+    if (isEditing || locationOptedOut) {
       return
     }
     let cancelled = false
@@ -166,7 +170,7 @@ export function TransactionForm({
     return () => {
       cancelled = true
     }
-  }, [isEditing])
+  }, [isEditing, locationOptedOut])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -386,6 +390,12 @@ export function TransactionForm({
               onClick={() => {
                 locationTouched.current = true
                 setLocationOptedOut(true)
+                // The opt-out is a create-form decision (issue #25): removing
+                // a location on a new Transaction disables the GPS prefill
+                // for the session; editing is unaffected.
+                if (!isEditing) {
+                  markLocationOptOut()
+                }
                 setLocation(null)
                 setShowingPicker(false)
               }}

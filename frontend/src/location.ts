@@ -88,3 +88,27 @@ export async function gpsPrefillAvailable(): Promise<boolean> {
   }
   return hasGpsPermission()
 }
+
+const OPT_OUT_KEY = 'budjetame.locationOptOut'
+
+/** Persist that the user removed a Geographic Location from a new Transaction,
+ * so the GPS prefill stays off for the rest of the browser session (issue
+ * #25). The tab switch unmounts the form, so the opt-out must outlive the
+ * component; a fresh session clears it and the prefill returns. */
+export function markLocationOptOut(): void {
+  try {
+    sessionStorage.setItem(OPT_OUT_KEY, '1')
+  } catch {
+    // storage unavailable (private mode): the opt-out just won't persist
+  }
+}
+
+/** True when the user removed a location at least once this session, so the
+ * create form skips the GPS prefill. Manual add paths never consult this. */
+export function locationOptOutActive(): boolean {
+  try {
+    return sessionStorage.getItem(OPT_OUT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
