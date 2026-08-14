@@ -11,7 +11,7 @@ import {
   type TransactionFilters,
   type Wallet,
 } from './api'
-import { TransactionForm } from './TransactionForm'
+import { TransactionModal } from './TransactionModal'
 import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
 const ALL_CATEGORIES = -1
@@ -239,14 +239,13 @@ export function HistoryScreen() {
       ) : (
         <>
           {editing !== null && wallets !== null && categories !== null && (
-            <TransactionForm
-              key={editing.id}
+            <TransactionModal
               wallets={wallets}
               categories={categories}
               editing={editing}
               onSaved={handleSaved}
               onDeleted={handleDeleted}
-              onCancel={() => setEditing(null)}
+              onClose={() => setEditing(null)}
             />
           )}
 

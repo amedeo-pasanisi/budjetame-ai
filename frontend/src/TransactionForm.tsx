@@ -44,7 +44,9 @@ type TransactionFormProps = {
 }
 
 /** The create/edit/delete form for a Transaction (Expense, Income, or
- * Transfer), shared by the Transactions tab and the History screen. */
+ * Transfer), hosted in the modal shell (TransactionModal) by the
+ * Transactions tab and the History screen. Cancel — like the shell's
+ * backdrop and Escape — abandons the draft without saving. */
 export function TransactionForm({
   wallets,
   categories,
@@ -237,22 +239,6 @@ export function TransactionForm({
     }
   }
 
-  const resetForm = () => {
-    setType('expense')
-    setAmount('')
-    setDate(todayInRome())
-    setWalletId(wallets[0]?.id)
-    setSourceWalletId(wallets[0]?.id)
-    setDestinationWalletId(wallets[1]?.id ?? wallets[0]?.id)
-    setCategoryId(null)
-    setDescription('')
-    setLocation(null)
-    setShowingPicker(false)
-    setLocationOptedOut(false)
-    locationTouched.current = false
-    setError(null)
-  }
-
   return (
     <form
       onSubmit={handleSubmit}
@@ -440,11 +426,11 @@ export function TransactionForm({
         </button>
         <button
           type="button"
-          onClick={isEditing ? onCancel : resetForm}
+          onClick={onCancel}
           disabled={submitting}
           className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
         >
-          {isEditing ? 'Cancel' : 'Clear'}
+          Cancel
         </button>
       </div>
 

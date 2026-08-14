@@ -10,10 +10,12 @@ import {
   type Wallet,
 } from './api'
 import { ImportScreen } from './ImportScreen'
-import {
-  TransactionForm,
-} from './TransactionForm'
+import { TransactionModal } from './TransactionModal'
 import { signedAmount, hasLocation, transactionTitle } from './transactions'
+
+/** The modal form's draft: create (no Transaction) or edit (a Transaction).
+ * Null means the modal is closed (US8–US10). */
+type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
 
 export function TransactionsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
@@ -21,7 +23,7 @@ export function TransactionsScreen() {
   const [categories, setCategories] = useState<Category[] | null>(null)
   const [transactions, setTransactions] = useState<Transaction[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [editing, setEditing] = useState<Transaction | null>(null)
+  const [form, setForm] = useState<FormDraft | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
 
@@ -50,7 +52,7 @@ export function TransactionsScreen() {
   }
 
   const handleSaved = (transaction: Transaction) => {
-    setEditing(null)
+    setForm(null)
     reload()
     // Set after reload(): reload clears the banner, and the last write in the
     // batch wins — so the warning renders above the reloaded list.
@@ -60,7 +62,7 @@ export function TransactionsScreen() {
   }
 
   const handleDeleted = (warning: boolean) => {
-    setEditing(null)
+    setForm(null)
     reload()
     if (warning) {
       setSavedWarning('Deleted — this made a Cash wallet negative.')
@@ -72,13 +74,23 @@ export function TransactionsScreen() {
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-slate-900">Transactions</h2>
         {!importing && (
-          <button
-            type="button"
-            onClick={() => setImporting(true)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
-          >
-            Import
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setForm({ kind: 'create' })}
+              disabled={wallets === null || categories === null}
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            >
+              New transaction
+            </button>
+            <button
+              type="button"
+              onClick={() => setImporting(true)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
+            >
+              Import
+            </button>
+          </div>
         )}
       </div>
 
@@ -93,90 +105,91 @@ export function TransactionsScreen() {
       ) : (
         <>
           {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
-      {savedWarning !== null && (
-        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          {savedWarning}
-        </p>
-      )}
+          {savedWarning !== null && (
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {savedWarning}
+            </p>
+          )}
 
-      {wallets === null || categories === null || transactions === null ? (
-        <p className="mt-3 text-sm text-slate-500">Loading…</p>
-      ) : (
-        <>
-          <TransactionForm
-            key={editing?.id ?? 'create'}
-            wallets={wallets}
-            categories={categories}
-            editing={editing}
-            onSaved={handleSaved}
-            onDeleted={handleDeleted}
-            onCancel={() => setEditing(null)}
-          />
-
-          <h3 className="mt-8 text-sm font-medium text-slate-700">Recent transactions</h3>
-          {transactions.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">Nothing here yet.</p>
+          {wallets === null || categories === null || transactions === null ? (
+            <p className="mt-3 text-sm text-slate-500">Loading…</p>
           ) : (
-            <ul className="mt-2 space-y-2">
-              {transactions.map((transaction) => {
-                // A Transaction on a Wallet that is no longer in the active list
-                // belongs to a frozen Wallet (the only way a Wallet leaves the
-                // list): viewable, but neither editable nor deletable (ADR-0002).
-                // A Transfer is frozen when either leg is frozen.
-                const onFrozenWallet =
-                  transaction.type === 'transfer'
-                    ? (transaction.source_wallet_id !== null &&
-                        wallets.find((w) => w.id === transaction.source_wallet_id) ===
-                          undefined) ||
-                      (transaction.destination_wallet_id !== null &&
-                        wallets.find((w) => w.id === transaction.destination_wallet_id) ===
-                          undefined)
-                    : wallets.find((w) => w.id === transaction.wallet_id) === undefined
-                const editable =
-                  transaction.type !== 'opening_balance' && !onFrozenWallet
-                const category = categoryName(transaction.category_id)
-                const walletLabel =
-                  transaction.type === 'transfer'
-                    ? `${walletName(transaction.source_wallet_id)} → ${walletName(
-                        transaction.destination_wallet_id,
-                      )}`
-                    : walletName(transaction.wallet_id)
-                return (
-                  <li key={transaction.id}>
-                    <button
-                      type="button"
-                      disabled={!editable}
-                      onClick={() => setEditing(transaction)}
-                      className={`flex w-full items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm ${
-                        editable ? '' : 'opacity-70'
-                      }`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-slate-900">
-                          {transactionTitle(transaction)}
-                          {category !== null && ` · ${category}`}
-                        </span>
-                        <span className="block truncate text-xs text-slate-500">
-                          {transaction.date} · {walletLabel}
-                          {transaction.description !== null && transaction.description !== ''
-                            ? ` · ${transaction.description}`
-                            : ''}
-                          {hasLocation(transaction) && ' · 📍'}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-sm font-semibold text-slate-900">
-                        {signedAmount(transaction)}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+            <>
+              <h3 className="mt-8 text-sm font-medium text-slate-700">Recent transactions</h3>
+              {transactions.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">Nothing here yet.</p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {transactions.map((transaction) => {
+                    // A Transaction on a Wallet that is no longer in the active list
+                    // belongs to a frozen Wallet (the only way a Wallet leaves the
+                    // list): viewable, but neither editable nor deletable (ADR-0002).
+                    // A Transfer is frozen when either leg is frozen.
+                    const onFrozenWallet =
+                      transaction.type === 'transfer'
+                        ? (transaction.source_wallet_id !== null &&
+                            wallets.find((w) => w.id === transaction.source_wallet_id) ===
+                              undefined) ||
+                          (transaction.destination_wallet_id !== null &&
+                            wallets.find((w) => w.id === transaction.destination_wallet_id) ===
+                              undefined)
+                        : wallets.find((w) => w.id === transaction.wallet_id) === undefined
+                    const editable =
+                      transaction.type !== 'opening_balance' && !onFrozenWallet
+                    const category = categoryName(transaction.category_id)
+                    const walletLabel =
+                      transaction.type === 'transfer'
+                        ? `${walletName(transaction.source_wallet_id)} → ${walletName(
+                            transaction.destination_wallet_id,
+                          )}`
+                        : walletName(transaction.wallet_id)
+                    return (
+                      <li key={transaction.id}>
+                        <button
+                          type="button"
+                          disabled={!editable}
+                          onClick={() => setForm({ kind: 'edit', transaction })}
+                          className={`flex w-full items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm ${
+                            editable ? '' : 'opacity-70'
+                          }`}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-slate-900">
+                              {transactionTitle(transaction)}
+                              {category !== null && ` · ${category}`}
+                            </span>
+                            <span className="block truncate text-xs text-slate-500">
+                              {transaction.date} · {walletLabel}
+                              {transaction.description !== null && transaction.description !== ''
+                                ? ` · ${transaction.description}`
+                                : ''}
+                              {hasLocation(transaction) && ' · 📍'}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm font-semibold text-slate-900">
+                            {signedAmount(transaction)}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </>
           )}
         </>
       )}
+
+      {form !== null && wallets !== null && categories !== null && (
+        <TransactionModal
+          wallets={wallets}
+          categories={categories}
+          editing={form.kind === 'edit' ? form.transaction : null}
+          onSaved={handleSaved}
+          onDeleted={handleDeleted}
+          onClose={() => setForm(null)}
+        />
+      )}
     </>
-  )}
-  </>
-)
+  )
 }
