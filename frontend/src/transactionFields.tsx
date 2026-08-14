@@ -11,6 +11,7 @@
 
 import type { Category, Wallet } from './api'
 import { formatEuros } from './api'
+import type { TransferProjection } from './balanceProjection'
 import { NON_CONTACT_WALLET_TYPES } from './transactions'
 
 export type TransactionFormType = 'expense' | 'income' | 'transfer'
@@ -164,17 +165,19 @@ export function CategoryField({
 /** The projected balance of the one Wallet an Expense/Income moves. */
 export function WalletBalancePreview({
   wallet,
-  projectedBalance,
+  before,
+  after,
   willWarn,
 }: {
   wallet: Wallet
-  projectedBalance: number
+  before: number
+  after: number
   willWarn: boolean
 }) {
   return (
     <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-      {wallet.name}: {formatEuros(wallet.balance)} →{' '}
-      <span className="font-semibold">{formatEuros(projectedBalance.toFixed(2))}</span>
+      {wallet.name}: {formatEuros(before.toFixed(2))} →{' '}
+      <span className="font-semibold">{formatEuros(after.toFixed(2))}</span>
       {willWarn && (
         <span className="mt-1 block text-amber-700">
           ⚠ This will make your Cash wallet negative.
@@ -188,24 +191,24 @@ export function WalletBalancePreview({
 export function TransferBalancePreview({
   source,
   destination,
-  amount,
+  projection,
   willWarn,
 }: {
   source: Wallet
   destination: Wallet
-  amount: number
+  projection: TransferProjection
   willWarn: boolean
 }) {
   return (
     <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-      {source.name}: {formatEuros(source.balance)} →{' '}
+      {source.name}: {formatEuros(projection.source.before.toFixed(2))} →{' '}
       <span className="font-semibold">
-        {formatEuros((Number.parseFloat(source.balance) - amount).toFixed(2))}
+        {formatEuros(projection.source.after.toFixed(2))}
       </span>
       <span className="mx-1">·</span>
-      {destination.name}: {formatEuros(destination.balance)} →{' '}
+      {destination.name}: {formatEuros(projection.destination.before.toFixed(2))} →{' '}
       <span className="font-semibold">
-        {formatEuros((Number.parseFloat(destination.balance) + amount).toFixed(2))}
+        {formatEuros(projection.destination.after.toFixed(2))}
       </span>
       {willWarn && (
         <span className="mt-1 block text-amber-700">

@@ -22,6 +22,7 @@ import {
   type TransactionFormType,
 } from './transactionFields'
 import { MapPicker } from './MapPicker'
+import { projectBalance, projectTransfer } from './balanceProjection'
 import {
   formatLocation,
   getGpsPosition,
@@ -102,21 +103,46 @@ export function TransactionForm({
   const selectedWallet = wallets.find((w) => w.id === walletId)
   const amountValue = Number.parseFloat(amount)
   const hasAmount = !Number.isNaN(amountValue) && amountValue > 0
-  const projectedBalance = useMemo(() => {
-    if (isTransfer) {
-      if (sourceWallet === undefined || !hasAmount) return null
-      return Number.parseFloat(sourceWallet.balance) - amountValue
-    }
-    if (selectedWallet === undefined || !hasAmount) return null
-    const current = Number.parseFloat(selectedWallet.balance)
-    const delta = type === 'expense' ? -amountValue : amountValue
-    return current + delta
-  }, [sourceWallet, selectedWallet, hasAmount, amountValue, type, isTransfer])
+  // The Wallet's current Balance includes the Transaction being edited, so the
+  // projection removes its old contribution before adding the new amount
+  // (issue #24); null when creating. Safe because Wallet and type are locked
+  // while editing.
+  const editedAmount = isEditing && editing !== null ? editing.amount : null
 
+  const singleWalletProjection = useMemo(() => {
+    if (type === 'transfer' || selectedWallet === undefined || !hasAmount) return null
+    return projectBalance({
+      currentBalance: selectedWallet.balance,
+      type,
+      newAmount: amountValue,
+      editedAmount,
+    })
+  }, [type, selectedWallet, hasAmount, amountValue, editedAmount])
+
+  const transferProjection = useMemo(() => {
+    if (
+      type !== 'transfer' ||
+      sourceWallet === undefined ||
+      destinationWallet === undefined ||
+      !hasAmount
+    ) {
+      return null
+    }
+    return projectTransfer({
+      sourceBalance: sourceWallet.balance,
+      destinationBalance: destinationWallet.balance,
+      newAmount: amountValue,
+      editedAmount,
+    })
+  }, [type, sourceWallet, destinationWallet, hasAmount, amountValue, editedAmount])
+
+  const cashAfter = isTransfer
+    ? (transferProjection?.source.after ?? null)
+    : (singleWalletProjection?.after ?? null)
   const willWarn =
     (isTransfer ? sourceWallet?.type === 'cash' : selectedWallet?.type === 'cash') &&
-    projectedBalance !== null &&
-    projectedBalance < 0
+    cashAfter !== null &&
+    cashAfter < 0
 
   // GPS prefill (US18 / T9): when creating a Transaction and device-location
   // permission is already granted, pre-fill the location from the current
@@ -297,18 +323,21 @@ export function TransactionForm({
       )}
 
       {isTransfer ? (
-        sourceWallet !== undefined && destinationWallet !== undefined && hasAmount ? (
+        sourceWallet !== undefined &&
+        destinationWallet !== undefined &&
+        transferProjection !== null ? (
           <TransferBalancePreview
             source={sourceWallet}
             destination={destinationWallet}
-            amount={amountValue}
+            projection={transferProjection}
             willWarn={willWarn}
           />
         ) : null
-      ) : selectedWallet !== undefined && projectedBalance !== null ? (
+      ) : selectedWallet !== undefined && singleWalletProjection !== null ? (
         <WalletBalancePreview
           wallet={selectedWallet}
-          projectedBalance={projectedBalance}
+          before={singleWalletProjection.before}
+          after={singleWalletProjection.after}
           willWarn={willWarn}
         />
       ) : null}
