@@ -77,6 +77,9 @@ const baseTransaction: Transaction = {
 }
 
 beforeEach(() => {
+  // A fresh session keeps the GPS prefill quiet: markGpsGranted from earlier
+  // tests would otherwise arm it for create-form tests and consume the mock.
+  sessionStorage.clear()
   picker.onPick = null
   getGpsPositionMock.mockReset()
   getGpsPositionMock.mockResolvedValue(null)
@@ -214,5 +217,69 @@ describe('TransactionForm place clearing (issue #34)', () => {
         place_id: null,
       }),
     )
+  })
+})
+
+describe('TransactionForm GPS feedback (issue #35)', () => {
+  it('disables the button with a "Locating…" label while the lookup runs, then restores', async () => {
+    let resolveGps!: (position: LatLng | null) => void
+    getGpsPositionMock.mockReturnValue(
+      new Promise<LatLng | null>((resolve) => {
+        resolveGps = resolve
+      }),
+    )
+    renderForm(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use my location' }))
+
+    const locatingButton = screen.getByRole('button', { name: 'Locating…' })
+    expect(locatingButton).toBeDisabled()
+
+    await act(async () => {
+      resolveGps({ lat: 44, lng: 7 })
+    })
+
+    // Success attaches the position as before and restores the button.
+    expect(await screen.findByText('📍 44, 7')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use my location' })).toBeEnabled()
+  })
+
+  it('failure shows the inline message and keeps the map picker available', async () => {
+    getGpsPositionMock.mockResolvedValue(null)
+    renderForm(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use my location' }))
+
+    expect(
+      await screen.findByText(
+        "Couldn't get your location — check permissions or pick it on the map.",
+      ),
+    ).toBeInTheDocument()
+    // The button restores so the lookup can be retried…
+    expect(screen.getByRole('button', { name: 'Use my location' })).toBeEnabled()
+    // …and the map picker buttons remain available after the failure.
+    fireEvent.click(screen.getByRole('button', { name: 'Add location' }))
+    expect(await screen.findByTestId('map-picker')).toBeInTheDocument()
+  })
+
+  it('a successful retry clears the failure message', async () => {
+    getGpsPositionMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ lat: 44, lng: 7 })
+    renderForm(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use my location' }))
+    await screen.findByText(
+      "Couldn't get your location — check permissions or pick it on the map.",
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use my location' }))
+
+    expect(await screen.findByText('📍 44, 7')).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Couldn't get your location — check permissions or pick it on the map.",
+      ),
+    ).not.toBeInTheDocument()
   })
 })

@@ -104,6 +104,12 @@ export function TransactionForm({
   // Set once the user changes the location themselves, so a pending GPS prefill
   // cannot overwrite an explicit choice.
   const locationTouched = useRef(false)
+  // GPS feedback (issue #35): true while the "Use my location" lookup runs,
+  // so the button can disable and show "Locating…" instead of failing silently.
+  const [locating, setLocating] = useState(false)
+  // Inline failure message for the GPS lookup (denied, timeout, unavailable),
+  // cleared by a successful GPS pick, a map pick, or a Remove.
+  const [gpsError, setGpsError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -274,15 +280,25 @@ export function TransactionForm({
   }
 
   const pickFromGps = async () => {
-    const position = await getGpsPosition()
-    if (position !== null) {
-      locationTouched.current = true
-      setLocation(position)
-      // A GPS pick is coordinates-only and clears any stored Place
-      // (ADR-0005): the name must always match the coordinates.
-      setPlace(null)
-      setShowingPicker(false)
-      markGpsGranted()
+    setGpsError(null)
+    setLocating(true)
+    try {
+      const position = await getGpsPosition()
+      if (position !== null) {
+        locationTouched.current = true
+        setLocation(position)
+        // A GPS pick is coordinates-only and clears any stored Place
+        // (ADR-0005): the name must always match the coordinates.
+        setPlace(null)
+        setShowingPicker(false)
+        markGpsGranted()
+      } else {
+        // Denied, timed out, or unavailable: say so instead of failing
+        // silently, with the map picker still one tap away (issue #35).
+        setGpsError("Couldn't get your location — check permissions or pick it on the map.")
+      }
+    } finally {
+      setLocating(false)
     }
   }
 
@@ -413,6 +429,7 @@ export function TransactionForm({
                 // a Place never survives without coordinates.
                 setPlace(null)
                 setLocationOptedOut(true)
+                setGpsError(null)
                 // The opt-out is a create-form decision (issue #25): removing
                 // a location on a new Transaction disables the GPS prefill
                 // for the session; editing is unaffected.
@@ -421,7 +438,7 @@ export function TransactionForm({
                 }
                 setShowingPicker(false)
               }}
-              className="text-sm font-medium text-red-600"
+              className="rounded px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 active:bg-red-100"
             >
               Remove
             </button>
@@ -440,33 +457,48 @@ export function TransactionForm({
                 // supplied) clears it (ADR-0005).
                 setPlace(pickedPlace ?? null)
                 setShowingPicker(false)
+                setGpsError(null)
               }}
             />
             <button
               type="button"
               onClick={() => setShowingPicker(false)}
-              className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
+              className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 active:bg-slate-200"
             >
               Cancel
             </button>
           </div>
         ) : (
-          <div className="mt-2 flex gap-3">
-            <button
-              type="button"
-              onClick={() => setShowingPicker(true)}
-              className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
-            >
-              {location !== null ? 'Change location' : 'Add location'}
-            </button>
-            <button
-              type="button"
-              onClick={pickFromGps}
-              className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
-            >
-              Use my location
-            </button>
-          </div>
+          <>
+            <div className="mt-2 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowingPicker(true)}
+                className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 active:bg-slate-200"
+              >
+                {location !== null ? 'Change location' : 'Add location'}
+              </button>
+              <button
+                type="button"
+                onClick={pickFromGps}
+                disabled={locating}
+                className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-60"
+              >
+                {locating ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      className="h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent"
+                    />
+                    Locating…
+                  </span>
+                ) : (
+                  'Use my location'
+                )}
+              </button>
+            </div>
+            {gpsError !== null && <p className="mt-2 text-xs text-red-600">{gpsError}</p>}
+          </>
         )}
       </div>
 
