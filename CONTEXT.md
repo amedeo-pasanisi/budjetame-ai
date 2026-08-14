@@ -53,8 +53,12 @@ A Transaction created when a Wallet is started with a nonzero initial balance (m
 _Avoid_: initial transaction, seed entry
 
 **Geographic Location**:
-An optional set of coordinates (latitude/longitude) attached to a Transaction. The Google Maps link is built from the coordinates on the frontend; it is never stored as text.
+An optional set of coordinates (latitude/longitude) attached to a Transaction, optionally carrying a Place reference. The maps link is built on the frontend from the Place when present, else from the coordinates; the link itself is never stored as text.
 _Avoid_: maps link, location text
+
+**Place**:
+A named spot on the map (e.g. "Esselunga") that a Geographic Location may carry alongside its coordinates, together with an optional provider-specific reference ID (e.g. a Google place_id). Only a name-search pick produces a Place; taps, GPS, and imports attach coordinates alone.
+_Avoid_: address, venue, POI
 
 ## Rules
 
@@ -63,6 +67,7 @@ _Avoid_: maps link, location text
 - Contact Wallets participate only in Transfers — never direct Expense/Income Transactions.
 - Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
 - A Wallet can only be frozen when its balance is exactly €0.
+- A Place is attached to a Geographic Location only by a name-search pick; setting the Location any other way (tap, GPS) or removing it clears the Place.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
 - All data is scoped to the single Account; foreign data gets a 403.
 

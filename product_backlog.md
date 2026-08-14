@@ -76,8 +76,9 @@
 **US 3.2 - Google Maps Location Saving**
 * **Story:** As a user, I want to record the location of my transactions so that I can remember and track my movements.
 * **Acceptance Criteria:**
-  * The "Geographic Location" field stores coordinates (latitude/longitude), chosen on Google Maps when creating a transaction; the Google Maps link is built from the coordinates on the frontend, never stored as text.
+  * The "Geographic Location" field stores coordinates (latitude/longitude) and, when a place was chosen by name search, that place's name and Google place_id (ADR-0005). The maps link is built on the frontend — from the place_id, else the name, else the coordinates — and the link itself is never stored as text. Re-picking by tap or GPS, or removing the location, clears the place.
   * When I create a transaction, if the system has permission to access GPS, the "Geographic Location" field is populated by default with my current coordinates.
+  * When I tap "Use my location", the button shows a locating state until the position is found; if it fails (denied, timeout, unavailable), an inline message tells me and the map picker remains available.
 
 **US 3.3 - Transaction Editing/Deletion**
 * **Story:** As a user, I want to edit or delete a transaction so that the accounts match reality.
@@ -93,12 +94,14 @@
   * Total Net Worth must not change after this operation.
   * Contact Wallets participate only in Transfers: money moves in and out of them exclusively via transfers, never via direct Expense/Income transactions.
 
-**US 3.5 - Transaction History**
-* **Story:** As a user, I want to browse my transactions per wallet, so that I can find, edit, and delete them.
+**US 3.5 - Transaction History (merged into the Transactions tab)**
+* **Story:** As a user, I want to browse my transactions, so that I can find, edit, and delete them.
 * **Acceptance Criteria:**
-  * A Transaction History screen lists the transactions of a wallet (including wallets' historical transactions after freezing).
-  * Filters by date range and category; uncategorized expenses are labeled "Uncategorized".
+  * The Transactions tab lists transactions newest-first with infinite scrolling (cursor-based paging, 50 per page).
+  * A collapsible filter bar narrows the list by wallet (including frozen wallets, marked "Frozen"), date range, and category; unfiltered, the list shows all transactions.
+  * Uncategorized expenses are labeled "Uncategorized".
   * Entry points for editing and deleting transactions from the list (except transactions of frozen wallets).
+  * The former History tab is removed; its capabilities live in the Transactions tab.
 
 ---
 
