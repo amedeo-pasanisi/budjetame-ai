@@ -6,6 +6,8 @@ import {
   locationOptOutActive,
   mapLink,
   markLocationOptOut,
+  placeFromWire,
+  placeToWire,
 } from './location'
 
 describe('location helpers', () => {
@@ -19,6 +21,32 @@ describe('location helpers', () => {
     expect(formatLocation({ lat: 41.9028, lng: 12.4964 })).toBe('41.9028, 12.4964')
   })
 
+  // The Place reference (ADR-0005): the maps link precedence is
+  // place_id → name → coordinates, so a search pick opens the place's info
+  // panel instead of a bare coordinate pin.
+  it('builds the place info-panel link from a place_id (precedence)', () => {
+    expect(
+      mapLink(
+        { lat: 41.9028, lng: 12.4964 },
+        { name: 'Esselunga', placeId: 'ChIJN1t_tDeuEmsRUsoyG83frY4' },
+      ),
+    ).toBe(
+      'https://www.google.com/maps/place/?q=place_id:ChIJN1t_tDeuEmsRUsoyG83frY4',
+    )
+  })
+
+  it('falls back to a name search when the Place has no place_id', () => {
+    expect(
+      mapLink({ lat: 41.9028, lng: 12.4964 }, { name: 'Esselunga Bar' }),
+    ).toBe('https://www.google.com/maps/search/?api=1&query=Esselunga%20Bar')
+  })
+
+  it('uses plain coordinates when there is no Place', () => {
+    expect(mapLink({ lat: 41.9028, lng: 12.4964 }, null)).toBe(
+      'https://www.google.com/maps/search/?api=1&query=41.9028,12.4964',
+    )
+  })
+
   it('round-trips a position through the wire format', () => {
     const position = { lat: 41.9028, lng: 12.4964 }
     const wire = latLngToWire(position)
@@ -28,6 +56,34 @@ describe('location helpers', () => {
   it('treats missing coordinates as no location', () => {
     expect(latLngFromWire(null, null)).toBeNull()
     expect(latLngFromWire('not-a-number', '12.4')).toBeNull()
+  })
+})
+
+describe('place helpers (ADR-0005)', () => {
+  it('round-trips a Place through the wire format', () => {
+    const wire = placeToWire({ name: 'Esselunga', placeId: 'ChIJabc' })
+    expect(wire).toEqual({ place_name: 'Esselunga', place_id: 'ChIJabc' })
+    expect(placeFromWire(wire.place_name, wire.place_id)).toEqual({
+      name: 'Esselunga',
+      placeId: 'ChIJabc',
+    })
+  })
+
+  it('keeps a Place with a name but no place_id (name-only search pick)', () => {
+    expect(placeFromWire('Esselunga', null)).toEqual({ name: 'Esselunga' })
+    expect(placeToWire({ name: 'Esselunga' })).toEqual({
+      place_name: 'Esselunga',
+      place_id: null,
+    })
+  })
+
+  it('treats a missing or empty name as no Place', () => {
+    expect(placeFromWire(null, 'ChIJabc')).toBeNull()
+    expect(placeFromWire('', 'ChIJabc')).toBeNull()
+  })
+
+  it('clears a Place through the wire format', () => {
+    expect(placeToWire(null)).toEqual({ place_name: null, place_id: null })
   })
 })
 

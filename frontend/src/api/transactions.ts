@@ -16,6 +16,10 @@ export type Transaction = {
   description: string | null
   latitude: string | null
   longitude: string | null
+  // The optional Place reference (ADR-0005): name plus provider id (e.g. a
+  // Google place_id), written and cleared together with the coordinates.
+  place_name: string | null
+  place_id: string | null
   warning: boolean
   created_at: string
 }
@@ -30,6 +34,8 @@ export type TransactionInput =
       description: string
       latitude: string | null
       longitude: string | null
+      place_name: string | null
+      place_id: string | null
     }
   | {
       type: 'transfer'
@@ -40,6 +46,8 @@ export type TransactionInput =
       description: string
       latitude: string | null
       longitude: string | null
+      place_name: string | null
+      place_id: string | null
     }
 
 export type TransactionFilters = {
@@ -102,6 +110,8 @@ export async function createTransaction(
     description: input.description === '' ? null : input.description,
     latitude: input.latitude,
     longitude: input.longitude,
+    place_name: input.place_name,
+    place_id: input.place_id,
   }
   const body =
     input.type === 'transfer'
@@ -134,6 +144,8 @@ export async function updateTransaction(
     description: string
     latitude?: string | null
     longitude?: string | null
+    place_name?: string | null
+    place_id?: string | null
   },
 ): Promise<Transaction> {
   const body: Record<string, unknown> = {
@@ -146,9 +158,12 @@ export async function updateTransaction(
     body.category_id = input.categoryId
   }
   // The location is always sent: values set it, null clears it (the backend
-  // applies any field present in the payload).
+  // applies any field present in the payload). The Place reference follows
+  // the same contract (ADR-0005).
   body.latitude = input.latitude ?? null
   body.longitude = input.longitude ?? null
+  body.place_name = input.place_name ?? null
+  body.place_id = input.place_id ?? null
   const response = await request(`/transactions/${transactionId}`, {
     method: 'PATCH',
     token,

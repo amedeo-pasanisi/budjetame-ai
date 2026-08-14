@@ -90,6 +90,8 @@ const baseTransaction: Transaction = {
   description: null,
   latitude: null,
   longitude: null,
+  place_name: null,
+  place_id: null,
   warning: false,
   created_at: '2026-08-01T10:00:00Z',
 }

@@ -1,18 +1,20 @@
 import { resolveMapConfig, type MapConfig } from './mapProvider'
 import { GoogleMapPicker } from './googleMapPicker'
 import { LeafletMapPicker } from './leafletMapPicker'
-import type { LatLng } from './location'
+import type { LatLng, Place } from './location'
 
 /** The map picker, behind a provider seam (issue #27): `VITE_MAP_PROVIDER`
  * (`google` | `leaflet`) selects the adapter; the Leaflet picker is the
  * default fallback and never requires a key. The contract stays
- * `{ position, onPick }` regardless of provider. */
+ * `{ position, onPick }` regardless of provider; `onPick` carries an optional
+ * Place (ADR-0005) — only the Google search pick supplies one, a tap pick and
+ * the Leaflet picker never do. */
 export function MapPicker({
   position,
   onPick,
 }: {
   position: LatLng | null
-  onPick: (position: LatLng) => void
+  onPick: (position: LatLng, place?: Place) => void
 }) {
   let config: MapConfig
   try {

@@ -3,7 +3,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { request } from './transport'
-import { fetchTransactions, PAGE_LIMIT } from './transactions'
+import {
+  createTransaction,
+  fetchTransactions,
+  PAGE_LIMIT,
+  updateTransaction,
+} from './transactions'
 
 vi.mock('./transport', () => ({
   request: vi.fn(),
@@ -66,6 +71,62 @@ describe('fetchTransactions', () => {
     expect(requestMock).toHaveBeenCalledWith(
       `/transactions?limit=${PAGE_LIMIT}`,
       expect.anything(),
+    )
+  })
+})
+
+describe('createTransaction', () => {
+  it('sends the Place reference alongside the coordinates (ADR-0005)', async () => {
+    requestMock.mockResolvedValue(jsonResponse(transaction))
+
+    await createTransaction('token', {
+      type: 'expense',
+      amount: '4.50',
+      date: '2026-08-01',
+      walletId: 1,
+      categoryId: null,
+      description: '',
+      latitude: '41.9028',
+      longitude: '12.4964',
+      place_name: 'Esselunga',
+      place_id: 'ChIJN1t_tDeuEmsRUsoyG83frY4',
+    })
+
+    expect(requestMock).toHaveBeenCalledWith(
+      '/transactions',
+      expect.objectContaining({
+        method: 'POST',
+        json: expect.objectContaining({
+          latitude: '41.9028',
+          longitude: '12.4964',
+          place_name: 'Esselunga',
+          place_id: 'ChIJN1t_tDeuEmsRUsoyG83frY4',
+        }),
+      }),
+    )
+  })
+})
+
+describe('updateTransaction', () => {
+  it('clears the Place when the payload carries nulls', async () => {
+    requestMock.mockResolvedValue(jsonResponse(transaction))
+
+    await updateTransaction('token', 7, {
+      amount: '4.50',
+      date: '2026-08-01',
+      description: '',
+      latitude: '41.9028',
+      longitude: '12.4964',
+      place_name: null,
+      place_id: null,
+    })
+
+    expect(requestMock).toHaveBeenCalledWith(
+      '/transactions/7',
+      expect.objectContaining({
+        method: 'PATCH',
+        json: expect.objectContaining({ place_name: null, place_id: null }),
+      }),
     )
   })
 })

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { DEFAULT_MAP_CENTER, type LatLng } from './location'
+import { DEFAULT_MAP_CENTER, type LatLng, type Place } from './location'
 
 /** The Google Maps adapter (issue #27): a real Google Map with Places
  * autocomplete search. Implements the same `{ position, onPick }` contract as
@@ -60,7 +60,9 @@ function loadGoogleMaps(apiKey: string): Promise<void> {
 }
 
 /** A tap-to-pick Google Map with a Places autocomplete search box. The chosen
- * coordinates are reported via `onPick`; the marker follows `position`. */
+ * coordinates are reported via `onPick`; a search pick also reports the
+ * Place's name and place_id (ADR-0005), a tap pick reports coordinates
+ * alone. The marker follows `position`. */
 export function GoogleMapPicker({
   apiKey,
   position,
@@ -68,7 +70,7 @@ export function GoogleMapPicker({
 }: {
   apiKey: string
   position: LatLng | null
-  onPick: (position: LatLng) => void
+  onPick: (position: LatLng, place?: Place) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
@@ -106,17 +108,30 @@ export function GoogleMapPicker({
             onPickRef.current({ lat: latLng.lat(), lng: latLng.lng() })
           }
         })
-        // Place-name search with autocomplete (user story 12): the picker only
-        // needs coordinates, so geometry is the only field requested.
+        // Place-name search with autocomplete (user story 12): the search
+        // requests name and place_id alongside the geometry, so a search pick
+        // can report the Place with the coordinates (ADR-0005). A tap pick
+        // stays coordinates-only.
         autocomplete = new google.maps.places.Autocomplete(search, {
-          fields: ['geometry'],
+          fields: ['geometry', 'name', 'place_id'],
         })
         autocomplete.addListener('place_changed', () => {
-          const location = autocomplete?.getPlace().geometry?.location
-          if (location === undefined) return
+          const selected = autocomplete?.getPlace()
+          const location = selected?.geometry?.location
+          if (selected === undefined || location === undefined) return
           map?.panTo(location)
           map?.setZoom(15)
-          onPickRef.current({ lat: location.lat(), lng: location.lng() })
+          const place: Place | undefined =
+            selected.name !== undefined &&
+            selected.name !== '' &&
+            selected.place_id !== undefined &&
+            selected.place_id !== ''
+              ? { name: selected.name, placeId: selected.place_id }
+              : undefined
+          onPickRef.current(
+            { lat: location.lat(), lng: location.lng() },
+            place,
+          )
         })
       })
       .catch((error: unknown) => {

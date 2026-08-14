@@ -33,7 +33,10 @@ import {
   mapLink,
   markGpsGranted,
   markLocationOptOut,
+  placeFromWire,
+  placeToWire,
   type LatLng,
+  type Place,
 } from './location'
 import { NON_CONTACT_WALLET_TYPES, todayInRome } from './transactions'
 
@@ -85,6 +88,12 @@ export function TransactionForm({
   const [description, setDescription] = useState(editing?.description ?? '')
   const [location, setLocation] = useState<LatLng | null>(() =>
     latLngFromWire(editing?.latitude ?? null, editing?.longitude ?? null),
+  )
+  // The optional Place reference (ADR-0005): set only by a search pick,
+  // cleared by a tap pick, a GPS pick, or Remove. It always accompanies
+  // coordinates — never the reverse.
+  const [place, setPlace] = useState<Place | null>(() =>
+    placeFromWire(editing?.place_name ?? null, editing?.place_id ?? null),
   )
   const [showingPicker, setShowingPicker] = useState(false)
   // Set once the user removes the location: the first-save prompt must not
@@ -199,6 +208,7 @@ export function TransactionForm({
             destinationWalletId: destinationWalletId as number,
             description,
             ...latLngToWire(finalLocation),
+            ...placeToWire(place),
           }
         : {
             type,
@@ -208,6 +218,7 @@ export function TransactionForm({
             categoryId,
             description,
             ...latLngToWire(finalLocation),
+            ...placeToWire(place),
           }
       const saved =
         isEditing && editing !== null
@@ -217,6 +228,9 @@ export function TransactionForm({
               description,
               ...(isTransfer ? {} : { categoryId }),
               ...latLngToWire(location),
+              // The Place follows the location: values set it, null clears it
+              // (ADR-0005), so a re-pick by tap or GPS reaches the API.
+              ...placeToWire(place),
             })
           : await createTransaction(token, input)
       onSaved(saved)
@@ -264,6 +278,9 @@ export function TransactionForm({
     if (position !== null) {
       locationTouched.current = true
       setLocation(position)
+      // A GPS pick is coordinates-only and clears any stored Place
+      // (ADR-0005): the name must always match the coordinates.
+      setPlace(null)
       setShowingPicker(false)
       markGpsGranted()
     }
@@ -376,9 +393,11 @@ export function TransactionForm({
         <span className="block text-sm font-medium text-slate-700">Location</span>
         {location !== null ? (
           <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
-            <span className="text-sm text-slate-700">📍 {formatLocation(location)}</span>
+            <span className="text-sm text-slate-700">
+              📍 {place !== null ? place.name : formatLocation(location)}
+            </span>
             <a
-              href={mapLink(location)}
+              href={mapLink(location, place)}
               target="_blank"
               rel="noreferrer"
               className="text-sm font-medium text-indigo-600"
@@ -389,6 +408,10 @@ export function TransactionForm({
               type="button"
               onClick={() => {
                 locationTouched.current = true
+                setLocation(null)
+                // Removing the location removes its Place with it (ADR-0005):
+                // a Place never survives without coordinates.
+                setPlace(null)
                 setLocationOptedOut(true)
                 // The opt-out is a create-form decision (issue #25): removing
                 // a location on a new Transaction disables the GPS prefill
@@ -396,7 +419,6 @@ export function TransactionForm({
                 if (!isEditing) {
                   markLocationOptOut()
                 }
-                setLocation(null)
                 setShowingPicker(false)
               }}
               className="text-sm font-medium text-red-600"
@@ -411,9 +433,12 @@ export function TransactionForm({
           <div className="mt-2 space-y-2">
             <MapPicker
               position={location}
-              onPick={(picked) => {
+              onPick={(picked, pickedPlace) => {
                 locationTouched.current = true
                 setLocation(picked)
+                // A search pick sets the Place; a tap pick (no Place
+                // supplied) clears it (ADR-0005).
+                setPlace(pickedPlace ?? null)
                 setShowingPicker(false)
               }}
             />
