@@ -1,16 +1,5 @@
-import { useState } from 'react'
-
-import {
-  TOKEN_KEY,
-  confirmImport,
-  formatEuros,
-  previewImport,
-  type ImportPreview,
-  type ImportRow,
-  type ImportRowInput,
-} from './api'
-
-type Phase = 'pick' | 'preview' | 'done'
+import { formatEuros, type ImportPreview, type ImportRow } from './api'
+import type { ImportDraftController } from './importDraft'
 
 const TYPE_LABEL: Record<string, string> = {
   expense: 'Expense',
@@ -20,99 +9,20 @@ const TYPE_LABEL: Record<string, string> = {
 
 /** Bulk import (T13): pick a .csv/.xlsx against the fixed template, see the
  * extracted rows validated — duplicates in yellow, problems in red — then
- * confirm; nothing reaches the database before that confirmation. */
+ * confirm; nothing reaches the database before that confirmation. The draft
+ * itself lives in the app shell (useImportDraft, issue #43) so it survives
+ * tab switches; this component only renders and drives it. */
 export function ImportScreen({
+  controller,
   onDone,
-  onBack,
 }: {
+  controller: ImportDraftController
   onDone: () => void
-  onBack: () => void
 }) {
-  const token = localStorage.getItem(TOKEN_KEY) ?? ''
-  const [phase, setPhase] = useState<Phase>('pick')
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<ImportPreview | null>(null)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [imported, setImported] = useState(0)
-  // True when any created Transaction carries the Cash negative-Balance warning:
-  // the import succeeded but a Cash Wallet went negative (CONTEXT.md).
-  const [createdWithWarning, setCreatedWithWarning] = useState(false)
-  // Bumped whenever the picker is reset so the <input type="file"> remounts
-  // with an empty value instead of showing the previous selection.
-  const [pickCount, setPickCount] = useState(0)
-
-  const handleReadFile = async () => {
-    if (file === null) return
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await previewImport(token, file)
-      setPreview(result)
-      setSelected(
-        new Set(
-          result.rows
-            .filter((row) => row.status === 'ok')
-            .map((row) => row.row),
-        ),
-      )
-      setPhase('preview')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not read the file.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const toggle = (row: ImportRow) => {
-    setSelected((current) => {
-      const next = new Set(current)
-      if (next.has(row.row)) {
-        next.delete(row.row)
-      } else {
-        next.add(row.row)
-      }
-      return next
-    })
-  }
-
-  const handleConfirm = async () => {
-    if (preview === null) return
-    const rows: ImportRowInput[] = []
-    for (const row of preview.rows) {
-      if (!selected.has(row.row)) continue
-      if (row.type !== 'expense' && row.type !== 'income' && row.type !== 'transfer') {
-        continue
-      }
-      if (row.date === null || row.amount === null) continue
-      rows.push({
-        row: row.row,
-        type: row.type,
-        date: row.date,
-        amount: row.amount,
-        wallet: row.wallet,
-        source_wallet: row.source_wallet,
-        destination_wallet: row.destination_wallet,
-        category: row.category,
-        description: row.description,
-        latitude: row.latitude,
-        longitude: row.longitude,
-      })
-    }
-    setBusy(true)
-    setError(null)
-    try {
-      const created = await confirmImport(token, rows)
-      setImported(created.length)
-      setCreatedWithWarning(created.some((transaction) => transaction.warning))
-      setPhase('done')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not confirm the import.')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const draft = controller.draft
+  if (draft === null) return null
+  const { phase, file, preview, selected, error, busy, imported, createdWithWarning, pickCount } =
+    draft
 
   return (
     <>
@@ -120,7 +30,7 @@ export function ImportScreen({
         <h2 className="font-semibold text-slate-900">Import</h2>
         <button
           type="button"
-          onClick={phase === 'done' ? onDone : onBack}
+          onClick={phase === 'done' ? onDone : controller.cancel}
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
         >
           {phase === 'done' ? 'Back' : 'Cancel'}
@@ -133,11 +43,8 @@ export function ImportScreen({
           file={file}
           busy={busy}
           error={error}
-          onFile={(next) => {
-            setFile(next)
-            setError(null)
-          }}
-          onRead={handleReadFile}
+          onFile={controller.pickFile}
+          onRead={controller.readFile}
         />
       )}
 
@@ -147,15 +54,9 @@ export function ImportScreen({
           selected={selected}
           busy={busy}
           error={error}
-          onToggle={toggle}
-          onConfirm={handleConfirm}
-          onPickAgain={() => {
-            setFile(null)
-            setPickCount((count) => count + 1)
-            setPreview(null)
-            setError(null)
-            setPhase('pick')
-          }}
+          onToggle={controller.toggle}
+          onConfirm={controller.confirm}
+          onPickAgain={controller.pickAgain}
         />
       )}
 

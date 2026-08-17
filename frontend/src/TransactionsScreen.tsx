@@ -13,6 +13,7 @@ import {
   type Wallet,
 } from './api'
 import { ImportScreen } from './ImportScreen'
+import type { ImportDraftController } from './importDraft'
 import { TransactionModal } from './TransactionModal'
 import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
@@ -25,8 +26,14 @@ type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
 /** The merged ledger (issue #33): the History tab's filters live in a
  * collapsible bar (closed by default) over the paged all-transactions list.
  * Any filter change refetches the first page with it applied; the bar and
- * its values reset when the screen unmounts (tab switch). */
-export function TransactionsScreen() {
+ * its values reset when the screen unmounts (tab switch). The Import Draft
+ * (issue #43) is NOT screen state: it arrives from the app shell, so it
+ * survives this screen unmounting on a tab switch. */
+export function TransactionsScreen({
+  importState,
+}: {
+  importState: ImportDraftController
+}) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [categories, setCategories] = useState<Category[] | null>(null)
@@ -39,7 +46,6 @@ export function TransactionsScreen() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState<FormDraft | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
-  const [importing, setImporting] = useState(false)
 
   // Filters bar (issue #33): closed by default; every change refetches the
   // first page. Empty wallet/date/category values mean "all" (the tab keeps
@@ -204,7 +210,7 @@ export function TransactionsScreen() {
     <>
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-slate-900">Transactions</h2>
-        {!importing && (
+        {importState.draft === null && (
           <div className="flex gap-2">
             <button
               type="button"
@@ -216,7 +222,7 @@ export function TransactionsScreen() {
             </button>
             <button
               type="button"
-              onClick={() => setImporting(true)}
+              onClick={importState.open}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
             >
               Import
@@ -225,11 +231,11 @@ export function TransactionsScreen() {
         )}
       </div>
 
-      {importing ? (
+      {importState.draft !== null ? (
         <ImportScreen
-          onBack={() => setImporting(false)}
+          controller={importState}
           onDone={() => {
-            setImporting(false)
+            importState.done()
             reload()
           }}
         />

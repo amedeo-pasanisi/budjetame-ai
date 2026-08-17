@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
+import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
 import { Screen } from './Screen'
 import { TransactionsScreen } from './TransactionsScreen'
@@ -71,7 +72,7 @@ function CheckingScreen() {
   )
 }
 
-function AppShell({
+export function AppShell({
   email,
   onSignOut,
 }: {
@@ -79,6 +80,9 @@ function AppShell({
   onSignOut: () => void
 }) {
   const [tab, setTab] = useState<Tab>('dashboard')
+  // The Import Draft lives here, not in the Transactions screen, so it
+  // survives the screen unmounting on a tab switch (issue #43).
+  const importState = useImportDraft()
 
   return (
     <div className="min-h-svh bg-slate-50 px-4 pt-6 pb-24">
@@ -99,7 +103,7 @@ function AppShell({
       <main className="mx-auto mt-6 max-w-sm">
         {tab === 'dashboard' && <DashboardScreen />}
         {tab === 'wallets' && <WalletsScreen />}
-        {tab === 'transactions' && <TransactionsScreen />}
+        {tab === 'transactions' && <TransactionsScreen importState={importState} />}
         {tab === 'categories' && <CategoriesScreen />}
       </main>
 

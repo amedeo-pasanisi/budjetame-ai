@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { TransactionsScreen } from './TransactionsScreen'
+import { useImportDraft } from './importDraft'
 import type { Transaction, TransactionPage, Wallet } from './api'
 
 vi.mock('./api', () => ({
@@ -58,6 +59,14 @@ class FakeIntersectionObserver {
       this as unknown as IntersectionObserver,
     )
   }
+}
+
+/** The Import Draft lives in the app shell (issue #43); the screen takes its
+ * controller as a prop. This harness owns a controller the way the shell
+ * would — these tests never exercise the import flow, so it stays closed. */
+function Harness() {
+  const controller = useImportDraft()
+  return <TransactionsScreen importState={controller} />
 }
 
 const wallet: Wallet = {
@@ -126,7 +135,7 @@ afterEach(() => {
 
 describe('TransactionsScreen infinite scroll', () => {
   it('renders the first page under the "All transactions" heading', async () => {
-    render(<TransactionsScreen />)
+    render(<Harness />)
 
     expect(
       await screen.findByRole('heading', { name: 'All transactions' }),
@@ -136,7 +145,7 @@ describe('TransactionsScreen infinite scroll', () => {
   })
 
   it('loads the next page when the sentinel enters the viewport, without duplicates', async () => {
-    render(<TransactionsScreen />)
+    render(<Harness />)
     await screen.findByText(/Coffee/)
 
     act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
@@ -150,7 +159,7 @@ describe('TransactionsScreen infinite scroll', () => {
   })
 
   it('does not fetch further pages once the last page is reached', async () => {
-    render(<TransactionsScreen />)
+    render(<Harness />)
     await screen.findByText(/Coffee/)
 
     act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
@@ -165,7 +174,7 @@ describe('TransactionsScreen infinite scroll', () => {
   })
 
   it('resets to the first page after saving a transaction', async () => {
-    render(<TransactionsScreen />)
+    render(<Harness />)
     await screen.findByText(/Coffee/)
     act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
     await screen.findByText(/Rent/)
@@ -187,7 +196,7 @@ describe('TransactionsScreen infinite scroll', () => {
 
 describe('TransactionsScreen merged filters (issue #33)', () => {
   it('keeps the filter bar closed by default and toggles it', async () => {
-    render(<TransactionsScreen />)
+    render(<Harness />)
 
     const toggle = await screen.findByRole('button', { name: /filters/i })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -203,7 +212,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
 
   it('lists active and Frozen Wallets in the Wallet dropdown, marked and with balances', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    render(<TransactionsScreen />)
+    render(<Harness />)
 
     fireEvent.click(await screen.findByRole('button', { name: /filters/i }))
     const select = await screen.findByLabelText('Wallet')
@@ -225,7 +234,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.walletId === 2 ? { items: [frozenLunch], next_cursor: null } : page1,
     )
-    render(<TransactionsScreen />)
+    render(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
@@ -246,7 +255,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.fromDate === '2026-01-01' ? { items: [], next_cursor: null } : page1,
     )
-    render(<TransactionsScreen />)
+    render(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
@@ -263,7 +272,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
 
   it('resets filters when the screen unmounts (a tab switch)', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    const { unmount } = render(<TransactionsScreen />)
+    const { unmount } = render(<Harness />)
     await screen.findByText(/Coffee/)
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
     fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
@@ -273,7 +282,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
 
     unmount()
     fetchTransactionsMock.mockClear()
-    render(<TransactionsScreen />)
+    render(<Harness />)
 
     await screen.findByText(/Coffee/)
     // Fresh mount: bar closed, no wallet selected, unfiltered first page.

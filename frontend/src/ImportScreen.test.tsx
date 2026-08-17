@@ -6,9 +6,11 @@
  * bar. The API client is mocked; the screen is driven like a user would
  * (pick a file, read, toggle, confirm). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useEffect } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { ImportScreen } from './ImportScreen'
+import { useImportDraft } from './importDraft'
 import type { ImportPreview, Transaction } from './api'
 
 vi.mock('./api', () => ({
@@ -110,10 +112,24 @@ const importedTransaction: Transaction = {
   created_at: '2026-08-02T10:00:00Z',
 }
 
+/** The draft itself lives in the app shell (issue #43); this harness opens
+ * a fresh draft locally and hands the controller to the screen, so the tests
+ * keep driving the real state transitions. */
+function Harness() {
+  const controller = useImportDraft()
+  useEffect(() => {
+    controller.open()
+    // The harness mounts once; opening on mount is the whole point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  if (controller.draft === null) return null
+  return <ImportScreen controller={controller} onDone={vi.fn()} />
+}
+
 /** Picks a file, reads it, and lands on the preview phase. */
 async function openPreview() {
   previewImportMock.mockResolvedValue(preview)
-  const view = render(<ImportScreen onDone={vi.fn()} onBack={vi.fn()} />)
+  const view = render(<Harness />)
   const file = new File(['rows'], 'rows.csv', { type: 'text/csv' })
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
   fireEvent.change(input!, { target: { files: [file] } })
