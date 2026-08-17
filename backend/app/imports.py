@@ -4,7 +4,13 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_account
 from app.deps import get_session
 from app.models import Account
-from app.schemas import ImportConfirmRequest, ImportPreview, TransactionOut
+from app.schemas import (
+    ImportConfirmRequest,
+    ImportPreview,
+    ImportRowValidation,
+    ImportRowValidationRequest,
+    TransactionOut,
+)
 from app.services import imports as import_service
 from app.transactions import _transaction_out, _write_warning
 
@@ -33,6 +39,22 @@ def preview_import(
         ok_count=sum(1 for row in rows if row.status == "ok"),
         error_count=sum(1 for row in rows if row.status == "error"),
         duplicate_count=sum(1 for row in rows if row.status == "duplicate"),
+    )
+
+
+@router.post("/validate-row", response_model=ImportRowValidation)
+def validate_row(
+    payload: ImportRowValidationRequest,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> ImportRowValidation:
+    """Re-validate one edited row during Verification (issue #44): the row's
+    Wallet/Category names are re-resolved against the Account, the CONTEXT.md
+    rules re-run, and the Duplicate check applied with the final key — the
+    row's fresh status and message, through the same pipeline as the Preview.
+    Nothing is written."""
+    return import_service.revalidate_row(
+        session, account.id, payload.row, payload.earlier_rows
     )
 
 

@@ -414,6 +414,28 @@ class ImportConfirmRequest(BaseModel):
     rows: list[ImportRowInput]
 
 
+class ImportRowValidationRequest(BaseModel):
+    """One edited Preview row to re-validate during Verification (issue #44):
+    `row` carries the row's edited fields (names, not ids); `earlier_rows` the
+    draft's rows that precede it in the file — the in-file Duplicate context
+    (CONTEXT.md: a row matching an earlier row of the same file is a
+    Duplicate), which the endpoint cannot see by itself."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    row: ImportRowInput
+    earlier_rows: list[ImportRowInput] = Field(default_factory=list)
+
+
+class ImportRowValidation(BaseModel):
+    """The fresh verdict for one edited row (issue #44). `status` speaks the
+    Preview's vocabulary — "ok" (ready in the UI), "duplicate", or "error" —
+    and `error` carries the message for an error row."""
+
+    status: Literal["ok", "duplicate", "error"]
+    error: str | None = None
+
+
 class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet

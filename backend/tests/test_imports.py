@@ -1,8 +1,16 @@
 from decimal import Decimal
 
 from httpx import AsyncClient
+from sqlalchemy.orm import Session
 
-from conftest import SEED_EMAIL, SEED_PASSWORD
+from app.db import create_db_engine
+from app.models import Wallet, WalletType
+from conftest import (
+    SEED_EMAIL,
+    SEED_PASSWORD,
+    delete_account,
+    insert_foreign_account,
+)
 
 
 async def _login(client: AsyncClient) -> str:
@@ -722,6 +730,12 @@ async def test_import_endpoints_require_authentication(client: AsyncClient) -> N
     assert (
         await client.post("/import/confirm", json={"rows": []})
     ).status_code == 401
+    assert (
+        await client.post(
+            "/import/validate-row",
+            json={"row": _expense("10.00", "Wallet"), "earlier_rows": []},
+        )
+    ).status_code == 401
 
 
 async def _wallet_balance(client: AsyncClient, token: str, wallet_id: int) -> str:
@@ -1132,3 +1146,242 @@ async def test_confirm_reports_cash_warning_on_created_transactions(
     assert response.status_code == 201
     assert response.json()[0]["warning"] is True
     assert await _wallet_balance(client, token, cash) == "-15.00"
+
+
+async def _validate(
+    client: AsyncClient, token: str, row: dict, *, earlier: list[dict] | None = None
+) -> dict:
+    """POST /import/validate-row: one edited row plus the draft's earlier rows."""
+    response = await client.post(
+        "/import/validate-row",
+        json={"row": row, "earlier_rows": earlier or []},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _transfer(
+    amount: str,
+    source: str,
+    destination: str,
+    *,
+    date: str = "2026-08-03",
+    **extra: str | None,
+) -> dict:
+    return {
+        "type": "transfer", "date": date, "amount": amount, "wallet": None,
+        "source_wallet": source, "destination_wallet": destination,
+        "category": None, "description": None, "latitude": None,
+        "longitude": None,
+        **extra,
+    }
+
+
+async def test_validate_row_revalidates_a_single_edited_row(client: AsyncClient) -> None:
+    """The single-row re-validation endpoint (issue #44): one row's edited
+    fields in, the fresh verdict out. An unknown Wallet stays an error with
+    its message; replacing it with a known Wallet returns ready ("ok"). The
+    same resolution and rules as the Preview apply, and nothing is written."""
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Verify Checking", "checking", "0.00")
+    await _create_category(client, token, "Verify Food", "expense")
+
+    still_bad = await _validate(
+        client, token, _expense("12.50", "Phantom Wallet", category="Verify Food")
+    )
+    assert still_bad["status"] == "error"
+    assert "Unknown wallet 'Phantom Wallet'" in still_bad["error"]
+
+    fixed = await _validate(
+        client, token, _expense("12.50", "Verify Checking", category="Verify Food")
+    )
+    assert fixed == {"status": "ok", "error": None}
+
+    # Verification only reads: neither call wrote a Transaction.
+    transactions = (
+        await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
+    ).json()["items"]
+    assert transactions == []
+
+
+async def test_validate_row_keeps_rule_violations_as_errors(
+    client: AsyncClient,
+) -> None:
+    """A row that still violates a CONTEXT.md rule keeps its error message:
+    the Contact-Wallet rule, the Category-Type rule, and the Transfer shape
+    rules surface the same messages the Preview gives."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Verify Rules Checking", "checking", "0.00")
+    await _create_wallet(client, token, "Verify Marco", "contact", "0.00")
+    await _create_category(client, token, "Verify Income Cat", "income")
+
+    contact = await _validate(
+        client, token, _expense("10.00", "Verify Marco")
+    )
+    assert contact["status"] == "error"
+    assert "Contact Wallets only participate in Transfers" in contact["error"]
+
+    wrong_type = await _validate(
+        client, token,
+        _expense("10.00", "Verify Rules Checking", category="Verify Income Cat"),
+    )
+    assert wrong_type["status"] == "error"
+    assert "not expense" in wrong_type["error"]
+
+    transfer_with_category = await _validate(
+        client, token,
+        _transfer(
+            "10.00", "Verify Rules Checking", "Verify Rules Checking",
+            category="Verify Income Cat",
+        ),
+    )
+    assert transfer_with_category["status"] == "error"
+    assert "never carry a category" in transfer_with_category["error"]
+
+    same_legs = await _validate(
+        client, token, _transfer("10.00", "Verify Rules Checking", "Verify Rules Checking")
+    )
+    assert same_legs["status"] == "error"
+    assert "different Wallets" in same_legs["error"]
+
+
+async def test_validate_row_duplicate_keys_on_every_dimension(
+    client: AsyncClient,
+) -> None:
+    """The Duplicate check uses the Preview's final key: an unchanged Duplicate
+    stays Duplicate, and changing any one of date, amount, type, wallet,
+    category, or description returns ready (issue #44)."""
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Verify Dup Checking", "checking", "0.00")
+    savings = await _create_wallet(client, token, "Verify Dup Savings", "checking", "0.00")
+    food = await _create_category(client, token, "Verify Dup Food", "expense")
+    travel = await _create_category(client, token, "Verify Dup Travel", "expense")
+    salary = await _create_category(client, token, "Verify Dup Salary", "income")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "12.50", "date": "2026-08-01",
+            "wallet_id": checking, "category_id": food, "description": "Lunch",
+        },
+        headers=_auth(token),
+    )
+
+    unchanged = await _validate(
+        client, token,
+        _expense("12.50", "Verify Dup Checking", category="Verify Dup Food", description="Lunch"),
+    )
+    assert unchanged["status"] == "duplicate"
+
+    for changed in (
+        # description
+        _expense("12.50", "Verify Dup Checking", category="Verify Dup Food", description="Dinner"),
+        # date
+        _expense("12.50", "Verify Dup Checking", category="Verify Dup Food", description="Lunch", date="2026-08-02"),
+        # amount
+        _expense("13.50", "Verify Dup Checking", category="Verify Dup Food", description="Lunch"),
+        # wallet
+        _expense("12.50", "Verify Dup Savings", category="Verify Dup Food", description="Lunch"),
+        # category
+        _expense("12.50", "Verify Dup Checking", category="Verify Dup Travel", description="Lunch"),
+        # type
+        _expense("12.50", "Verify Dup Checking", category="Verify Dup Salary", description="Lunch", type="income"),
+    ):
+        verdict = await _validate(client, token, changed)
+        assert verdict["status"] == "ok", changed
+
+
+async def test_validate_row_transfer_duplicates(client: AsyncClient) -> None:
+    """Transfer rows key on date, amount, source, destination, and description
+    (ADR-0006): an unchanged transfer Duplicate stays Duplicate; changing the
+    description alone returns ready."""
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Verify Tr Checking", "checking", "0.00")
+    savings = await _create_wallet(client, token, "Verify Tr Savings", "checking", "0.00")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "transfer", "amount": "50.00", "date": "2026-08-03",
+            "source_wallet_id": checking, "destination_wallet_id": savings,
+            "description": "Rent",
+        },
+        headers=_auth(token),
+    )
+
+    unchanged = await _validate(
+        client, token,
+        _transfer("50.00", "Verify Tr Checking", "Verify Tr Savings", description="Rent"),
+    )
+    assert unchanged["status"] == "duplicate"
+
+    changed = await _validate(
+        client, token,
+        _transfer("50.00", "Verify Tr Checking", "Verify Tr Savings", description="Deposit"),
+    )
+    assert changed["status"] == "ok"
+
+
+async def test_validate_row_counts_earlier_file_rows_as_duplicates(
+    client: AsyncClient,
+) -> None:
+    """The in-file half of the Duplicate check: a row matching an EARLIER row
+    of the same file is a Duplicate until its key actually changes. An
+    earlier row that failed to resolve holds no key, exactly as in the
+    Preview."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Verify File Checking", "checking", "0.00")
+    earlier = _expense("10.00", "Verify File Checking", description="Morning")
+
+    unchanged = await _validate(
+        client, token,
+        _expense("10.00", "Verify File Checking", description="Morning"),
+        earlier=[earlier],
+    )
+    assert unchanged["status"] == "duplicate"
+
+    changed = await _validate(
+        client, token,
+        _expense("10.00", "Verify File Checking", description="Evening"),
+        earlier=[earlier],
+    )
+    assert changed["status"] == "ok"
+
+    # An earlier row that failed to resolve cannot make the edited row a
+    # Duplicate: the edited row is judged on its own key.
+    broken_earlier = _expense("10.00", "Phantom Wallet", description="Morning")
+    fixed = await _validate(
+        client, token,
+        _expense("10.00", "Verify File Checking", description="Morning"),
+        earlier=[broken_earlier],
+    )
+    assert fixed["status"] == "ok"
+
+
+async def test_validate_row_is_scoped_to_the_account(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Foreign data is rejected (ADR-0003): a Wallet that exists only on
+    another Account resolves as unknown for this Account — the endpoint never
+    leaks or writes through foreign rows."""
+    token = await _login(client)
+    account_id = insert_foreign_account(database_url, "verify@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            session.add(
+                Wallet(
+                    account_id=account_id,
+                    name="Verify Foreign",
+                    type=WalletType.CHECKING.value,
+                )
+            )
+            session.commit()
+        engine.dispose()
+
+        verdict = await _validate(
+            client, token, _expense("10.00", "Verify Foreign")
+        )
+        assert verdict["status"] == "error"
+        assert "Unknown wallet 'Verify Foreign'" in verdict["error"]
+    finally:
+        delete_account(database_url, account_id)

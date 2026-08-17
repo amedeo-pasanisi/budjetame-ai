@@ -28,7 +28,12 @@ from sqlalchemy.orm import Session
 
 from app.dates import from_rome_day
 from app.models import Category, Transaction, TransactionType, Wallet
-from app.schemas import ImportRow, ImportRowInput, fmt_coord
+from app.schemas import (
+    ImportRow,
+    ImportRowInput,
+    ImportRowValidation,
+    fmt_coord,
+)
 from app.services import scoping, transactions as transaction_service
 
 # Matches the Numeric(12, 2) column and TransactionCreate._MAX_AMOUNT.
@@ -475,7 +480,52 @@ def _duplicate_key(params: dict[str, Any]) -> tuple:
     )
 
 
-# --- The two HTTP-facing operations ------------------------------------------
+# --- The HTTP-facing operations --------------------------------------------
+
+
+def _raw_from_input(item: ImportRowInput) -> RawRow:
+    """The RawRow a confirmed or edited row resolves from: the same fields the
+    preview parsed out of the file, now typed by the schema (names, not ids)."""
+    return RawRow(
+        number=item.row or 0,
+        type=item.type,
+        date=item.date,
+        amount=item.amount,
+        wallet=item.wallet,
+        source_wallet=item.source_wallet,
+        destination_wallet=item.destination_wallet,
+        category=item.category,
+        description=_blank(item.description),
+        latitude=item.latitude,
+        longitude=item.longitude,
+    )
+
+
+def _resolved_params(
+    session: Session, account_id: int, raw: RawRow
+) -> dict[str, Any]:
+    """Resolve and rule-check one row: the resolved kwargs when it passes,
+    ImportValidationError with the row's message when it does not — the
+    Preview's per-row pipeline, shared by preview_rows and revalidate_row so
+    the two can never drift."""
+    try:
+        params = _resolve_row(session, account_id, raw)
+        transaction_service.validate_create(
+            session,
+            account_id,
+            type=params["type"],
+            wallet_id=params["wallet_id"],
+            source_wallet_id=params["source_wallet_id"],
+            destination_wallet_id=params["destination_wallet_id"],
+            category_id=params["category_id"],
+        )
+    except (
+        ImportValidationError,
+        transaction_service.TransactionRuleError,
+        scoping.NotOwned,
+    ) as error:
+        raise ImportValidationError(str(error)) from error
+    return params
 
 
 def preview_rows(
@@ -507,21 +557,8 @@ def preview_rows(
             row.error = raw.error
         else:
             try:
-                params = _resolve_row(session, account_id, raw)
-                transaction_service.validate_create(
-                    session,
-                    account_id,
-                    type=params["type"],
-                    wallet_id=params["wallet_id"],
-                    source_wallet_id=params["source_wallet_id"],
-                    destination_wallet_id=params["destination_wallet_id"],
-                    category_id=params["category_id"],
-                )
-            except (
-                ImportValidationError,
-                transaction_service.TransactionRuleError,
-                scoping.NotOwned,
-            ) as error:
+                params = _resolved_params(session, account_id, raw)
+            except ImportValidationError as error:
                 row.status = "error"
                 row.error = str(error)
             else:
@@ -544,19 +581,7 @@ def confirm_rows(
     created: list[Transaction] = []
     try:
         for item in rows:
-            raw = RawRow(
-                number=item.row or 0,
-                type=item.type,
-                date=item.date,
-                amount=item.amount,
-                wallet=item.wallet,
-                source_wallet=item.source_wallet,
-                destination_wallet=item.destination_wallet,
-                category=item.category,
-                description=_blank(item.description),
-                latitude=item.latitude,
-                longitude=item.longitude,
-            )
+            raw = _raw_from_input(item)
             params = _resolve_row(session, account_id, raw)
             if _is_duplicate(session, account_id, params):
                 raise ImportValidationError(
@@ -580,3 +605,35 @@ def confirm_rows(
     for transaction in created:
         session.refresh(transaction)
     return created
+
+
+def revalidate_row(
+    session: Session,
+    account_id: int,
+    row: ImportRowInput,
+    earlier_rows: list[ImportRowInput],
+) -> ImportRowValidation:
+    """The fresh verdict for one edited row (issue #44): the Preview's
+    resolution, rules, and Duplicate check re-run for this single row,
+    writing nothing. `earlier_rows` is the draft's rows that precede it in
+    the file — the in-file half of the Duplicate check (CONTEXT.md: a row
+    matching an earlier row of the same file is a Duplicate) — because the
+    endpoint alone cannot see the draft. Rows that failed to resolve hold no
+    key, exactly as in the Preview."""
+    seen: set[tuple] = set()
+    for earlier in earlier_rows:
+        try:
+            params = _resolved_params(
+                session, account_id, _raw_from_input(earlier)
+            )
+        except ImportValidationError:
+            continue
+        seen.add(_duplicate_key(params))
+    try:
+        params = _resolved_params(session, account_id, _raw_from_input(row))
+    except ImportValidationError as error:
+        return ImportRowValidation(status="error", error=str(error))
+    key = _duplicate_key(params)
+    if _is_duplicate(session, account_id, params) or key in seen:
+        return ImportRowValidation(status="duplicate")
+    return ImportRowValidation(status="ok")
