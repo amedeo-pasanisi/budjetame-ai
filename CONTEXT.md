@@ -36,6 +36,10 @@ _Avoid_: internal transfer, move
 A user-defined label that groups Transactions of one type. Each Category is either expense-only or income-only and can only be attached to Transactions of that type. Names are unique case-insensitively within their type: an expense "Food" and an income "Food" can coexist.
 _Avoid_: tag, label, group
 
+**Duplicate**:
+An import row that matches an existing Transaction, or an earlier row of the same file, on date, amount, type, wallet(s), category, and description (Transfers key on date, amount, source and destination Wallets, and description). Duplicates are skipped by the import unless the row is verified into a different key.
+_Avoid_: repeated row, double entry
+
 **Balance**:
 The current amount of a Wallet, always computed as the sum of its Transactions, never stored.
 _Avoid_: stored balance, ledger balance
@@ -68,6 +72,7 @@ _Avoid_: address, venue, POI
 - Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
 - A Wallet can only be frozen when its balance is exactly €0.
 - A Place is attached to a Geographic Location by a name-search pick or a tap on the Google map; a coordinates-only pick (Leaflet tap, GPS), an import, or removing the Location clears it.
+- An import row is a Duplicate when date, amount, type, wallet(s), category, and description all match an existing Transaction or an earlier row of the same file; a blank description matches a missing one.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
 - All data is scoped to the single Account; foreign data gets a 403.
 

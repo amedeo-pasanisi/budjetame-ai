@@ -96,9 +96,10 @@ async def test_preview_parses_a_csv_into_ok_rows(client: AsyncClient) -> None:
 
 
 async def test_preview_flags_duplicates_against_the_database(client: AsyncClient) -> None:
-    """A row already in the database is marked "duplicate", keyed per the
-    spec: expense/income by date + amount + wallet + category; transfer by
-    date + amount + source + destination."""
+    """A row already in the database is marked "duplicate", keyed per
+    ADR-0006: expense/income by date + amount + type + wallet + category +
+    description; transfer by date + amount + source + destination +
+    description."""
     token = await _login(client)
     checking = await _create_wallet(client, token, "Dup Checking", "checking", "0.00")
     savings = await _create_wallet(client, token, "Dup Savings", "checking", "0.00")
@@ -297,6 +298,207 @@ async def test_confirm_inserts_cross_type_rows_with_the_same_key(
         headers=_auth(token),
     )
     assert repeated.status_code == 422
+
+
+async def test_preview_rows_differing_only_by_description_are_ok(
+    client: AsyncClient,
+) -> None:
+    """Two rows identical on date, amount, type, Wallet, and Category but with
+    different descriptions are both ready (ADR-0006): the duplicate key
+    includes the description, so rows distinguishable only by their note are
+    both importable."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Desc File Checking", "checking", "0.00")
+    await _create_category(client, token, "Desc File Food", "expense")
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,expense,12.50,Desc File Checking,,,Desc File Food,Morning coffee,",
+                    "2026-08-01,expense,12.50,Desc File Checking,,,Desc File Food,Evening coffee,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["ok", "ok"]
+    assert body["duplicate_count"] == 0
+
+
+async def test_preview_description_differentiates_rows_against_the_database(
+    client: AsyncClient,
+) -> None:
+    """A database row and a file row identical on date, amount, type, Wallet,
+    and Category but with different descriptions are distinct rows: the file
+    row is ready, while a row matching the description too is a Duplicate."""
+    token = await _login(client)
+    checking = await _create_wallet(
+        client, token, "Desc Db Checking", "checking", "0.00"
+    )
+    food = await _create_category(client, token, "Desc Db Food", "expense")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "12.50", "date": "2026-08-01",
+            "wallet_id": checking, "category_id": food, "description": "Lunch",
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,expense,12.50,Desc Db Checking,,,Desc Db Food,Dinner,",
+                    "2026-08-01,expense,12.50,Desc Db Checking,,,Desc Db Food,Lunch,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["ok", "duplicate"]
+    assert body["ok_count"] == 1
+    assert body["duplicate_count"] == 1
+
+
+async def test_preview_blank_description_matches_a_missing_one(
+    client: AsyncClient,
+) -> None:
+    """A blank description in the file matches a database row with no
+    description (still a Duplicate), and a database row whose description is
+    the empty string matches a blank file row too."""
+    token = await _login(client)
+    checking = await _create_wallet(
+        client, token, "Desc Blank Checking", "checking", "0.00"
+    )
+    # One database row with description stored as NULL, one stored as "".
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "12.50", "date": "2026-08-01",
+            "wallet_id": checking,
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "type": "income", "amount": "7.00", "date": "2026-08-02",
+            "wallet_id": checking, "description": "",
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,expense,12.50,Desc Blank Checking,,,,,",
+                    "2026-08-02,income,7.00,Desc Blank Checking,,,,,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["duplicate", "duplicate"]
+    assert body["duplicate_count"] == 2
+
+
+async def test_preview_transfer_duplicate_key_includes_description(
+    client: AsyncClient,
+) -> None:
+    """Transfer rows key on date, amount, source wallet, destination wallet,
+    and description (ADR-0006): transfers differing only by description are
+    both ready, while a repeat including the description is a Duplicate."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Desc Tr Checking", "checking", "0.00")
+    await _create_wallet(client, token, "Desc Tr Savings", "checking", "0.00")
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,transfer,50.00,,Desc Tr Checking,Desc Tr Savings,,Rent,",
+                    "2026-08-01,transfer,50.00,,Desc Tr Checking,Desc Tr Savings,,Rent,",
+                    "2026-08-01,transfer,50.00,,Desc Tr Checking,Desc Tr Savings,,Refund,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["ok", "duplicate", "ok"]
+    assert body["ok_count"] == 2
+    assert body["duplicate_count"] == 1
+
+
+async def test_preview_transfer_description_against_the_database(
+    client: AsyncClient,
+) -> None:
+    """The description dimension also applies against the database: a transfer
+    matching an existing one except for the description is ready, a transfer
+    matching it including the description is a Duplicate."""
+    token = await _login(client)
+    checking = await _create_wallet(
+        client, token, "Desc Tr Db Checking", "checking", "0.00"
+    )
+    savings = await _create_wallet(
+        client, token, "Desc Tr Db Savings", "checking", "0.00"
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "type": "transfer", "amount": "50.00", "date": "2026-08-01",
+            "source_wallet_id": checking, "destination_wallet_id": savings,
+            "description": "Rent",
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,transfer,50.00,,Desc Tr Db Checking,Desc Tr Db Savings,,Refund,",
+                    "2026-08-01,transfer,50.00,,Desc Tr Db Checking,Desc Tr Db Savings,,Rent,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["status"] for row in body["rows"]] == ["ok", "duplicate"]
+    assert body["ok_count"] == 1
+    assert body["duplicate_count"] == 1
 
 
 async def test_preview_flags_duplicate_key_differs_by_category(
@@ -774,6 +976,84 @@ async def test_preview_resolves_same_named_categories_by_type(
     assert response.status_code == 200
     body = response.json()
     assert [row["status"] for row in body["rows"]] == ["ok", "ok"]
+
+
+async def test_confirm_accepts_a_row_differing_only_by_description(
+    client: AsyncClient,
+) -> None:
+    """Confirm re-checks with the same key as the preview: a row identical to
+    a database row except for the description is not a Duplicate and is
+    inserted (ADR-0006)."""
+    token = await _login(client)
+    checking = await _create_wallet(
+        client, token, "Desc Confirm Checking", "checking", "0.00"
+    )
+    food = await _create_category(client, token, "Desc Confirm Food", "expense")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "12.50", "date": "2026-08-01",
+            "wallet_id": checking, "category_id": food, "description": "Lunch",
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.post(
+        "/import/confirm",
+        json={
+            "rows": [
+                _expense(
+                    "12.50", "Desc Confirm Checking",
+                    category="Desc Confirm Food", description="Dinner",
+                )
+            ]
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert len(created) == 1
+    assert created[0]["description"] == "Dinner"
+
+
+async def test_confirm_duplicate_by_description_rejects_the_whole_batch(
+    client: AsyncClient,
+) -> None:
+    """A confirmed row matching a database row including the description is a
+    Duplicate at confirm time too, and the batch is rejected all-or-nothing:
+    the valid row in the same batch is rolled back with it."""
+    token = await _login(client)
+    checking = await _create_wallet(
+        client, token, "Desc Reject Checking", "checking", "0.00"
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "12.50", "date": "2026-08-01",
+            "wallet_id": checking, "description": "Lunch",
+        },
+        headers=_auth(token),
+    )
+
+    response = await client.post(
+        "/import/confirm",
+        json={
+            "rows": [
+                _expense("1.00", "Desc Reject Checking", description="Fresh"),
+                _expense("12.50", "Desc Reject Checking", description="Lunch"),
+            ]
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+    assert "duplicates" in response.json()["detail"]
+    # Nothing was written: only the pre-existing expense remains on the Wallet.
+    transactions = (
+        await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
+    ).json()["items"]
+    assert len(transactions) == 1
 
 
 async def test_confirm_duplicate_message_names_the_row(client: AsyncClient) -> None:

@@ -298,7 +298,7 @@ class ImportRow(BaseModel):
     """One row of an import preview (T13): the extracted template fields plus
     the pipeline's verdict. `status` is "ok" (ready to insert), "error" (a
     parse or rule failure, detailed in `error`), or "duplicate" (a row already
-    in the database, keyed per the spec); `row` is the file's line number (the
+    in the database, keyed per ADR-0006); `row` is the file's line number (the
     header is line 1). Fields that failed to parse are null."""
 
     row: int

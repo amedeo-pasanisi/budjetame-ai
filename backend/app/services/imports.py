@@ -406,11 +406,13 @@ def _is_duplicate(
     session: Session, account_id: int, params: dict[str, Any]
 ) -> bool:
     """A row already in the database. Expense/income rows key on date + amount
-    + type + wallet + category; transfer rows on date + amount + source +
-    destination. The Type is part of the expense/income key — a deliberate
-    deviation from the spec's literal key (US31/ID13), which lacks it and
-    would make a €5 Expense and a €5 Income on the same Wallet and Category
-    collide. Opening Balance rows never match (they are not expense/income)."""
+    + type + wallet + category + description; transfer rows on date + amount +
+    source + destination + description. The Type is part of the expense/income
+    key — a deliberate deviation from the spec's literal key (US31/ID13), which
+    lacks it and would make a €5 Expense and a €5 Income on the same Wallet and
+    Category collide. The description is part of every key (ADR-0006), and a
+    blank one matches a missing one (the column can hold either NULL or "").
+    Opening Balance rows never match (they are not expense/income)."""
     day = from_rome_day(params["date"])
     stmt = (
         select(Transaction.id)
@@ -419,6 +421,8 @@ def _is_duplicate(
             Transaction.amount == params["amount"],
             Transaction.date >= day,
             Transaction.date < day + timedelta(days=1),
+            func.coalesce(Transaction.description, "")
+            == (params["description"] or ""),
         )
         .limit(1)
     )
@@ -443,10 +447,15 @@ def _is_duplicate(
 def _duplicate_key(params: dict[str, Any]) -> tuple:
     """The duplicate key, as a comparable tuple — keyed exactly as
     `_is_duplicate` queries it, including the Type dimension (the US31/ID13
-    deviation rationale lives there). The in-file `seen` set uses this so a
-    row repeated in the file is flagged like one already in the database. The
-    amount is quantized so "12.5" and "12.50" key identically."""
+    deviation rationale lives there) and the description (ADR-0006). The
+    in-file `seen` set uses this so a row repeated in the file is flagged like
+    one already in the database. The amount is quantized so "12.5" and
+    "12.50" key identically; the description keys as "" when blank or
+    missing."""
     amount = params["amount"].quantize(Decimal("0.01"))
+    # The description keys as "" for both None and blank (ADR-0006): a blank
+    # description matches a missing one in the file and in the database.
+    description = params["description"] or ""
     if params["type"] == TransactionType.TRANSFER.value:
         return (
             "transfer",
@@ -454,6 +463,7 @@ def _duplicate_key(params: dict[str, Any]) -> tuple:
             amount,
             params["source_wallet_id"],
             params["destination_wallet_id"],
+            description,
         )
     return (
         params["type"],
@@ -461,6 +471,7 @@ def _duplicate_key(params: dict[str, Any]) -> tuple:
         amount,
         params["wallet_id"],
         params["category_id"],
+        description,
     )
 
 
@@ -542,7 +553,7 @@ def confirm_rows(
                 source_wallet=item.source_wallet,
                 destination_wallet=item.destination_wallet,
                 category=item.category,
-                description=item.description,
+                description=_blank(item.description),
                 latitude=item.latitude,
                 longitude=item.longitude,
             )

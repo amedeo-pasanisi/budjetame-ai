@@ -161,7 +161,7 @@
   * Owned template, one flat sheet, amounts always positive — columns: `date`, `type` (expense | income | transfer), `amount`, `wallet`, `source wallet`, `destination wallet`, `category`, `description`, `location`.
   * Expense/Income rows: `wallet` + `category` (matching the category's type). Transfer rows: `source wallet` + `destination wallet`, no `wallet`, no `category`.
   * Wallets are matched by name (unique per Account); unknown names are rejected before the confirmation step.
-  * Duplicate rows (compared against the DB) are displayed in yellow: expense/income key = date + amount + wallet + category; transfer key = date + amount + source + destination.
+  * Duplicate rows (compared against the DB) are displayed in yellow: expense/income key = date + amount + type + wallet + category + description; transfer key = date + amount + source + destination + description (ADR-0006). A blank description matches a missing one.
   * The user confirms before the transactions are added to the DB.
 
 **US 7.2 - Balance Checking via Banking APIs** *(DEFERRED — later milestone)*
