@@ -7,8 +7,8 @@ import type { LatLng, Place } from './location'
  * (`google` | `leaflet`) selects the adapter; the Leaflet picker is the
  * default fallback and never requires a key. The contract stays
  * `{ position, onPick }` regardless of provider; `onPick` carries an optional
- * Place (ADR-0005) — only the Google search pick supplies one, a tap pick and
- * the Leaflet picker never do. */
+ * Place (ADR-0005) — picks made on the Google map supply one (search pick or
+ * tap on a place); the Leaflet picker never does. */
 export function MapPicker({
   position,
   onPick,

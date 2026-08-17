@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { fetchPlaceName } from './placeLookup'
 import { DEFAULT_MAP_CENTER, type LatLng, type Place } from './location'
 
 /** The Google Maps adapter (issue #27): a real Google Map with Places
@@ -44,10 +45,12 @@ function loadGoogleMaps(apiKey: string): Promise<void> {
     const script = document.createElement('script')
     script.dataset.budjetameGoogleMaps = 'true'
     script.async = true
+    // language=it keeps place names and autocomplete suggestions in Italian,
+    // independent of the browser's language (issue #34).
     script.src =
       'https://maps.googleapis.com/maps/api/js' +
       `?key=${encodeURIComponent(apiKey)}` +
-      '&libraries=places&v=weekly&loading=async&callback=__budjetameMapsReady'
+      '&libraries=places&language=it&v=weekly&loading=async&callback=__budjetameMapsReady'
     script.onerror = () => {
       window.clearTimeout(timeout)
       delete window.__budjetameMapsReady
@@ -60,9 +63,16 @@ function loadGoogleMaps(apiKey: string): Promise<void> {
 }
 
 /** A tap-to-pick Google Map with a Places autocomplete search box. The chosen
- * coordinates are reported via `onPick`; a search pick also reports the
- * Place's name and place_id (ADR-0005), a tap pick reports coordinates
- * alone. The marker follows `position`. */
+ * coordinates are reported via `onPick`; a search pick and a tap on a place
+ * (POI) both report the Place's name and place_id (ADR-0005), a bare-map
+ * tap reports coordinates alone. The marker follows `position`. */
+
+/** The map click event, with the POI place_id the runtime provides: clicking
+ * a place on the map fires a click carrying its place_id (verified on
+ * library 3.65), but @types/google.maps lags the runtime and does not
+ * declare it on MapMouseEvent. */
+type TapClickEvent = google.maps.MapMouseEvent & { placeId?: string | null }
+
 export function GoogleMapPicker({
   apiKey,
   position,
@@ -78,9 +88,16 @@ export function GoogleMapPicker({
   const markerRef = useRef<google.maps.Marker | null>(null)
   const onPickRef = useRef(onPick)
   onPickRef.current = onPick
+  // Every pick (tap or search) bumps this token, so only the most recent
+  // pick may call onPick — a stale tap lookup can never overwrite a newer
+  // pick or one that was cancelled by unmounting the picker.
+  const pickTokenRef = useRef(0)
 
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // True while a tap's place name is being fetched (issue #34): the map is
+  // covered with "Looking up…" so the lookup is visible to the user.
+  const [lookingUp, setLookingUp] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -102,16 +119,36 @@ export function GoogleMapPicker({
           map,
           position: position ?? DEFAULT_MAP_CENTER,
         })
-        map.addListener('click', (event: google.maps.MapMouseEvent) => {
+        map.addListener('click', (event: TapClickEvent) => {
           const latLng = event.latLng
-          if (latLng !== null) {
-            onPickRef.current({ lat: latLng.lat(), lng: latLng.lng() })
+          if (latLng === null) return
+          const position = { lat: latLng.lat(), lng: latLng.lng() }
+          const pickToken = ++pickTokenRef.current
+          const placeId = event.placeId ?? null
+          if (placeId === null) {
+            // Bare-map tap: coordinates-only pick (clears any stored Place).
+            onPickRef.current(position)
+            return
           }
+          // Tap on a place (issue #34): the place_id comes free with the
+          // click; fetch the name while the "Looking up…" cover hides
+          // Google's default place card (it cannot be suppressed).
+          void (async () => {
+            setLookingUp(true)
+            try {
+              const place = await fetchPlaceName(placeId, google, container)
+              if (cancelled || pickToken !== pickTokenRef.current) return
+              onPickRef.current(position, place ?? undefined)
+            } finally {
+              if (!cancelled && pickToken === pickTokenRef.current) {
+                setLookingUp(false)
+              }
+            }
+          })()
         })
         // Place-name search with autocomplete (user story 12): the search
         // requests name and place_id alongside the geometry, so a search pick
-        // can report the Place with the coordinates (ADR-0005). A tap pick
-        // stays coordinates-only.
+        // can report the Place with the coordinates (ADR-0005).
         autocomplete = new google.maps.places.Autocomplete(search, {
           fields: ['geometry', 'name', 'place_id'],
         })
@@ -128,6 +165,7 @@ export function GoogleMapPicker({
             selected.place_id !== ''
               ? { name: selected.name, placeId: selected.place_id }
               : undefined
+          pickTokenRef.current += 1 // invalidate any in-flight tap lookup
           onPickRef.current(
             { lat: location.lat(), lng: location.lng() },
             place,
@@ -180,13 +218,23 @@ export function GoogleMapPicker({
         ref={searchRef}
         type="text"
         placeholder="Search for a place…"
-        disabled={loading}
+        disabled={loading || lookingUp}
         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
       />
       {loading && (
         <p className="text-xs text-slate-500">Loading Google Map…</p>
       )}
-      <div ref={containerRef} className="h-56 w-full overflow-hidden rounded-xl" />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className="h-56 w-full overflow-hidden rounded-xl"
+        />
+        {lookingUp && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/90 text-sm text-slate-600">
+            Looking up…
+          </div>
+        )}
+      </div>
     </div>
   )
 }

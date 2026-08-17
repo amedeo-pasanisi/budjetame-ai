@@ -57,7 +57,7 @@ An optional set of coordinates (latitude/longitude) attached to a Transaction, o
 _Avoid_: maps link, location text
 
 **Place**:
-A named spot on the map (e.g. "Esselunga") that a Geographic Location may carry alongside its coordinates, together with an optional provider-specific reference ID (e.g. a Google place_id). Only a name-search pick produces a Place; taps, GPS, and imports attach coordinates alone.
+A named spot on the map (e.g. "Esselunga") that a Geographic Location may carry alongside its coordinates, together with an optional provider-specific reference ID (e.g. a Google place_id). Only a name-search pick or a tap on the Google map produces a Place; Leaflet taps, GPS, and imports attach coordinates alone. Google's map UI calls them points of interest (POIs); the provider API and the stored reference ID use the word place (place_id).
 _Avoid_: address, venue, POI
 
 ## Rules
@@ -67,7 +67,7 @@ _Avoid_: address, venue, POI
 - Contact Wallets participate only in Transfers — never direct Expense/Income Transactions.
 - Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
 - A Wallet can only be frozen when its balance is exactly €0.
-- A Place is attached to a Geographic Location only by a name-search pick; setting the Location any other way (tap, GPS) or removing it clears the Place.
+- A Place is attached to a Geographic Location by a name-search pick or a tap on the Google map; a coordinates-only pick (Leaflet tap, GPS), an import, or removing the Location clears it.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
 - All data is scoped to the single Account; foreign data gets a 403.
 

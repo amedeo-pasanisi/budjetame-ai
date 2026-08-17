@@ -5,9 +5,10 @@
 export type LatLng = { lat: number; lng: number }
 
 /** An optional Place reference on a Geographic Location (ADR-0005): the name
- * from a name-search pick, plus the provider's reference id when it has one
- * (e.g. a Google place_id). Only a search pick produces a Place; taps, GPS
- * and imports attach coordinates alone. */
+ * from a name-search pick or a tap on the Google map, plus the provider's
+ * reference id when it has one (e.g. a Google place_id). Only picks made on
+ * the Google map produce a Place; Leaflet taps, GPS and imports attach
+ * coordinates alone. */
 export type Place = { name: string; placeId?: string }
 
 /** Default map center when nothing is picked yet (Europe/Rome), shared by

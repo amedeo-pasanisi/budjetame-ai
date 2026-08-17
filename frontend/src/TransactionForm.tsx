@@ -89,9 +89,10 @@ export function TransactionForm({
   const [location, setLocation] = useState<LatLng | null>(() =>
     latLngFromWire(editing?.latitude ?? null, editing?.longitude ?? null),
   )
-  // The optional Place reference (ADR-0005): set only by a search pick,
-  // cleared by a tap pick, a GPS pick, or Remove. It always accompanies
-  // coordinates — never the reverse.
+  // The optional Place reference (ADR-0005): set by a pick that carries one
+  // (search pick, Google-map tap), cleared by a coordinates-only pick
+  // (Leaflet tap, GPS), or Remove. It always accompanies coordinates — never
+  // the reverse.
   const [place, setPlace] = useState<Place | null>(() =>
     placeFromWire(editing?.place_name ?? null, editing?.place_id ?? null),
   )
@@ -453,8 +454,8 @@ export function TransactionForm({
               onPick={(picked, pickedPlace) => {
                 locationTouched.current = true
                 setLocation(picked)
-                // A search pick sets the Place; a tap pick (no Place
-                // supplied) clears it (ADR-0005).
+                // A pick that carries a Place sets it; a coordinates-only
+                // pick (bare-map/Leaflet tap, GPS, failed lookup) clears it.
                 setPlace(pickedPlace ?? null)
                 setShowingPicker(false)
                 setGpsError(null)

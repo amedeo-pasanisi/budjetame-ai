@@ -76,7 +76,7 @@
 **US 3.2 - Google Maps Location Saving**
 * **Story:** As a user, I want to record the location of my transactions so that I can remember and track my movements.
 * **Acceptance Criteria:**
-  * The "Geographic Location" field stores coordinates (latitude/longitude) and, when a place was chosen by name search, that place's name and Google place_id (ADR-0005). The maps link is built on the frontend — from the place_id, else the name, else the coordinates — and the link itself is never stored as text. Re-picking by tap or GPS, or removing the location, clears the place.
+  * The "Geographic Location" field stores coordinates (latitude/longitude) and, when a place was chosen by name search or by tapping the Google map, that place's name and Google place_id (ADR-0005). The maps link is built on the frontend — from the place_id, else the name, else the coordinates — and the link itself is never stored as text. Re-picking by a coordinates-only pick (Leaflet tap or GPS), or removing the location, clears the place.
   * When I create a transaction, if the system has permission to access GPS, the "Geographic Location" field is populated by default with my current coordinates.
   * When I tap "Use my location", the button shows a locating state until the position is found; if it fails (denied, timeout, unavailable), an inline message tells me and the map picker remains available.
 
