@@ -256,28 +256,21 @@ function PreviewPhase({
   const confirmable = selected.size
   return (
     <div className="mt-4 space-y-3">
-      <p className="text-sm text-slate-600">
-        <span className="font-medium text-emerald-700">{ready} ready</span>
-        {duplicates > 0 && (
-          <>
-            {' · '}
-            <span className="font-medium text-amber-700">{duplicates} duplicate</span>
-          </>
-        )}
-        {problems > 0 && (
-          <>
-            {' · '}
-            <span className="font-medium text-red-700">{problems} problem</span>
-          </>
-        )}
-        {' — duplicates are skipped; check the rows below, then confirm.'}
-      </p>
-
       {error !== null && (
         <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onPickAgain}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
+        >
+          Pick another file
+        </button>
+      </div>
 
       {preview.rows.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
@@ -293,19 +286,26 @@ function PreviewPhase({
         </ul>
       )}
 
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={onPickAgain}
-          className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600"
-        >
-          Pick another file
-        </button>
+      {/* The confirm bar (issue #42): sticky above the fixed tab nav
+       * (bottom-12 clears it), so a long row list scrolls under it while
+       * the counts and the Import button stay visible. */}
+      <div className="sticky bottom-12 z-10 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
+        <p className="min-w-0 text-xs font-medium text-slate-600">
+          <span className="text-emerald-700">{ready} ready</span>
+          {' · '}
+          <span className="text-amber-700">
+            {duplicates} duplicate{duplicates === 1 ? '' : 's'}
+          </span>
+          {' · '}
+          <span className="text-red-700">
+            {problems} problem{problems === 1 ? '' : 's'}
+          </span>
+        </p>
         <button
           type="button"
           disabled={confirmable === 0 || busy}
           onClick={onConfirm}
-          className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+          className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy
             ? 'Importing…'
