@@ -40,6 +40,10 @@ _Avoid_: tag, label, group
 An import row that matches an existing Transaction, or an earlier row of the same file, on date, amount, type, wallet(s), category, and description (Transfers key on date, amount, source and destination Wallets, and description). Duplicates are skipped by the import unless the row is verified into a different key.
 _Avoid_: repeated row, double entry
 
+**Merging**:
+The outcome of renaming a Category to the name of an existing Category of the same Type: the existing Category survives with its name, icon, and color; the renamed Category's Transactions move to it; the renamed Category is deleted. A rename that collides merges instead of failing.
+_Avoid_: combining, renaming-into
+
 **Balance**:
 The current amount of a Wallet, always computed as the sum of its Transactions, never stored.
 _Avoid_: stored balance, ledger balance
@@ -63,6 +67,18 @@ _Avoid_: maps link, location text
 **Place**:
 A named spot on the map (e.g. "Esselunga") that a Geographic Location may carry alongside its coordinates, together with an optional provider-specific reference ID (e.g. a Google place_id). Only a name-search pick or a tap on the Google map produces a Place; Leaflet taps, GPS, and imports attach coordinates alone. Google's map UI calls them points of interest (POIs); the provider API and the stored reference ID use the word place (place_id).
 _Avoid_: address, venue, POI
+
+**Import Draft**:
+The unconfirmed state of an import: the parsed rows, verification edits, and row selections, kept while the user leaves the Import screen. It is discarded only by Cancel, picking another file, or a successful import.
+_Avoid_: pending import
+
+**Preview**:
+The review step of an import before anything is written: every row is classified ready, duplicate, or problem, and can be verified. Nothing reaches the database until the import is confirmed.
+_Avoid_: verification phase
+
+**Verification**:
+The act of editing a Preview row — date, amount, type, wallet(s), category, description, location — so it becomes acceptable for import. A verified row is re-validated against the database as it is saved.
+_Avoid_: fixing rows
 
 ## Rules
 

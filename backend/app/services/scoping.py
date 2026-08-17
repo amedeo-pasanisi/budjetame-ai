@@ -49,6 +49,30 @@ def owned_or_raise(
     return row
 
 
+def named_row(
+    session: Session,
+    model: type[TNamed],
+    account_id: int,
+    name: str,
+    *,
+    type_value: str | None = None,
+    exclude_id: int | None = None,
+) -> TNamed | None:
+    """The Account's row of `model` already holding `name`,
+    case-insensitively, or None. `type_value` scopes the match within a Type
+    (Categories: names are unique per Account and Type); `exclude_id` ignores
+    the row being renamed (its own name must not count against it)."""
+    stmt = select(model).where(
+        model.account_id == account_id,
+        func.lower(model.name) == func.lower(name),
+    )
+    if type_value is not None:
+        stmt = stmt.where(model.type == type_value)
+    if exclude_id is not None:
+        stmt = stmt.where(model.id != exclude_id)
+    return session.scalar(stmt)
+
+
 def name_is_taken(
     session: Session,
     model: type[TNamed],
@@ -59,15 +83,16 @@ def name_is_taken(
     exclude_id: int | None = None,
 ) -> bool:
     """True when another row of `model` of the Account already has `name`,
-    case-insensitively. `type_value` scopes the check within a Type
-    (Categories: names are unique per Account and Type); `exclude_id` ignores
-    the row being renamed (its own name must not count against it)."""
-    stmt = select(model.id).where(
-        model.account_id == account_id,
-        func.lower(model.name) == func.lower(name),
+    case-insensitively — `named_row` with the same scoping, reduced to the
+    boolean every caller but the merge-offer lookup needs."""
+    return (
+        named_row(
+            session,
+            model,
+            account_id,
+            name,
+            type_value=type_value,
+            exclude_id=exclude_id,
+        )
+        is not None
     )
-    if type_value is not None:
-        stmt = stmt.where(model.type == type_value)
-    if exclude_id is not None:
-        stmt = stmt.where(model.id != exclude_id)
-    return session.scalar(stmt) is not None

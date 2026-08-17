@@ -86,7 +86,12 @@ class CategoryCreate(BaseModel):
 
 class CategoryUpdate(BaseModel):
     """Edit a Category: name, icon, or color. The type cannot change, and at
-    least one editable field must be present."""
+    least one editable field must be present. A `name` that collides with an
+    existing same-Type Category is not applied: the endpoint answers 409 with
+    a structured detail carrying the existing Category's id (`target_id`) and
+    the count of Transactions on the renamed Category (`transaction_count`),
+    the merge offer (ADR-0007). The merge itself is a separate confirmed call
+    — POST /categories/{id}/merge."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -99,6 +104,17 @@ class CategoryUpdate(BaseModel):
         if self.name is None and self.icon is None and self.color is None:
             raise ValueError("at least one of name, icon, or color is required")
         return self
+
+
+class CategoryMergeRequest(BaseModel):
+    """The confirmed merge (ADR-0007): move the renamed Category's
+    Transactions into the existing Category the rename collided with.
+    `target_id` is the `target_id` the 409 conflict response carried; the
+    target survives with its name, icon, and color."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: int
 
 
 class CategoryOut(BaseModel):

@@ -112,6 +112,7 @@
 * **Acceptance Criteria:**
   * I can create a category by specifying a Name, an Icon/Color, and a Type: expense-only or income-only. A category can only be attached to transactions of its type.
   * I cannot create two categories with the exact same name within a type (case-insensitive): an expense "Food" and an income "Food" can coexist.
+  * Renaming a category to the name of an existing same-type category merges them (ADR-0007): the existing category survives with its name, icon, and color, the renamed category's transactions move to it, and the renamed category is deleted. The rename shows a confirmation with the transaction count before the merge happens.
   * Deleting a category leaves its transactions uncategorized; transactions are never deleted.
   * Transfers never carry a category.
 
