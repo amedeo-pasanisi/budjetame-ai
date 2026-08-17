@@ -21,21 +21,22 @@ describe('location helpers', () => {
     expect(formatLocation({ lat: 41.9028, lng: 12.4964 })).toBe('41.9028, 12.4964')
   })
 
-  // The Place reference (ADR-0005): the maps link precedence is
-  // place_id → name → coordinates, so a search pick opens the place's info
-  // panel instead of a bare coordinate pin.
-  it('builds the place info-panel link from a place_id (precedence)', () => {
+  // The Place reference (ADR-0005): a picked Place opens via Google's
+  // documented place-with-pin search URL — coordinates as the query,
+  // place_id as query_place_id. The mobile apps run it as a search: a
+  // place_id they can't resolve still lands a pin on the coordinates.
+  it('builds the place-with-pin search URL from a Place with a place_id', () => {
     expect(
       mapLink(
         { lat: 41.9028, lng: 12.4964 },
         { name: 'Esselunga', placeId: 'ChIJN1t_tDeuEmsRUsoyG83frY4' },
       ),
     ).toBe(
-      'https://www.google.com/maps/place/?q=place_id:ChIJN1t_tDeuEmsRUsoyG83frY4',
+      'https://www.google.com/maps/search/?api=1&query=41.9028,12.4964&query_place_id=ChIJN1t_tDeuEmsRUsoyG83frY4',
     )
   })
 
-  it('falls back to a name search when the Place has no place_id', () => {
+  it('searches the place name when the Place has no place_id', () => {
     expect(
       mapLink({ lat: 41.9028, lng: 12.4964 }, { name: 'Esselunga Bar' }),
     ).toBe('https://www.google.com/maps/search/?api=1&query=Esselunga%20Bar')

@@ -108,10 +108,12 @@ describe('TransactionForm place display (issue #34)', () => {
 
     expect(screen.getByText('📍 Esselunga')).toBeInTheDocument()
     expect(screen.queryByText('📍 41.9028, 12.4964')).not.toBeInTheDocument()
-    // The link opens the place's info panel, not a coordinate pin.
+    // The link is Google's place-with-pin search URL (coordinates as the
+    // query, place_id as query_place_id): the mobile Maps apps run it as a
+    // search, so an unresolvable place_id still lands a pin on the spot.
     expect(screen.getByRole('link', { name: /Open in Google Maps/ })).toHaveAttribute(
       'href',
-      'https://www.google.com/maps/place/?q=place_id:ChIJN1t_tDeuEmsRUsoyG83frY4',
+      'https://www.google.com/maps/search/?api=1&query=41.9028,12.4964&query_place_id=ChIJN1t_tDeuEmsRUsoyG83frY4',
     )
   })
 

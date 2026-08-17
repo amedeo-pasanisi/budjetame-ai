@@ -16,12 +16,16 @@ export type Place = { name: string; placeId?: string }
 export const DEFAULT_MAP_CENTER: LatLng = { lat: 41.9028, lng: 12.4964 }
 
 /** The Google Maps link for a coordinate pair — built at render time, never
- * persisted (US17: "never stored as text"). A Place (ADR-0005) takes
- * precedence: place_id opens the place's info panel, else the name is
- * searched, else the bare coordinate pin. */
+ * persisted (US17: "never stored as text"). A Place (ADR-0005) with a
+ * place_id becomes Google's documented place-with-pin search URL:
+ * `search/?api=1&query={lat},{lng}&query_place_id={id}`. The mobile Maps apps
+ * run it as a search, so an unresolvable place_id still lands a pin on the
+ * exact coordinates (never a literal "place_id:…" text search, and never a
+ * place URL the app silently ignores). Without a place_id the place name is
+ * searched; without a Place the link is a plain coordinate search. */
 export function mapLink(position: LatLng, place: Place | null = null): string {
   if (place !== null && place.placeId !== undefined && place.placeId !== '') {
-    return `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(place.placeId)}`
+    return `https://www.google.com/maps/search/?api=1&query=${position.lat},${position.lng}&query_place_id=${encodeURIComponent(place.placeId)}`
   }
   if (place !== null && place.name !== '') {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}`
