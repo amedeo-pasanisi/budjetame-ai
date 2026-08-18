@@ -61,6 +61,15 @@
   * When I delete a wallet, the interface no longer displays it, but it remains present in the DB and all transactions made on that wallet are still viewable.
   * A frozen wallet is read-only: no new transactions can be created on it, and its existing transactions can no longer be edited or deleted. Its balance therefore stays €0 and Net Worth is unaffected.
 
+**US 2.3 - Unfreezing Frozen Wallets**
+* **Story:** As a user, I want to unfreeze a frozen wallet, so that a mistaken freeze or a change of heart is reversible (issue #48).
+* **Acceptance Criteria:**
+  * The Wallets screen shows a collapsed "Frozen wallets (N)" footer row (absent when N = 0); tapping it expands the frozen list in place.
+  * Frozen rows read like active rows — name, "Type · Frozen" subtitle, unsigned €0.00 — sorted A→Z case-insensitively in one flat list.
+  * The whole frozen row is the Unfreeze button: one tap, no confirmation. The wallet leaves the Frozen list and lands in its type section at its sorted position; the footer row disappears when the last frozen wallet is unfrozen.
+  * An unfrozen wallet behaves exactly as if never frozen: its Transactions become editable again, and rename/re-freeze work.
+  * The name rule is unchanged: a frozen wallet still holds its name, and name-collision messages stay as they are.
+
 ---
 
 ### EPIC 3: Transaction Management

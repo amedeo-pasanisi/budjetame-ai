@@ -53,8 +53,8 @@ The algebraic sum of the balances of all Wallets, including Contact Wallets and 
 _Avoid_: total assets, equity
 
 **Frozen Wallet**:
-A Wallet deleted at balance €0. It is hidden from the UI but kept in the database; its Transactions stay viewable but can no longer be created, edited, or deleted.
-_Avoid_: deleted wallet, trashed wallet
+A Wallet deleted at balance exactly €0. It stays in the database with its Transactions viewable; while frozen it is read-only — no Transactions can be created, edited, or deleted on it — and it appears only in the Wallets screen's collapsed Frozen Wallets list. Unfreezing restores it to active: it returns to its type section, accepts Transactions again, and its existing Transactions become editable again.
+_Avoid_: deleted wallet, trashed wallet, archived wallet
 
 **Opening Balance**:
 A Transaction created when a Wallet is started with a nonzero initial balance (must be ≥ €0). It counts toward the Wallet's balance but never toward income/expense statistics.
@@ -87,6 +87,7 @@ _Avoid_: fixing rows
 - Contact Wallets participate only in Transfers — never direct Expense/Income Transactions.
 - Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
 - A Wallet can only be frozen when its balance is exactly €0.
+- A Frozen Wallet can be unfrozen at any time: its balance is always exactly €0 while frozen.
 - A Place is attached to a Geographic Location by a name-search pick or a tap on the Google map; a coordinates-only pick (Leaflet tap, GPS), an import, or removing the Location clears it.
 - An import row is a Duplicate when date, amount, type, wallet(s), category, and description all match an existing Transaction or an earlier row of the same file; a blank description matches a missing one.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
