@@ -7,7 +7,7 @@
  * The shell is rendered and driven like a user would (click tabs, pick a
  * file, read, toggle rows, confirm); the API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { AppShell } from './App'
 import type { ImportPreview, Transaction, Wallet } from './api'
@@ -26,6 +26,7 @@ vi.mock('./api', () => ({
   fetchExpenseTrend: vi.fn(),
   previewImport: vi.fn(),
   confirmImport: vi.fn(),
+  validateImportRow: vi.fn(),
   // The screens not exercised here (forms, wallets, login) import these at
   // module scope; the mock must still provide them.
   fetchCurrentAccount: vi.fn(),
@@ -54,10 +55,12 @@ import {
   fetchTransactions,
   fetchWallets,
   previewImport,
+  validateImportRow,
 } from './api'
 
 const previewImportMock = vi.mocked(previewImport)
 const confirmImportMock = vi.mocked(confirmImport)
+const validateImportRowMock = vi.mocked(validateImportRow)
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
 const fetchTransactionsMock = vi.mocked(fetchTransactions)
@@ -332,5 +335,27 @@ describe('Import Draft lifecycle (issue #43)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
     expect(screen.getByRole('button', { name: 'Read and validate' })).toBeDisabled()
+  })
+
+  it('keeps verification edits across a tab switch (issue #46)', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    const view = renderShell()
+    await openPreview(view)
+
+    // Verify the problem row: the unknown wallet becomes a known one.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    fireEvent.change(within(dialog).getByLabelText('Wallet'), { target: { value: 'Cash' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('button', { name: 'Import 3 rows' })).toBeInTheDocument()
+
+    // Switch to another tab and back: the verified row stays verified and
+    // selected, without re-validating.
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
+
+    expect(await screen.findByRole('button', { name: 'Import 3 rows' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit row 4' })).toHaveTextContent('Ready')
+    expect(validateImportRowMock).toHaveBeenCalledTimes(1)
   })
 })

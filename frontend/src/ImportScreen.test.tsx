@@ -3,27 +3,36 @@
  * the Import button visible; the button reflects the selection ("Nothing to
  * import" disabled at zero, "Import N rows" otherwise) and imports exactly
  * the selected rows; "Pick another file" stays above the list, out of the
- * bar. The API client is mocked; the screen is driven like a user would
- * (pick a file, read, toggle, confirm). */
+ * bar.
+ *
+ * Import row editor (issue #46): tapping any row opens a bottom-sheet modal
+ * prefilled with its fields; saving re-validates the edited row server-side
+ * and flips its status inline, auto-selecting rows that become Ready and
+ * deselecting ones that stop being Ready; confirm sends the edited values.
+ *
+ * The API client is mocked; the screen is driven like a user would (pick a
+ * file, read, toggle, edit a row, confirm). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { ImportScreen } from './ImportScreen'
 import { useImportDraft } from './importDraft'
-import type { ImportPreview, Transaction } from './api'
+import type { ImportPreview, ImportRowInput, Transaction } from './api'
 
 vi.mock('./api', () => ({
   TOKEN_KEY: 'budjetame.token',
   formatEuros: (value: string) => `€${value}`,
   previewImport: vi.fn(),
   confirmImport: vi.fn(),
+  validateImportRow: vi.fn(),
 }))
 
-import { confirmImport, previewImport } from './api'
+import { confirmImport, previewImport, validateImportRow } from './api'
 
 const previewImportMock = vi.mocked(previewImport)
 const confirmImportMock = vi.mocked(confirmImport)
+const validateImportRowMock = vi.mocked(validateImportRow)
 
 /** Two ready rows (auto-selected), one duplicate, one problem. */
 const preview: ImportPreview = {
@@ -141,6 +150,7 @@ beforeEach(() => {
   localStorage.setItem('budjetame.token', 'budjetame.token')
   confirmImportMock.mockReset()
   previewImportMock.mockReset()
+  validateImportRowMock.mockReset()
 })
 
 afterEach(() => {
@@ -221,5 +231,277 @@ describe('ImportScreen sticky confirm bar (issue #42)', () => {
       ]),
     )
     expect(await screen.findByText(/Imported 1 transaction/)).toBeInTheDocument()
+  })
+})
+
+/** The fixture's rows 1-3 as the wire's ImportRowInput literals — the worked
+ * example the validate/confirm calls must match, written independently of
+ * the code under test. */
+const wireRows: ImportRowInput[] = [
+  {
+    row: 1,
+    type: 'expense',
+    date: '2026-08-01',
+    amount: '4.50',
+    wallet: 'Cash',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Food',
+    description: 'Coffee',
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 2,
+    type: 'income',
+    date: '2026-08-02',
+    amount: '100.00',
+    wallet: 'Bank',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Salary',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 3,
+    type: 'expense',
+    date: '2026-08-01',
+    amount: '4.50',
+    wallet: 'Cash',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Food',
+    description: 'Coffee',
+    latitude: null,
+    longitude: null,
+  },
+]
+
+describe('ImportScreen row editor (issue #46)', () => {
+  /** Lands on the preview and opens the editor for the given row. */
+  const openEditor = async (rowNumber: number) => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+    fireEvent.click(screen.getByRole('button', { name: `Edit row ${rowNumber}` }))
+    const dialog = await screen.findByRole('dialog', { name: `Edit row ${rowNumber}` })
+    return { dialog }
+  }
+
+  it('opens prefilled for ready, duplicate, and problem rows; backdrop, Escape, and Cancel close without changing the row', async () => {
+    // Problem row.
+    const problem = await openEditor(4)
+    expect(within(problem.dialog).getByLabelText('Wallet')).toHaveValue('Unknown')
+    expect(within(problem.dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(within(problem.dialog).getByLabelText('Date')).toHaveValue('2026-08-03')
+    expect(within(problem.dialog).queryByLabelText('From')).not.toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+    expect(screen.getByText("Unknown wallet 'Unknown'")).toBeInTheDocument()
+
+    // Ready row, closed via the backdrop.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const ready = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    expect(within(ready).getByLabelText('Wallet')).toHaveValue('Cash')
+    expect(within(ready).getByLabelText('Category')).toHaveValue('Food')
+    expect(within(ready).getByLabelText('Description')).toHaveValue('Coffee')
+    fireEvent.click(ready.previousElementSibling as Element)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+
+    // Duplicate row, closed via Cancel.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 3' }))
+    const duplicate = await screen.findByRole('dialog', { name: 'Edit row 3' })
+    expect(within(duplicate).getByLabelText('Wallet')).toHaveValue('Cash')
+    expect(within(duplicate).getByLabelText('Amount (€)')).toHaveValue(4.5)
+    fireEvent.click(within(duplicate).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+
+    // Every row is still there with its original status.
+    expect(screen.getAllByRole('checkbox')).toHaveLength(4)
+    expect(screen.getByRole('button', { name: 'Edit row 3' })).toHaveTextContent('Duplicate')
+  })
+
+  it('lets the Type switch and adapts the fields: wallet+category for expense/income, source/destination and no category for transfers', async () => {
+    const { dialog } = await openEditor(1)
+    expect(within(dialog).getByLabelText('Wallet')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Category')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('From')).not.toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer' }))
+    expect(within(dialog).queryByLabelText('Wallet')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Category')).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('From')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('To')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText('Transfers never carry a category.'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
+    expect(within(dialog).getByLabelText('Wallet')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Category')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('From')).not.toBeInTheDocument()
+  })
+
+  it('saves through the re-validation endpoint, flips a fixed problem row to Ready inline, and auto-selects it', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    const { dialog } = await openEditor(4)
+
+    fireEvent.change(within(dialog).getByLabelText('Wallet'), { target: { value: 'Cash' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(validateImportRowMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        {
+          row: 4,
+          type: 'expense',
+          date: '2026-08-03',
+          amount: '12.00',
+          wallet: 'Cash',
+          source_wallet: null,
+          destination_wallet: null,
+          category: null,
+          description: null,
+          latitude: null,
+          longitude: null,
+        },
+        wireRows,
+      ),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: 'Select row 4' })).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Import 3 rows' })).toBeInTheDocument()
+    expect(screen.queryByText("Unknown wallet 'Unknown'")).not.toBeInTheDocument()
+  })
+
+  it('deselects a selected row that stops being ready', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'duplicate', error: null })
+    const { dialog } = await openEditor(1)
+
+    fireEvent.change(within(dialog).getByLabelText('Description'), {
+      target: { value: 'Latte' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(validateImportRowMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        { ...wireRows[0], description: 'Latte' },
+        [],
+      ),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: 'Select row 1' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Edit row 1' })).toHaveTextContent('Duplicate')
+    expect(screen.getByRole('button', { name: 'Import 1 row' })).toBeInTheDocument()
+  })
+
+  it('keeps a problem row\'s error message until the problem is actually fixed', async () => {
+    validateImportRowMock.mockResolvedValue({
+      status: 'error',
+      error: "Unknown wallet 'Cash'",
+    })
+    const { dialog } = await openEditor(4)
+
+    fireEvent.change(within(dialog).getByLabelText('Wallet'), { target: { value: 'Cash' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText("Unknown wallet 'Cash'")).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Select row 4' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Import 2 rows' })).toBeInTheDocument()
+
+    // Reopening keeps the last saved edit; a real fix flips it to Ready.
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const reopened = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    expect(within(reopened).getByLabelText('Wallet')).toHaveValue('Cash')
+    fireEvent.change(within(reopened).getByLabelText('Wallet'), { target: { value: 'Bank' } })
+    fireEvent.click(within(reopened).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: 'Select row 4' })).toBeChecked()
+    expect(screen.queryByText("Unknown wallet 'Cash'")).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Import 3 rows' })).toBeInTheDocument()
+  })
+
+  it('confirms the edited values, not the file\'s originals', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    confirmImportMock.mockResolvedValue([importedTransaction])
+    const { dialog } = await openEditor(4)
+
+    fireEvent.change(within(dialog).getByLabelText('Wallet'), { target: { value: 'Cash' } })
+    fireEvent.change(within(dialog).getByLabelText('Description'), {
+      target: { value: 'Lunch' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import 3 rows' }))
+
+    await waitFor(() =>
+      expect(confirmImportMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        expect.arrayContaining([
+          {
+            row: 4,
+            type: 'expense',
+            date: '2026-08-03',
+            amount: '12.00',
+            wallet: 'Cash',
+            source_wallet: null,
+            destination_wallet: null,
+            category: null,
+            description: 'Lunch',
+            latitude: null,
+            longitude: null,
+          },
+        ]),
+      ),
+    )
+  })
+
+  it('sends the earlier draft rows — with their edits applied — as the in-file Duplicate context', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+
+    // Edit row 3's description first, so its edited value becomes part of
+    // the context for later rows.
+    const first = await openEditor(3)
+    fireEvent.change(within(first.dialog).getByLabelText('Description'), {
+      target: { value: 'Espresso' },
+    })
+    fireEvent.click(within(first.dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const second = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    fireEvent.click(within(second).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(validateImportRowMock).toHaveBeenLastCalledWith(
+        'budjetame.token',
+        {
+          row: 4,
+          type: 'expense',
+          date: '2026-08-03',
+          amount: '12.00',
+          wallet: 'Unknown',
+          source_wallet: null,
+          destination_wallet: null,
+          category: null,
+          description: null,
+          latitude: null,
+          longitude: null,
+        },
+        expect.arrayContaining([
+          expect.objectContaining({ row: 3, description: 'Espresso' }),
+        ]),
+      ),
+    )
   })
 })

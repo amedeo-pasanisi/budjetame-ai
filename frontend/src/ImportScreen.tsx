@@ -1,5 +1,8 @@
+import { useState } from 'react'
+
 import { formatEuros, type ImportPreview, type ImportRow } from './api'
 import type { ImportDraftController } from './importDraft'
+import { ImportRowModal } from './ImportRowModal'
 
 const TYPE_LABEL: Record<string, string> = {
   expense: 'Expense',
@@ -19,10 +22,18 @@ export function ImportScreen({
   controller: ImportDraftController
   onDone: () => void
 }) {
+  // Which Preview row the editor modal is open for (null: none). The modal
+  // itself lives in this screen's state; the draft — and with it every edit
+  // saved — lives in the app shell (issue #43).
+  const [editingRowNumber, setEditingRowNumber] = useState<number | null>(null)
   const draft = controller.draft
   if (draft === null) return null
   const { phase, file, preview, selected, error, busy, imported, createdWithWarning, pickCount } =
     draft
+  const editingRow =
+    phase === 'preview' && preview !== null
+      ? (preview.rows.find((row) => row.row === editingRowNumber) ?? null)
+      : null
 
   return (
     <>
@@ -55,8 +66,17 @@ export function ImportScreen({
           busy={busy}
           error={error}
           onToggle={controller.toggle}
+          onEdit={(row) => setEditingRowNumber(row.row)}
           onConfirm={controller.confirm}
           onPickAgain={controller.pickAgain}
+        />
+      )}
+
+      {editingRow !== null && (
+        <ImportRowModal
+          row={editingRow}
+          onSave={(input) => controller.saveRowEdit(editingRow.row, input)}
+          onClose={() => setEditingRowNumber(null)}
         />
       )}
 
@@ -140,6 +160,7 @@ function PreviewPhase({
   busy,
   error,
   onToggle,
+  onEdit,
   onConfirm,
   onPickAgain,
 }: {
@@ -148,6 +169,7 @@ function PreviewPhase({
   busy: boolean
   error: string | null
   onToggle: (row: ImportRow) => void
+  onEdit: (row: ImportRow) => void
   onConfirm: () => void
   onPickAgain: () => void
 }) {
@@ -181,7 +203,12 @@ function PreviewPhase({
         <ul className="space-y-2">
           {preview.rows.map((row) => (
             <li key={row.row}>
-              <ImportRowCard row={row} selected={selected.has(row.row)} onToggle={onToggle} />
+              <ImportRowCard
+                row={row}
+                selected={selected.has(row.row)}
+                onToggle={onToggle}
+                onEdit={onEdit}
+              />
             </li>
           ))}
         </ul>
@@ -219,14 +246,19 @@ function PreviewPhase({
   )
 }
 
+/** One Preview row: a checkbox toggles the selection of ready rows, and
+ * tapping the card opens the Verification editor (issue #46) for any row —
+ * ready, duplicate, or problem. */
 function ImportRowCard({
   row,
   selected,
   onToggle,
+  onEdit,
 }: {
   row: ImportRow
   selected: boolean
   onToggle: (row: ImportRow) => void
+  onEdit: (row: ImportRow) => void
 }) {
   const checkable = row.status === 'ok'
   const palette =
@@ -251,19 +283,25 @@ function ImportRowCard({
       ? ` 📍 ${row.latitude}, ${row.longitude}`
       : ''
   return (
-    <label
-      className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-left shadow-sm ${
-        checkable ? 'cursor-pointer' : 'cursor-default'
-      } ${palette}`}
+    <div
+      className={`flex items-start gap-3 rounded-2xl border px-4 py-3 shadow-sm ${palette}`}
     >
       <input
         type="checkbox"
+        aria-label={`Select row ${row.row}`}
         checked={checkable && selected}
         disabled={!checkable}
         onChange={() => onToggle(row)}
-        className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"
+        className={`mt-1 h-4 w-4 shrink-0 accent-indigo-600 ${
+          checkable ? 'cursor-pointer' : ''
+        }`}
       />
-      <span className="min-w-0 flex-1">
+      <button
+        type="button"
+        aria-label={`Edit row ${row.row}`}
+        onClick={() => onEdit(row)}
+        className="min-w-0 flex-1 text-left"
+      >
         <span className="flex items-baseline justify-between gap-2">
           <span className="truncate text-sm font-medium text-slate-900">
             {row.date ?? '—'} · {type || '—'}
@@ -295,7 +333,7 @@ function ImportRowCard({
             Already in the database or repeated in this file — this row will be skipped.
           </span>
         )}
-      </span>
-    </label>
+      </button>
+    </div>
   )
 }

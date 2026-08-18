@@ -11,6 +11,7 @@ import {
   TOKEN_KEY,
   confirmImport,
   previewImport,
+  validateImportRow,
   type ImportPreview,
   type ImportRow,
   type ImportRowInput,
@@ -43,6 +44,11 @@ export type ImportDraftController = {
   pickFile: (file: File | null) => void
   readFile: () => Promise<void>
   toggle: (row: ImportRow) => void
+  /** Verification (issue #46): re-validate one edited row and flip its
+   * status in place — auto-selecting it when it becomes ready, deselecting
+   * it when it stops being ready. Throws when the call itself fails; the
+   * draft stays untouched then. */
+  saveRowEdit: (rowNumber: number, input: ImportRowInput) => Promise<void>
   confirm: () => Promise<void>
   pickAgain: () => void
   cancel: () => void
@@ -60,6 +66,32 @@ const freshDraft = (): ImportDraft => ({
   createdWithWarning: false,
   pickCount: 0,
 })
+
+/** A draft row as an ImportRowInput for the wire, or null when it has no
+ * sendable identity (no type, date, or amount). The draft rows are the live
+ * edited values, so this is what confirm and the row editor's `earlier_rows`
+ * both send. */
+function rowInput(row: ImportRow): ImportRowInput | null {
+  if (row.type !== 'expense' && row.type !== 'income' && row.type !== 'transfer') {
+    return null
+  }
+  if (row.date === null || row.amount === null) {
+    return null
+  }
+  return {
+    row: row.row,
+    type: row.type,
+    date: row.date,
+    amount: row.amount,
+    wallet: row.wallet,
+    source_wallet: row.source_wallet,
+    destination_wallet: row.destination_wallet,
+    category: row.category,
+    description: row.description,
+    latitude: row.latitude,
+    longitude: row.longitude,
+  }
+}
 
 export function useImportDraft(): ImportDraftController {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
@@ -125,28 +157,66 @@ export function useImportDraft(): ImportDraftController {
     })
   }
 
+  const saveRowEdit = async (rowNumber: number, input: ImportRowInput) => {
+    if (draft === null || draft.preview === null) {
+      return
+    }
+    // The in-file half of the Duplicate check (CONTEXT.md): the draft's
+    // rows that precede this one, with their edits applied. Rows without a
+    // sendable identity contribute no key, exactly as in the Preview.
+    const earlierRows = draft.preview.rows
+      .filter((row) => row.row < rowNumber)
+      .map(rowInput)
+      .filter((input): input is ImportRowInput => input !== null)
+    const verdict = await validateImportRow(token, input, earlierRows)
+    setDraft((current) => {
+      if (current === null || current.preview === null) {
+        return current
+      }
+      const next = new Set(current.selected)
+      // A row that flips to ready joins the selection; one that stops being
+      // ready leaves it (issue #46).
+      if (verdict.status === 'ok') {
+        next.add(rowNumber)
+      } else {
+        next.delete(rowNumber)
+      }
+      return {
+        ...current,
+        preview: {
+          ...current.preview,
+          rows: current.preview.rows.map((row) =>
+            row.row === rowNumber
+              ? {
+                  row: row.row,
+                  status: verdict.status,
+                  error: verdict.error ?? null,
+                  type: input.type,
+                  date: input.date,
+                  amount: input.amount,
+                  wallet: input.wallet,
+                  source_wallet: input.source_wallet,
+                  destination_wallet: input.destination_wallet,
+                  category: input.category,
+                  description: input.description,
+                  latitude: input.latitude,
+                  longitude: input.longitude,
+                }
+              : row,
+          ),
+        },
+        selected: next,
+      }
+    })
+  }
+
   const confirm = async () => {
     if (draft === null || draft.preview === null) return
     const rows: ImportRowInput[] = []
     for (const row of draft.preview.rows) {
       if (!draft.selected.has(row.row)) continue
-      if (row.type !== 'expense' && row.type !== 'income' && row.type !== 'transfer') {
-        continue
-      }
-      if (row.date === null || row.amount === null) continue
-      rows.push({
-        row: row.row,
-        type: row.type,
-        date: row.date,
-        amount: row.amount,
-        wallet: row.wallet,
-        source_wallet: row.source_wallet,
-        destination_wallet: row.destination_wallet,
-        category: row.category,
-        description: row.description,
-        latitude: row.latitude,
-        longitude: row.longitude,
-      })
+      const input = rowInput(row)
+      if (input !== null) rows.push(input)
     }
     setDraft({ ...draft, busy: true, error: null })
     try {
@@ -200,5 +270,5 @@ export function useImportDraft(): ImportDraftController {
     setDraft(null)
   }
 
-  return { draft, open, pickFile, readFile, toggle, confirm, pickAgain, cancel, done }
+  return { draft, open, pickFile, readFile, toggle, saveRowEdit, confirm, pickAgain, cancel, done }
 }

@@ -54,6 +54,8 @@ export {
   type ImportRow,
   type ImportRowInput,
   type ImportRowStatus,
+  type ImportRowValidation,
   confirmImport,
   previewImport,
+  validateImportRow,
 } from './imports'

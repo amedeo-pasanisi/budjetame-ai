@@ -59,6 +59,35 @@ export async function previewImport(token: string, file: File): Promise<ImportPr
   return (await response.json()) as ImportPreview
 }
 
+/** The fresh verdict for one edited row (issue #44): `status` speaks the
+ * Preview's vocabulary — ok (Ready in the UI), duplicate, or error — and
+ * `error` carries the message for an error row. */
+export type ImportRowValidation = {
+  status: ImportRowStatus
+  error: string | null
+}
+
+/** Re-validate one edited row during Verification (issue #44/#46): the
+ * row's Wallet/Category names are re-resolved against the Account, every
+ * CONTEXT.md rule re-run, and the Duplicate check applied with the final
+ * key. `earlierRows` is the draft's rows that precede it in the file — the
+ * in-file Duplicate context — with their edits applied. Nothing is
+ * written. */
+export async function validateImportRow(
+  token: string,
+  row: ImportRowInput,
+  earlierRows: ImportRowInput[],
+): Promise<ImportRowValidation> {
+  const response = await request('/import/validate-row', {
+    method: 'POST',
+    token,
+    json: { row, earlier_rows: earlierRows },
+    readDetail: true,
+    errorMessage: 'Could not validate the row',
+  })
+  return (await response.json()) as ImportRowValidation
+}
+
 export async function confirmImport(
   token: string,
   rows: ImportRowInput[],
