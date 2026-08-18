@@ -13,17 +13,55 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { CategoriesScreen } from './CategoriesScreen'
 import type { Category } from './api'
 
-vi.mock('./api', () => ({
-  TOKEN_KEY: 'budjetame.token',
-  ApiError: class ApiError extends Error {},
-  apiErrorMessage: (_error: unknown, conflict: string) => conflict,
-  createCategory: vi.fn(),
-  deleteCategory: vi.fn(),
-  fetchCategories: vi.fn(),
-  updateCategory: vi.fn(),
-}))
+vi.mock('./api', () => {
+  class ApiError extends Error {
+    status: number
 
-import { createCategory, deleteCategory, fetchCategories, updateCategory } from './api'
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  }
+  // The 409 a colliding rename answers (ADR-0007): a merge offer, not a bare
+  // error. The form reads targetId/transactionCount; the mock mirrors the
+  // real class's public shape.
+  class CategoryMergeConflict extends Error {
+    targetId: number
+    transactionCount: number
+
+    constructor(payload: { message: string; target_id: number; transaction_count: number }) {
+      super(payload.message)
+      this.targetId = payload.target_id
+      this.transactionCount = payload.transaction_count
+    }
+  }
+  return {
+    TOKEN_KEY: 'budjetame.token',
+    ApiError,
+    CategoryMergeConflict,
+    apiErrorMessage: (error: unknown, conflict: string, fallback: string) =>
+      error instanceof ApiError
+        ? error.status === 409
+          ? conflict
+          : fallback
+        : fallback,
+    createCategory: vi.fn(),
+    deleteCategory: vi.fn(),
+    fetchCategories: vi.fn(),
+    mergeCategories: vi.fn(),
+    updateCategory: vi.fn(),
+  }
+})
+
+import {
+  ApiError,
+  CategoryMergeConflict,
+  createCategory,
+  deleteCategory,
+  fetchCategories,
+  mergeCategories,
+  updateCategory,
+} from './api'
 
 const createdAt = '2026-08-01T10:00:00Z'
 
@@ -41,6 +79,7 @@ const fetchCategoriesMock = vi.mocked(fetchCategories)
 const createCategoryMock = vi.mocked(createCategory)
 const updateCategoryMock = vi.mocked(updateCategory)
 const deleteCategoryMock = vi.mocked(deleteCategory)
+const mergeCategoriesMock = vi.mocked(mergeCategories)
 
 beforeEach(() => {
   fetchCategoriesMock.mockResolvedValue(categories)
@@ -255,5 +294,91 @@ describe('CategoriesScreen category modal (issue #41)', () => {
         name: /apple/,
       }),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('CategoriesScreen merge confirm flow (issue #45)', () => {
+  // Renaming apple (id 1) to Banana collides with Banana (id 2): the
+  // backend's 409 carries the surviving Category's id and the count of
+  // Transactions that would move (ADR-0007).
+  const bananaConflict = new CategoryMergeConflict({
+    message: 'A Category with this name already exists',
+    target_id: 2,
+    transaction_count: 7,
+  })
+
+  const openEdit = async (name: string | RegExp) => {
+    render(<CategoriesScreen />)
+    const expenses = await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(within(expenses).getByRole('button', { name }))
+    return screen.findByRole('dialog', { name: 'Edit category' })
+  }
+
+  const renameIntoBanana = async () => {
+    updateCategoryMock.mockRejectedValue(bananaConflict)
+    const dialog = await openEdit(/apple/)
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Banana' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    return dialog
+  }
+
+  it('a colliding rename shows the merge offer with the count; cancelling it keeps the draft and both Categories', async () => {
+    const dialog = await renameIntoBanana()
+
+    expect(
+      await within(dialog).findByText(
+        /Merge apple into Banana\? 7 transactions will move — this cannot be undone\./,
+      ),
+    ).toBeInTheDocument()
+    expect(mergeCategoriesMock).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel merge' }))
+    expect(within(dialog).queryByText(/Merge apple into Banana/)).not.toBeInTheDocument()
+    // The edit draft is untouched and the modal stays open.
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Banana')
+    expect(screen.getByRole('dialog', { name: 'Edit category' })).toBeInTheDocument()
+    expect(mergeCategoriesMock).not.toHaveBeenCalled()
+    // Both Categories still listed, unchanged.
+    const expenseRows = within(screen.getByRole('region', { name: 'Expenses' }))
+      .getAllByRole('button')
+      .map((b) => b.textContent)
+    expect(expenseRows).toHaveLength(3)
+    expect(expenseRows[0]).toContain('apple')
+    expect(expenseRows[1]).toContain('Banana')
+  })
+
+  it('confirming with tap-again runs the merge; the list shows only the surviving Category', async () => {
+    mergeCategoriesMock.mockResolvedValue({ ...categories[1] })
+    const dialog = await renameIntoBanana()
+    await within(dialog).findByText(/Merge apple into Banana/)
+
+    // The first tap arms the destructive action, the second executes it.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }))
+    const armed = within(dialog).getByRole('button', { name: 'Tap again to confirm' })
+    expect(mergeCategoriesMock).not.toHaveBeenCalled()
+    fireEvent.click(armed)
+
+    await waitFor(() => expect(mergeCategoriesMock).toHaveBeenCalledWith('', 1, 2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const expenseRows = within(screen.getByRole('region', { name: 'Expenses' }))
+      .getAllByRole('button')
+      .map((b) => b.textContent)
+    expect(expenseRows).toHaveLength(2)
+    expect(expenseRows[0]).toContain('Banana')
+    expect(expenseRows[1]).toContain('Carrots')
+  })
+
+  it('a failed merge shows the server error inline in the modal and keeps the confirmation', async () => {
+    mergeCategoriesMock.mockRejectedValue(new ApiError('boom', 500))
+    const dialog = await renameIntoBanana()
+    await within(dialog).findByText(/Merge apple into Banana/)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Tap again to confirm' }))
+
+    expect(await within(dialog).findByText('Could not merge the categories.')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Edit category' })).toBeInTheDocument()
+    expect(within(dialog).getByText(/Merge apple into Banana/)).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Banana')
   })
 })

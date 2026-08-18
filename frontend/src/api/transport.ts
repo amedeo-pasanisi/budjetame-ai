@@ -12,9 +12,14 @@ export const TOKEN_KEY = 'budjetame.token'
 export class ApiError extends Error {
   readonly status: number
 
-  constructor(message: string, status: number) {
+  /** The backend's parsed `detail` when the response carried one — a string,
+   * or a structured object like the category merge conflict (ADR-0007). */
+  readonly detail: unknown
+
+  constructor(message: string, status: number, detail?: unknown) {
     super(message)
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -31,11 +36,20 @@ export function apiErrorMessage(
 }
 
 /** The backend's error detail, when it carries one (e.g. "Unknown wallet
- * 'X'"); the generic fallback otherwise. */
-async function detailOr(response: Response, fallback: string): Promise<string> {
-  const body = (await response.json().catch(() => null)) as { detail?: unknown } | null
-  if (body !== null && typeof body.detail === 'string' && body.detail !== '') {
-    return body.detail
+ * 'X'"); the generic fallback otherwise. A string detail becomes the
+ * message; a structured detail (ADR-0007's merge conflict) contributes its
+ * `message` field and stays attached to the ApiError for the caller. */
+function messageOr(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail !== '') {
+    return detail
+  }
+  if (
+    typeof detail === 'object' &&
+    detail !== null &&
+    typeof (detail as { message?: unknown }).message === 'string' &&
+    (detail as { message: string }).message !== ''
+  ) {
+    return (detail as { message: string }).message
   }
   return fallback
 }
@@ -67,11 +81,13 @@ export async function request(path: string, options: RequestOptions): Promise<Re
     body: options.json !== undefined ? JSON.stringify(options.json) : options.formData,
   })
   if (!response.ok) {
-    const message =
-      options.readDetail === true
-        ? await detailOr(response, options.errorMessage)
-        : options.errorMessage
-    throw new ApiError(message, response.status)
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null
+    const detail = body?.detail ?? undefined
+    throw new ApiError(
+      options.readDetail === true ? messageOr(detail, options.errorMessage) : options.errorMessage,
+      response.status,
+      detail,
+    )
   }
   return response
 }

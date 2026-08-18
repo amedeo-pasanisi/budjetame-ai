@@ -67,6 +67,19 @@ export function CategoriesScreen() {
     setModal(null)
   }
 
+  // A merge removes the renamed Category and returns the surviving one
+  // (ADR-0007): the list ends up with exactly the survivor, in place.
+  const handleMerged = (deletedId: number, surviving: Category) => {
+    setCategories((current) =>
+      current === null
+        ? [surviving]
+        : current
+            .filter((existing) => existing.id !== deletedId)
+            .map((existing) => (existing.id === surviving.id ? surviving : existing)),
+    )
+    setModal(null)
+  }
+
   // The sections are derived at render time: filter by the search needle
   // (case-insensitive substring, live) and sort A→Z case-insensitively, so a
   // new Category lands at the sorted position of its section automatically.
@@ -178,6 +191,7 @@ export function CategoriesScreen() {
           category={modal.kind === 'edit' ? modal.category : undefined}
           onSaved={handleSaved}
           onDeleted={handleDeleted}
+          onMerged={handleMerged}
           onClose={() => setModal(null)}
         />
       )}

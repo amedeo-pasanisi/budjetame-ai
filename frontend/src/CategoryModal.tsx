@@ -6,6 +6,9 @@ type CategoryModalProps = {
   category?: Category
   onSaved: (category: Category) => void
   onDeleted?: (categoryId: number) => void
+  /** The confirmed merge (ADR-0007): the renamed Category is gone and the
+   * surviving one returned. */
+  onMerged?: (deletedId: number, surviving: Category) => void
   onClose: () => void
 }
 
@@ -14,7 +17,13 @@ type CategoryModalProps = {
  * only appears while creating, and the tap-again delete confirmation only
  * while editing. The shell adds the dismissal paths — backdrop click, Cancel,
  * and Escape all abandon the draft without saving. */
-export function CategoryModal({ category, onSaved, onDeleted, onClose }: CategoryModalProps) {
+export function CategoryModal({
+  category,
+  onSaved,
+  onDeleted,
+  onMerged,
+  onClose,
+}: CategoryModalProps) {
   const editing = category !== undefined
   return (
     <BottomSheet label={editing ? 'Edit category' : 'New category'} onClose={onClose}>
@@ -23,6 +32,7 @@ export function CategoryModal({ category, onSaved, onDeleted, onClose }: Categor
         category={category}
         onSaved={onSaved}
         onDeleted={onDeleted}
+        onMerged={onMerged}
         onCancel={onClose}
       />
     </BottomSheet>

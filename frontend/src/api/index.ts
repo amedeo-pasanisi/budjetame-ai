@@ -19,9 +19,11 @@ export {
 export {
   type Category,
   type CategoryType,
+  CategoryMergeConflict,
   createCategory,
   deleteCategory,
   fetchCategories,
+  mergeCategories,
   updateCategory,
 } from './categories'
 
