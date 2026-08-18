@@ -10,7 +10,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { TransactionsScreen } from './TransactionsScreen'
 import { useImportDraft } from './importDraft'
-import type { Transaction, TransactionPage, Wallet } from './api'
+import type { Category, Transaction, TransactionPage, Wallet } from './api'
 
 vi.mock('./api', () => ({
   TOKEN_KEY: 'budjetame.token',
@@ -87,6 +87,15 @@ const frozenWallet: Wallet = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+const foodCategory: Category = {
+  id: 1,
+  name: 'Food',
+  type: 'expense',
+  icon: null,
+  color: '#000000',
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 const baseTransaction: Transaction = {
   id: 1,
   type: 'expense',
@@ -131,6 +140,24 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
+})
+
+describe('TransactionsScreen row title (description-led)', () => {
+  it('leads with the Category, then the Description, and keeps the type word as the fallback', async () => {
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [{ ...coffee, category_id: 1 }, { ...baseTransaction, id: 2 }],
+      next_cursor: null,
+    }))
+    render(<Harness />)
+
+    // Category leads, the whole Description follows on the bold line.
+    expect(await screen.findByText('Food · Coffee')).toBeInTheDocument()
+    // Neither Category nor Description: the type word survives.
+    expect(await screen.findByText('Expense')).toBeInTheDocument()
+    // The Description no longer repeats in the subtitle line.
+    expect(screen.getAllByText(/Coffee/)).toHaveLength(1)
+  })
 })
 
 describe('TransactionsScreen infinite scroll', () => {

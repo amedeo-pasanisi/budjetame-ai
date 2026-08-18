@@ -36,6 +36,10 @@ _Avoid_: internal transfer, move
 A user-defined label that groups Transactions of one type. Each Category is either expense-only or income-only and can only be attached to Transactions of that type. Names are unique case-insensitively within their type: an expense "Food" and an income "Food" can coexist.
 _Avoid_: tag, label, group
 
+**Description**:
+A free-text note a user attaches to a Transaction, optional and up to 500 characters. A blank or missing description is treated as the same value (e.g. by import duplicates).
+_Avoid_: note, memo, reference
+
 **Duplicate**:
 An import row that matches an existing Transaction, or an earlier row of the same file, on date, amount, type, wallet(s), category, and description (Transfers key on date, amount, source and destination Wallets, and description). Duplicates are skipped by the import unless the row is verified into a different key.
 _Avoid_: repeated row, double entry

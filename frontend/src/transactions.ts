@@ -16,8 +16,27 @@ export function signedAmount(transaction: Transaction): string {
   return `€${transaction.amount}`
 }
 
-export function transactionTitle(transaction: Transaction): string {
+/** The Description as display text: trimmed, or null when missing or blank —
+ * a whitespace-only Description counts as blank (CONTEXT.md). */
+export function descriptionText(description: string | null): string | null {
+  const trimmed = description?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
+}
+
+/** The ledger row's bold identifying line: an Opening Balance keeps its
+ * fixed label; otherwise the Category leads (it implies the type), then the
+ * whole Description — falling back to the type word only when neither
+ * exists. A whitespace-only Description counts as blank (CONTEXT.md). */
+export function transactionTitle(
+  transaction: Transaction,
+  categoryName: string | null,
+): string {
   if (transaction.type === 'opening_balance') return 'Opening balance'
+  const description = descriptionText(transaction.description)
+  const parts: string[] = []
+  if (categoryName !== null) parts.push(categoryName)
+  if (description !== null) parts.push(description)
+  if (parts.length > 0) return parts.join(' · ')
   if (transaction.type === 'expense') return 'Expense'
   if (transaction.type === 'income') return 'Income'
   return 'Transfer'

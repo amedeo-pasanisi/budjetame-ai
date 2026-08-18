@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { formatEuros, type ImportPreview, type ImportRow } from './api'
 import type { ImportDraftController } from './importDraft'
 import { ImportRowModal } from './ImportRowModal'
+import { descriptionText } from './transactions'
 
 const TYPE_LABEL: Record<string, string> = {
   expense: 'Expense',
@@ -282,6 +283,7 @@ function ImportRowCard({
     row.latitude !== null && row.longitude !== null
       ? ` 📍 ${row.latitude}, ${row.longitude}`
       : ''
+  const description = descriptionText(row.description)
   return (
     <div
       className={`flex items-start gap-3 rounded-2xl border px-4 py-3 shadow-sm ${palette}`}
@@ -314,15 +316,17 @@ function ImportRowCard({
                 : 'Problem'}
           </span>
         </span>
+        {description !== null && (
+          <span className="mt-0.5 block truncate text-sm font-medium text-slate-900">
+            {description}
+          </span>
+        )}
         <span className="mt-0.5 block text-sm font-semibold text-slate-900">
           {row.amount !== null ? formatEuros(row.amount) : '—'}
         </span>
         <span className="block truncate text-xs text-slate-500">
           {walletLabel}
           {row.category !== null && row.category !== '' ? ` · ${row.category}` : ''}
-          {row.description !== null && row.description !== ''
-            ? ` · ${row.description}`
-            : ''}
           {location}
         </span>
         {row.status === 'error' && row.error !== null && (

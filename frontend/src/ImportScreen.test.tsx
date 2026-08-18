@@ -505,3 +505,29 @@ describe('ImportScreen row editor (issue #46)', () => {
     )
   })
 })
+
+describe('ImportScreen preview description title', () => {
+  it('shows the Description as its own line under date · type, and hides the line when blank', async () => {
+    await openPreview()
+
+    const withDescription = await screen.findByRole('button', { name: 'Edit row 1' })
+    const titleLines = (node: HTMLElement) =>
+      Array.from(node.querySelectorAll('span')).filter(
+        (span) =>
+          span.className.includes('text-sm') && span.className.includes('font-medium'),
+      )
+    expect(titleLines(withDescription).map((span) => span.textContent)).toEqual([
+      '2026-08-01 · Expense',
+      'Coffee',
+    ])
+    // The gray meta line no longer repeats the Description.
+    expect(withDescription).toHaveTextContent('Cash · Food')
+
+    // A blank Description renders no empty bold line: only the date · type
+    // line keeps the medium weight.
+    const withoutDescription = await screen.findByRole('button', { name: 'Edit row 2' })
+    expect(titleLines(withoutDescription).map((span) => span.textContent)).toEqual([
+      '2026-08-02 · Income',
+    ])
+  })
+})

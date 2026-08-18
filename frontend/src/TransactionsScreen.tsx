@@ -374,14 +374,10 @@ export function TransactionsScreen({
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-slate-900">
-                          {transactionTitle(transaction)}
-                          {category !== null && ` · ${category}`}
+                          {transactionTitle(transaction, category)}
                         </span>
                         <span className="block truncate text-xs text-slate-500">
                           {transaction.date} · {walletLabel}
-                          {transaction.description !== null && transaction.description !== ''
-                            ? ` · ${transaction.description}`
-                            : ''}
                           {hasLocation(transaction) && ' · 📍'}
                         </span>
                       </span>
