@@ -103,7 +103,16 @@ export function CategoriesScreen() {
 
   return (
     <>
-      <h2 className="font-semibold text-slate-900">Categories</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-slate-900">Categories</h2>
+        <button
+          type="button"
+          onClick={() => setModal({ kind: 'create' })}
+          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+        >
+          New category
+        </button>
+      </div>
 
       {loadError !== null && (
         <p className="mb-4 mt-2 text-sm text-red-600">{loadError}</p>
@@ -177,14 +186,6 @@ export function CategoriesScreen() {
           )}
         </>
       )}
-
-      <button
-        type="button"
-        onClick={() => setModal({ kind: 'create' })}
-        className="mt-5 w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
-      >
-        + New category
-      </button>
 
       {modal !== null && (
         <CategoryModal

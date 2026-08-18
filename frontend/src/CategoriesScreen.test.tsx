@@ -89,6 +89,22 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+describe('CategoriesScreen header (issue #49)', () => {
+  it('puts the New category button in the header row with the heading, always enabled, and no bottom button', () => {
+    render(<CategoriesScreen />)
+
+    // Asserted before the list resolves: the button needs nothing from the
+    // list, so it is available while loading (issue #49).
+    const heading = screen.getByRole('heading', { name: 'Categories' })
+    const newCategory = within(heading.parentElement as HTMLElement).getByRole('button', {
+      name: 'New category',
+    })
+    expect(newCategory).not.toBeDisabled()
+    // The old bottom button is gone, not duplicated.
+    expect(screen.queryByRole('button', { name: '+ New category' })).not.toBeInTheDocument()
+  })
+})
+
 describe('CategoriesScreen sections (issue #41)', () => {
   it('groups categories into Expenses and Incomes, each sorted A→Z case-insensitively', async () => {
     render(<CategoriesScreen />)
@@ -245,7 +261,7 @@ describe('CategoriesScreen category modal (issue #41)', () => {
     render(<CategoriesScreen />)
     await screen.findByRole('region', { name: 'Incomes' })
 
-    fireEvent.click(screen.getByRole('button', { name: '+ New category' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New category' }))
     const dialog = await screen.findByRole('dialog', { name: 'New category' })
     const typeSelect = within(dialog).getByLabelText('Type')
     expect(typeSelect).toHaveValue('expense')
