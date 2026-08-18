@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -7,6 +7,7 @@ import {
   createWallet,
   fetchWallets,
   formatEuros,
+  formatSignedEuros,
   freezeWallet,
   renameWallet,
   type Wallet,
@@ -24,6 +25,18 @@ const WALLET_TYPE_OPTIONS = (Object.entries(TYPE_LABELS) as [WalletType, string]
   ([value, label]) => ({ value, label }),
 )
 
+// Section headers are plural, like the Categories tab's Expenses/Incomes;
+// "Cash" has no English plural. Row subtitles keep the singular labels above.
+const SECTION_LABELS: Record<WalletType, string> = {
+  contact: 'Contacts',
+  checking: 'Checking Accounts',
+  credit_card: 'Credit Cards',
+  cash: 'Cash',
+}
+
+// Fixed order: Contacts first, so who owes me / whom do I owe is answered the
+// moment the tab opens (issue #47).
+const SECTION_TYPES: WalletType[] = ['contact', 'checking', 'credit_card', 'cash']
 
 export function WalletsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
@@ -67,6 +80,22 @@ export function WalletsScreen() {
     setEditing(null)
   }
 
+  // The sections are derived at render time: group by type in the fixed
+  // order and sort A→Z case-insensitively, so a new or renamed Wallet lands
+  // at the sorted position of its section (issue #47).
+  const sections = useMemo(() => {
+    if (wallets === null) {
+      return null
+    }
+    return SECTION_TYPES.map((type) => ({
+      type,
+      label: SECTION_LABELS[type],
+      items: wallets
+        .filter((wallet) => wallet.type === type)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+    }))
+  }, [wallets])
+
   return (
     <>
       <h2 className="font-semibold text-slate-900">Wallets</h2>
@@ -80,27 +109,43 @@ export function WalletsScreen() {
           No wallets yet. Add your first one to start tracking.
         </p>
       ) : (
-        <ul className="mt-3 space-y-3">
-          {wallets.map((wallet) => (
-            <li key={wallet.id}>
-              <button
-                type="button"
-                onClick={() => setEditing(wallet)}
-                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
+        sections
+          ?.filter((section) => section.items.length > 0)
+          .map((section) => (
+            <section
+              key={section.type}
+              aria-labelledby={`wallets-${section.type}`}
+              className="mt-5"
+            >
+              <h3
+                id={`wallets-${section.type}`}
+                className="text-sm font-medium text-slate-700"
               >
-                <span>
-                  <span className="block font-medium text-slate-900">{wallet.name}</span>
-                  <span className="block text-xs text-slate-500">
-                    {TYPE_LABELS[wallet.type]}
-                  </span>
-                </span>
-                <span className="font-semibold text-slate-900">
-                  {formatEuros(wallet.balance)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+                {section.label}
+              </h3>
+              <ul className="mt-2 space-y-3">
+                {section.items.map((wallet) => (
+                  <li key={wallet.id}>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(wallet)}
+                      className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
+                    >
+                      <span>
+                        <span className="block font-medium text-slate-900">{wallet.name}</span>
+                        <span className="block text-xs text-slate-500">
+                          {TYPE_LABELS[wallet.type]}
+                        </span>
+                      </span>
+                      <span className="font-semibold text-slate-900">
+                        {formatSignedEuros(wallet.balance)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))
       )}
 
       {!showCreate && editing === null && (

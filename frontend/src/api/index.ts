@@ -3,7 +3,7 @@
  */
 
 export { ApiError, TOKEN_KEY, apiErrorMessage } from './transport'
-export { formatEuros } from './format'
+export { formatEuros, formatSignedEuros } from './format'
 
 export { type Account, fetchCurrentAccount, login } from './auth'
 

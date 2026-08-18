@@ -126,6 +126,15 @@
   * When I transfer €50 from my Checking Account to the "Marco" Wallet, the "Marco" Wallet increases to +€50 (credit in my favor).
   * The positive/negative balance of Contact Wallets contributes to the Net Worth calculation.
 
+**US 5.2 - Wallets Screen Sections (Who Owes Me)**
+* **Story:** As a user, I want the Wallets screen grouped into sections by type — Contacts first — each sorted alphabetically with signed balances, so that I can see at a glance who owes me money and whom I owe (issue #47).
+* **Acceptance Criteria:**
+  * Four sections, fixed order, styled like the Categories tab sections: Contacts, Checking Accounts, Credit Cards, Cash. A section with no wallets is hidden; the row appearance is unchanged.
+  * Each section is sorted A→Z case-insensitively; settled contacts (€0.00) stay visible.
+  * Every balance carries a sign in the transaction-amount convention: `+€50.00` / `-€30.00` / `€0.00` unsigned.
+  * Debts are Contact Wallets only: credit cards and other types are accounts, never debt parties.
+  * Frontend-only change: no backend, schema, or migration work; no search bar, no subtotals, no Dashboard changes.
+
 ---
 
 ### EPIC 6: Dashboard and Reporting
