@@ -10,6 +10,7 @@ import {
   formatSignedEuros,
   freezeWallet,
   renameWallet,
+  unfreezeWallet,
   type Wallet,
   type WalletType,
 } from './api'
@@ -44,10 +45,13 @@ export function WalletsScreen() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [editing, setEditing] = useState<Wallet | null>(null)
+  const [frozenExpanded, setFrozenExpanded] = useState(false)
+  const [unfreezeError, setUnfreezeError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    fetchWallets(token)
+    // Frozen Wallets come along for the collapsed Frozen Wallets list (#48).
+    fetchWallets(token, true)
       .then((data) => {
         if (!cancelled) setWallets(data)
       })
@@ -74,15 +78,37 @@ export function WalletsScreen() {
   }
 
   const handleFrozen = (walletId: number) => {
+    // The Wallet stays in state, flipping to frozen: it moves from its type
+    // section into the Frozen Wallets list (issue #48).
     setWallets((current) =>
-      current === null ? current : current.filter((existing) => existing.id !== walletId),
+      current === null
+        ? current
+        : current.map((existing) =>
+            existing.id === walletId ? { ...existing, frozen: true } : existing,
+          ),
     )
     setEditing(null)
   }
 
+  const handleUnfrozen = async (wallet: Wallet) => {
+    setUnfreezeError(null)
+    try {
+      const token = localStorage.getItem(TOKEN_KEY) ?? ''
+      const unfrozen = await unfreezeWallet(token, wallet.id)
+      setWallets((current) =>
+        current === null
+          ? current
+          : current.map((existing) => (existing.id === unfrozen.id ? unfrozen : existing)),
+      )
+    } catch {
+      setUnfreezeError('Could not unfreeze the wallet.')
+    }
+  }
+
   // The sections are derived at render time: group by type in the fixed
   // order and sort A→Z case-insensitively, so a new or renamed Wallet lands
-  // at the sorted position of its section (issue #47).
+  // at the sorted position of its section (issue #47). Frozen Wallets live in
+  // the separate Frozen Wallets list, never in the type sections (#48).
   const sections = useMemo(() => {
     if (wallets === null) {
       return null
@@ -91,9 +117,19 @@ export function WalletsScreen() {
       type,
       label: SECTION_LABELS[type],
       items: wallets
-        .filter((wallet) => wallet.type === type)
+        .filter((wallet) => wallet.type === type && !wallet.frozen)
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
     }))
+  }, [wallets])
+
+  // One flat A→Z list across types, matching the active sections' sort (#48).
+  const frozenWallets = useMemo(() => {
+    if (wallets === null) {
+      return []
+    }
+    return wallets
+      .filter((wallet) => wallet.frozen)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   }, [wallets])
 
   return (
@@ -146,6 +182,45 @@ export function WalletsScreen() {
               </ul>
             </section>
           ))
+      )}
+
+      {frozenWallets.length > 0 && (
+        <div className="mt-5">
+          <button
+            type="button"
+            aria-expanded={frozenExpanded}
+            onClick={() => setFrozenExpanded((open) => !open)}
+            className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
+          >
+            Frozen wallets ({frozenWallets.length})
+          </button>
+          {frozenExpanded && (
+            <ul className="mt-2 space-y-3">
+              {frozenWallets.map((wallet) => (
+                <li key={wallet.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleUnfrozen(wallet)}
+                    className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
+                  >
+                    <span>
+                      <span className="block font-medium text-slate-900">{wallet.name}</span>
+                      <span className="block text-xs text-slate-500">
+                        {TYPE_LABELS[wallet.type]} · Frozen
+                      </span>
+                    </span>
+                    <span className="font-semibold text-slate-900">
+                      {formatSignedEuros(wallet.balance)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {unfreezeError !== null && (
+            <p className="mt-2 text-sm text-red-600">{unfreezeError}</p>
+          )}
+        </div>
       )}
 
       {!showCreate && editing === null && (

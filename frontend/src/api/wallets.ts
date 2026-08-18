@@ -56,3 +56,12 @@ export async function freezeWallet(token: string, walletId: number): Promise<voi
     errorMessage: 'Could not freeze wallet',
   })
 }
+
+export async function unfreezeWallet(token: string, walletId: number): Promise<Wallet> {
+  const response = await request(`/wallets/${walletId}/unfreeze`, {
+    method: 'POST',
+    token,
+    errorMessage: 'Could not unfreeze wallet',
+  })
+  return (await response.json()) as Wallet
+}

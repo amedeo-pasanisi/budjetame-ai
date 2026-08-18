@@ -37,10 +37,11 @@ vi.mock('./api', async () => {
     createWallet: vi.fn(),
     renameWallet: vi.fn(),
     freezeWallet: vi.fn(),
+    unfreezeWallet: vi.fn(),
   }
 })
 
-import { createWallet, fetchWallets, freezeWallet, renameWallet } from './api'
+import { createWallet, fetchWallets, freezeWallet, renameWallet, unfreezeWallet } from './api'
 
 const createdAt = '2026-08-01T10:00:00Z'
 
@@ -59,6 +60,7 @@ const fetchWalletsMock = vi.mocked(fetchWallets)
 const createWalletMock = vi.mocked(createWallet)
 const renameWalletMock = vi.mocked(renameWallet)
 const freezeWalletMock = vi.mocked(freezeWallet)
+const unfreezeWalletMock = vi.mocked(unfreezeWallet)
 
 beforeEach(() => {
   fetchWalletsMock.mockResolvedValue(wallets)
@@ -203,5 +205,88 @@ describe('WalletsScreen sections (issue #47)', () => {
       .map((b) => b.textContent)
     expect(contactRows.some((row) => row?.includes('Leo'))).toBe(false)
     expect(contactRows).toHaveLength(3)
+  })
+})
+
+describe('WalletsScreen frozen wallets (issue #48)', () => {
+  const frozenWallet: Wallet = {
+    id: 7,
+    name: 'Old Card',
+    type: 'credit_card',
+    balance: '0.00',
+    frozen: true,
+    created_at: createdAt,
+  }
+  const frozenCash: Wallet = {
+    id: 8,
+    name: 'Drawer',
+    type: 'cash',
+    balance: '0.00',
+    frozen: true,
+    created_at: createdAt,
+  }
+
+  it('keeps frozen wallets out of the type sections and shows a collapsed Frozen wallets row with the count', async () => {
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    expect(
+      within(screen.getByRole('region', { name: 'Credit Cards' })).queryByRole(
+        'button',
+        { name: /Old Card/ },
+      ),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Frozen wallets \(1\)/ })).toBeInTheDocument()
+  })
+
+  it('expands and collapses the frozen list in place; rows read "Type · Frozen" with unsigned €0.00', async () => {
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    expect(screen.queryByText('Old Card')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    expect(screen.getByText('Old Card')).toBeInTheDocument()
+    expect(screen.getByText('Credit Card · Frozen')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Old Card/ }).textContent).toMatch(/€0\.00$/)
+
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    expect(screen.queryByText('Old Card')).not.toBeInTheDocument()
+  })
+
+  it('one tap on a frozen row unfreezes it: it lands in its type section at its sorted position and the footer row disappears', async () => {
+    unfreezeWalletMock.mockResolvedValue({ ...frozenWallet, frozen: false })
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Old Card/ }))
+
+    await waitFor(() => expect(unfreezeWalletMock).toHaveBeenCalledWith('', 7))
+    const cards = within(screen.getByRole('region', { name: 'Credit Cards' }))
+      .getAllByRole('button')
+      .map((b) => b.textContent)
+    expect(cards[0]).toContain('Amex')
+    expect(cards[1]).toContain('Old Card')
+    expect(screen.queryByRole('button', { name: /Frozen wallets/ })).not.toBeInTheDocument()
+  })
+
+  it('unfreezing a wallet whose type section is hidden creates the section', async () => {
+    unfreezeWalletMock.mockResolvedValue({ ...frozenCash, frozen: false })
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenCash])
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+    expect(screen.queryByRole('region', { name: 'Cash' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Drawer/ }))
+
+    await waitFor(() => expect(unfreezeWalletMock).toHaveBeenCalledWith('', 8))
+    expect(screen.getByRole('region', { name: 'Cash' })).toBeInTheDocument()
+    const cashRows = within(screen.getByRole('region', { name: 'Cash' })).getAllByRole('button')
+    expect(cashRows).toHaveLength(1)
+    expect(cashRows[0].textContent).toContain('Drawer')
   })
 })

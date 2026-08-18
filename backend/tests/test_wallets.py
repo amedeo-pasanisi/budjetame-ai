@@ -434,3 +434,89 @@ async def test_list_wallets_can_include_frozen_wallets(client: AsyncClient) -> N
     active = next(w for w in included if w["id"] == active_id)
     assert active["frozen"] is False
     assert all(w["balance"] is not None for w in included)
+
+
+# --- Unfreeze (issue #48) ---
+
+
+async def test_unfreeze_restores_a_frozen_wallet(client: AsyncClient) -> None:
+    """Unfreezing puts a Frozen Wallet back into the active list, exactly as
+    if it had never been frozen (issue #48)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "To Unfreeze", "cash")
+    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    assert frozen.status_code == 204
+
+    response = await client.post(f"/wallets/{wallet_id}/unfreeze", headers=_auth(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == wallet_id
+    assert body["frozen"] is False
+    listed = (await client.get("/wallets", headers=_auth(token))).json()
+    assert any(w["id"] == wallet_id for w in listed)
+
+
+async def test_unfrozen_wallet_accepts_transactions_again(
+    client: AsyncClient,
+) -> None:
+    """Full reversal: while frozen a write is rejected (ADR-0002), after
+    unfreezing the Wallet accepts Transactions again (issue #48)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Revived", "cash")
+    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    assert frozen.status_code == 204
+
+    while_frozen = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "5.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    assert while_frozen.status_code == 422
+
+    unfrozen = await client.post(f"/wallets/{wallet_id}/unfreeze", headers=_auth(token))
+    assert unfrozen.status_code == 200
+
+    after = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "5.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+    assert after.status_code == 201
+    listed = (await client.get("/wallets", headers=_auth(token))).json()
+    revived = next(w for w in listed if w["id"] == wallet_id)
+    assert revived["balance"] == "-5.00"
+
+
+async def test_unfreeze_an_active_wallet_is_a_noop(client: AsyncClient) -> None:
+    """Unfreeze mirrors freeze's idempotency: calling it on an active Wallet
+    succeeds and changes nothing (issue #48)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Never Frozen", "cash")
+
+    response = await client.post(f"/wallets/{wallet_id}/unfreeze", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.json()["frozen"] is False
+    listed = (await client.get("/wallets", headers=_auth(token))).json()
+    assert any(w["id"] == wallet_id for w in listed)
+
+
+async def test_unfreeze_foreign_wallet_returns_403(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    account_id, wallet_id = _insert_foreign_wallet(database_url)
+    try:
+        response = await client.post(f"/wallets/{wallet_id}/unfreeze", headers=_auth(token))
+        assert response.status_code == 403
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_unfreeze_missing_wallet_returns_403(client: AsyncClient) -> None:
+    token = await _login(client)
+
+    response = await client.post("/wallets/999999/unfreeze", headers=_auth(token))
+
+    assert response.status_code == 403

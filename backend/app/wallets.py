@@ -115,3 +115,16 @@ def freeze_wallet(
         wallet_service.freeze_wallet(session, wallet)
     except wallet_service.WalletNotFreezable as error:
         raise HTTPException(status_code=422, detail=str(error))
+
+
+@router.post("/{wallet_id}/unfreeze", response_model=WalletOut)
+def unfreeze_wallet(
+    wallet_id: int,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> WalletOut:
+    """Unfreeze a Frozen Wallet, restoring it to active (issue #48)."""
+    wallet = _owned_wallet_or_403(session, account, wallet_id)
+    wallet = wallet_service.unfreeze_wallet(session, wallet)
+    balances = wallet_service.wallet_balances(session, account.id)
+    return _wallet_out(wallet, balances.get(wallet.id, Decimal("0.00")))

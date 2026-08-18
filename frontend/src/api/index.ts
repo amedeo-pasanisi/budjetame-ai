@@ -14,6 +14,7 @@ export {
   fetchWallets,
   freezeWallet,
   renameWallet,
+  unfreezeWallet,
 } from './wallets'
 
 export {

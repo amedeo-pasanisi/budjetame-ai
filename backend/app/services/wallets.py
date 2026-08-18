@@ -100,6 +100,17 @@ def freeze_wallet(session: Session, wallet: Wallet) -> Wallet:
     return locked
 
 
+def unfreeze_wallet(session: Session, wallet: Wallet) -> Wallet:
+    """Unfreeze a Frozen Wallet, restoring it to active (issue #48). There is
+    no balance precondition — a Frozen Wallet's Balance is always exactly €0
+    (ADR-0002) — and unfreezing an active Wallet is a no-op, mirroring
+    freeze's idempotency."""
+    wallet.frozen = False
+    session.commit()
+    session.refresh(wallet)
+    return wallet
+
+
 def _balance_ledger(account_id: int):
     """The derived-Balance ledger (ADR-0001): one row per (wallet, signed
     amount). Regular rows contribute through `wallet_id` (Expense subtracts,
