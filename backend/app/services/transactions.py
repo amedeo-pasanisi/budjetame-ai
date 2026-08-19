@@ -6,7 +6,10 @@ carry a Category, and never change Net Worth; Cash negativity is allowed but
 warned (the indicator is computed at the HTTP layer from the derived Balance);
 Contact Wallets only participate in Transfers; a Category attaches only to
 Transactions of its Type; Opening Balance Transactions are created by the
-Wallet lifecycle and are read-only here.
+Wallet lifecycle and are read-only here. An Expense may optionally link one
+Recurring Cost (issue #57), paying exactly one Occurrence — the oldest Unpaid
+one at link time, pinned then and never reassigned; Income and Transfer never
+carry a link (ADR-0010).
 """
 
 from decimal import Decimal
@@ -15,7 +18,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dates import from_rome_day
-from app.models import Category, Transaction, TransactionType, Wallet, WalletType
+from app.models import (
+    Category,
+    RecurringCost,
+    Transaction,
+    TransactionType,
+    Wallet,
+    WalletType,
+)
+from app.services import recurring_costs as recurring_service
 from app.services.scoping import owned_or_raise
 
 
@@ -90,6 +101,7 @@ def _check_create_rules(
     source_wallet_id: int | None,
     destination_wallet_id: int | None,
     category_id: int | None,
+    recurring_cost_id: int | None = None,
 ) -> tuple[Wallet, ...]:
     """Every CONTEXT.md rule a create must satisfy, without locking or
     inserting. Returns the Wallets the create touches (the caller locks them
@@ -110,6 +122,8 @@ def _check_create_rules(
                 "Transfers use source and destination Wallets and never carry "
                 "a Category"
             )
+        if recurring_cost_id is not None:
+            raise TransactionRuleError("Transfers never carry a Recurring Cost link")
         if source_wallet_id is None or destination_wallet_id is None:
             raise TransactionRuleError("Transfers need source and destination Wallets")
         source = owned_or_raise(session, Wallet, account_id, source_wallet_id)
@@ -133,6 +147,14 @@ def _check_create_rules(
         raise TransactionRuleError("Contact Wallets only participate in Transfers")
     if category_id is not None:
         _check_category_matches(session, account_id, category_id, type)
+    if recurring_cost_id is not None:
+        if type != TransactionType.EXPENSE.value:
+            raise TransactionRuleError(
+                "Only Expenses can be linked to a Recurring Cost"
+            )
+        # Foreign or absent data is indistinguishable: owned_or_raise raises
+        # NotOwned, mapped to 403 by the HTTP layer (ADR-0003).
+        owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
     return (wallet,)
 
 
@@ -145,11 +167,13 @@ def validate_create(
     source_wallet_id: int | None = None,
     destination_wallet_id: int | None = None,
     category_id: int | None = None,
+    recurring_cost_id: int | None = None,
 ) -> None:
     """Run every rule a create must satisfy, writing nothing. The import
     pipeline's preview validates rows through this so they are judged by the
     same rules as a typed Transaction; `create_transaction` runs the same
-    checks and then locks and inserts."""
+    checks and then locks and inserts. Imports never pass a Recurring Cost
+    link (issue #57: imported rows stay ordinary Expenses)."""
     _check_create_rules(
         session,
         account_id,
@@ -158,6 +182,7 @@ def validate_create(
         source_wallet_id=source_wallet_id,
         destination_wallet_id=destination_wallet_id,
         category_id=category_id,
+        recurring_cost_id=recurring_cost_id,
     )
 
 
@@ -172,6 +197,7 @@ def create_transaction(
     source_wallet_id: int | None = None,
     destination_wallet_id: int | None = None,
     category_id: int | None = None,
+    recurring_cost_id: int | None = None,
     description: str | None = None,
     latitude: Decimal | None = None,
     longitude: Decimal | None = None,
@@ -190,7 +216,18 @@ def create_transaction(
         source_wallet_id=source_wallet_id,
         destination_wallet_id=destination_wallet_id,
         category_id=category_id,
+        recurring_cost_id=recurring_cost_id,
     )
+    # The link pays the oldest Unpaid Occurrence at link time (issue #57).
+    # The pin is stored on the row — never recomputed by later edits — and
+    # the partial unique index on (recurring_cost_id, occurrence_date) guards
+    # the "one payer per Occurrence" invariant against a concurrent
+    # double-link race.
+    occurrence_date = None
+    if recurring_cost_id is not None:
+        cost = session.get(RecurringCost, recurring_cost_id)
+        assert cost is not None  # _check_create_rules just validated ownership
+        occurrence_date = recurring_service.oldest_unpaid_occurrence(session, cost)
     # Lock the touched Wallets in ascending id order and enforce the freeze
     # rule under the lock, so the write serializes with a concurrent freeze
     # (whose Balance check must not see a stale sum).
@@ -219,6 +256,8 @@ def create_transaction(
             amount=amount,
             date=from_rome_day(date),
             category_id=category_id,
+            recurring_cost_id=recurring_cost_id,
+            occurrence_date=occurrence_date,
             description=description,
             latitude=latitude,
             longitude=longitude,
@@ -256,6 +295,28 @@ def update_transaction(
                 session, account_id, category_id, transaction.type
             )
         transaction.category_id = category_id
+    if "recurring_cost_id" in changes:
+        recurring_cost_id = changes["recurring_cost_id"]
+        if transaction.type != TransactionType.EXPENSE.value:
+            raise TransactionRuleError(
+                "Only Expenses can be linked to a Recurring Cost"
+            )
+        if recurring_cost_id is None:
+            # Unlinking frees the Occurrence: the row's pin is cleared.
+            transaction.recurring_cost_id = None
+            transaction.occurrence_date = None
+        else:
+            # Linking (or relinking) pays the oldest Unpaid Occurrence right
+            # now — the Transaction's own pin excluded, so it can re-pin the
+            # very Occurrence it already covers. The assignment is pinned at
+            # this moment: a later date edit never reassigns it (issue #57).
+            owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
+            cost = session.get(RecurringCost, recurring_cost_id)
+            assert cost is not None  # owned_or_raise just fetched it
+            transaction.recurring_cost_id = recurring_cost_id
+            transaction.occurrence_date = recurring_service.oldest_unpaid_occurrence(
+                session, cost, exclude_transaction_id=transaction.id
+            )
     if "amount" in changes:
         transaction.amount = changes["amount"]
     if "date" in changes:

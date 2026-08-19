@@ -64,6 +64,7 @@ const costs: RecurringCost[] = [
     due_day: 1,
     due_month: null,
     next_due_date: '2026-09-01',
+  next_unpaid_occurrence_date: '2026-09-01',
     created_at: createdAt,
   },
   {
@@ -78,6 +79,7 @@ const costs: RecurringCost[] = [
     due_day: null,
     due_month: null,
     next_due_date: '2026-08-20',
+  next_unpaid_occurrence_date: '2026-08-20',
     created_at: createdAt,
   },
   {
@@ -92,6 +94,7 @@ const costs: RecurringCost[] = [
     due_day: 1,
     due_month: 12,
     next_due_date: '2026-12-01',
+  next_unpaid_occurrence_date: '2026-12-01',
     created_at: createdAt,
   },
 ]
@@ -181,6 +184,7 @@ describe('RecurringCostsScreen create flow', () => {
       due_day: null,
       due_month: null,
       next_due_date: '2026-08-24',
+  next_unpaid_occurrence_date: '2026-08-24',
       created_at: createdAt,
     })
     render(<RecurringCostsScreen />)
@@ -241,6 +245,7 @@ describe('RecurringCostsScreen edit and delete flows', () => {
       ...costs[0],
       amount: '900.00',
       next_due_date: '2026-09-01',
+  next_unpaid_occurrence_date: '2026-09-01',
     })
     render(<RecurringCostsScreen />)
     await screen.findByText('Coffee')

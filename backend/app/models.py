@@ -1,5 +1,9 @@
 import enum
 from datetime import date, datetime
+
+# The Transaction class has a column named `date`; the Occurrence pin's
+# annotation uses this alias so the class body doesn't shadow the import.
+OccurrenceDate = date
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -139,6 +143,22 @@ class Transaction(Base):
     # and cleared together; never without coordinates (frontend invariant).
     place_name: Mapped[str | None] = mapped_column(Text)
     place_id: Mapped[str | None] = mapped_column(Text)
+    # The optional Recurring Cost link (issue #57, ADR-0010): an Expense may
+    # pin one Recurring Cost, paying exactly one Occurrence — the oldest
+    # Unpaid one at link time. `occurrence_date` is the paid Occurrence's own
+    # date, stored and never recomputed: later edits to the Transaction's
+    # date don't reassign it, and editing the cost's definition leaves
+    # already-Paid Occurrences as they were. Unlinking or deleting the
+    # Expense nulls both columns (freeing the Occurrence); deleting the
+    # Recurring Cost severs the link via ON DELETE SET NULL, the Expense
+    # surviving as an ordinary one. Income and Transfer never carry a link.
+    recurring_cost_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_costs.id", ondelete="SET NULL"), index=True
+    )
+    # The pin of the paid Occurrence (issue #57): the occurrence's own date,
+    # stored at link time and never recomputed. Uses the OccurrenceDate
+    # alias: the column named `date` shadows the import in this class body.
+    occurrence_date: Mapped[OccurrenceDate | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

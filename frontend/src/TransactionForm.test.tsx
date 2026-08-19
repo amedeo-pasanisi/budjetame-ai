@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { TransactionForm } from './TransactionForm'
-import type { Category, Transaction, Wallet } from './api'
+import type { Category, RecurringCost, Transaction, Wallet } from './api'
 import type { LatLng, Place } from './location'
 
 vi.mock('./api', () => ({
@@ -58,6 +58,39 @@ const wallet: Wallet = {
 
 const categories: Category[] = []
 
+const recurringCosts: RecurringCost[] = [
+  {
+    id: 1,
+    name: 'Rent',
+    amount: '850.00',
+    wallet_id: 1,
+    category_id: null,
+    interval_value: 1,
+    interval_unit: 'months',
+    start_date: '2030-03-01',
+    due_day: null,
+    due_month: null,
+    next_due_date: '2030-03-01',
+    next_unpaid_occurrence_date: '2030-03-01',
+    created_at: '2026-08-01T10:00:00Z',
+  },
+  {
+    id: 2,
+    name: 'Insurance',
+    amount: '120.00',
+    wallet_id: 1,
+    category_id: null,
+    interval_value: 1,
+    interval_unit: 'years',
+    start_date: '2030-06-01',
+    due_day: null,
+    due_month: null,
+    next_due_date: '2030-06-01',
+    next_unpaid_occurrence_date: '2030-06-01',
+    created_at: '2026-08-01T10:00:00Z',
+  },
+]
+
 const baseTransaction: Transaction = {
   id: 7,
   type: 'expense',
@@ -67,6 +100,8 @@ const baseTransaction: Transaction = {
   source_wallet_id: null,
   destination_wallet_id: null,
   category_id: null,
+  recurring_cost_id: null,
+  occurrence_date: null,
   description: null,
   latitude: '41.9028',
   longitude: '12.4964',
@@ -89,11 +124,12 @@ beforeEach(() => {
   updateTransactionMock.mockResolvedValue({ ...baseTransaction })
 })
 
-function renderForm(editing: Transaction | null) {
+function renderForm(editing: Transaction | null, costs: RecurringCost[] = recurringCosts) {
   return render(
     <TransactionForm
       wallets={[wallet]}
       categories={categories}
+      recurringCosts={costs}
       editing={editing}
       onSaved={() => {}}
       onDeleted={() => {}}
@@ -283,6 +319,112 @@ describe('TransactionForm GPS feedback (issue #35)', () => {
         "Couldn't get your location — check permissions or pick it on the map.",
       ),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('TransactionForm recurring-cost link (issue #57)', () => {
+  const linkedTransaction: Transaction = {
+    ...baseTransaction,
+    recurring_cost_id: 1,
+    occurrence_date: '2030-02-15',
+  }
+
+  it('shows the picker in expense mode only, listing the Account costs', () => {
+    renderForm(null)
+
+    // Expense is the default type: the picker is visible with every cost.
+    const picker = screen.getByLabelText('Recurring Cost')
+    expect(
+      Array.from(picker.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['None', 'Rent', 'Insurance'])
+
+    // Income and Transfer never carry a link: the picker hides.
+    fireEvent.click(screen.getByRole('button', { name: 'Income' }))
+    expect(screen.queryByLabelText('Recurring Cost')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    expect(screen.queryByLabelText('Recurring Cost')).not.toBeInTheDocument()
+  })
+
+  it('picking a cost shows the Occurrence the link will pay', () => {
+    renderForm(null)
+
+    fireEvent.change(screen.getByLabelText('Recurring Cost'), {
+      target: { value: '1' },
+    })
+
+    expect(screen.getByText('Pays the occurrence of 2030-03-01.')).toBeInTheDocument()
+  })
+
+  it('create submits the chosen link', async () => {
+    renderForm(null)
+
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.change(screen.getByLabelText('Recurring Cost'), {
+      target: { value: '1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ recurringCostId: 1 }),
+    )
+  })
+
+  it('editing a linked Expense shows its pinned Occurrence, not the fresher next unpaid', () => {
+    // The API's next unpaid for Rent is 2030-03-01; the Transaction pinned
+    // 2030-02-15 at link time. The form shows the pin: a later edit must
+    // never reassign the paid Occurrence (issue #57).
+    renderForm(linkedTransaction)
+
+    expect(screen.getByLabelText('Recurring Cost')).toHaveValue('1')
+    expect(screen.getByText('Pays the occurrence of 2030-02-15.')).toBeInTheDocument()
+    expect(screen.queryByText('Pays the occurrence of 2030-03-01.')).not.toBeInTheDocument()
+  })
+
+  it('an edit that keeps the link leaves it out of the PATCH, so the pin stays', async () => {
+    renderForm(linkedTransaction)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.not.objectContaining({ recurringCostId: expect.anything() }),
+    )
+  })
+
+  it('unlinking on edit sends recurringCostId: null, freeing the Occurrence', async () => {
+    renderForm(linkedTransaction)
+
+    fireEvent.change(screen.getByLabelText('Recurring Cost'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.objectContaining({ recurringCostId: null }),
+    )
+  })
+
+  it('changing the link on edit sends the new cost id', async () => {
+    renderForm(linkedTransaction)
+
+    fireEvent.change(screen.getByLabelText('Recurring Cost'), {
+      target: { value: '2' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.objectContaining({ recurringCostId: 2 }),
+    )
   })
 })
 

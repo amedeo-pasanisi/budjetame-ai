@@ -29,10 +29,11 @@ def _owned_cost_or_403(
         raise HTTPException(status_code=403, detail="Recurring Cost not found") from None
 
 
-def _cost_out(cost: RecurringCost) -> RecurringCostOut:
+def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
     """The API view of a Recurring Cost, with the derived next due date
     (override applied, clamping included — the pure recurrence module owns
-    that math)."""
+    that math) and the next Unpaid Occurrence date (issue #57): the one a
+    new linked Expense would pay, what the transaction form's picker shows."""
     return RecurringCostOut(
         id=cost.id,
         name=cost.name,
@@ -45,6 +46,9 @@ def _cost_out(cost: RecurringCost) -> RecurringCostOut:
         due_day=cost.due_day,
         due_month=cost.due_month,
         next_due_date=recurring_service.next_due_date_for(cost).isoformat(),
+        next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
+            session, cost
+        ).isoformat(),
         created_at=cost.created_at,
     )
 
@@ -70,7 +74,7 @@ def list_recurring_costs(
         select(RecurringCost).where(RecurringCost.account_id == account.id)
     ).all()
     return sorted(
-        (_cost_out(cost) for cost in costs),
+        (_cost_out(session, cost) for cost in costs),
         key=lambda out: (out.next_due_date, out.name.lower()),
     )
 
@@ -101,7 +105,7 @@ def create_recurring_cost(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringCostNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
-    return _cost_out(cost)
+    return _cost_out(session, cost)
 
 
 @router.patch("/{cost_id}", response_model=RecurringCostOut)
@@ -124,7 +128,7 @@ def update_recurring_cost(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringCostNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
-    return _cost_out(cost)
+    return _cost_out(session, cost)
 
 
 @router.delete("/{cost_id}", status_code=204)

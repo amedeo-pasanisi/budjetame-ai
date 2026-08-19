@@ -8,12 +8,14 @@ import {
   deleteTransaction,
   updateTransaction,
   type Category,
+  type RecurringCost,
   type Transaction,
   type TransactionInput,
   type Wallet,
 } from './api'
 import {
   CategoryField,
+  RecurringCostField,
   TransferBalancePreview,
   TransferWalletFields,
   TypeSelector,
@@ -43,6 +45,7 @@ import { NON_CONTACT_WALLET_TYPES, todayInRome } from './transactions'
 type TransactionFormProps = {
   wallets: Wallet[]
   categories: Category[]
+  recurringCosts: RecurringCost[]
   editing: Transaction | null
   onSaved: (transaction: Transaction) => void
   onDeleted: (warning: boolean) => void
@@ -56,6 +59,7 @@ type TransactionFormProps = {
 export function TransactionForm({
   wallets,
   categories,
+  recurringCosts,
   editing,
   onSaved,
   onDeleted,
@@ -85,6 +89,12 @@ export function TransactionForm({
       : (wallets[1]?.id ?? wallets[0]?.id),
   )
   const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
+  // The optional Recurring Cost link (issue #57): an Expense pins one cost,
+  // paying its oldest Unpaid Occurrence. Seeded from the Transaction being
+  // edited, so an untouched link is never re-sent (and never re-pinned).
+  const [recurringCostId, setRecurringCostId] = useState<number | null>(
+    editing?.recurring_cost_id ?? null,
+  )
   const [description, setDescription] = useState(editing?.description ?? '')
   const descriptionField = useRef<HTMLTextAreaElement | null>(null)
   // Auto-grow (issue #53): rows follow the explicit line count so the field
@@ -132,6 +142,19 @@ export function TransactionForm({
 
   const isEditing = editing !== null
   const isTransfer = type === 'transfer'
+
+  // The Occurrence the picker says the link will pay (issue #57): for a new
+  // link it is the selected cost's oldest Unpaid Occurrence (from the API);
+  // for the very link already on the edited Transaction it is the stored
+  // pin — the assignment was made at link time and must never be reassigned
+  // by a later edit, so the list's fresher "next unpaid" is not shown.
+  const selectedCost = recurringCosts.find((cost) => cost.id === recurringCostId)
+  const payingOccurrenceDate =
+    selectedCost === undefined
+      ? null
+      : isEditing && editing !== null && recurringCostId === editing.recurring_cost_id
+        ? editing.occurrence_date
+        : selectedCost.next_unpaid_occurrence_date
 
   const sourceWallet = wallets.find((w) => w.id === sourceWalletId)
   const destinationWallet = wallets.find((w) => w.id === destinationWalletId)
@@ -238,6 +261,7 @@ export function TransactionForm({
             date,
             walletId: walletId as number,
             categoryId,
+            recurringCostId: type === 'expense' ? recurringCostId : null,
             description,
             ...latLngToWire(finalLocation),
             ...placeToWire(place),
@@ -249,6 +273,12 @@ export function TransactionForm({
               date,
               description,
               ...(isTransfer ? {} : { categoryId }),
+              // The link rides the PATCH only when it changed: absent means
+              // "keep the stored pin" — a date-only edit must never
+              // reassign the paid Occurrence (issue #57).
+              ...(recurringCostId !== (editing.recurring_cost_id ?? null)
+                ? { recurringCostId }
+                : {}),
               ...latLngToWire(location),
               // The Place follows the location: values set it, null clears it
               // (ADR-0005), so a re-pick by tap or GPS reaches the API.
@@ -403,6 +433,15 @@ export function TransactionForm({
           type={type}
           value={categoryId}
           onChange={setCategoryId}
+        />
+      )}
+
+      {!isTransfer && type === 'expense' && (
+        <RecurringCostField
+          costs={recurringCosts}
+          value={recurringCostId}
+          occurrenceDate={payingOccurrenceDate}
+          onChange={setRecurringCostId}
         />
       )}
 

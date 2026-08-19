@@ -13,6 +13,11 @@ export type Transaction = {
   source_wallet_id: number | null
   destination_wallet_id: number | null
   category_id: number | null
+  // The optional Recurring Cost link (issue #57): an Expense pinning one
+  // cost, with the Occurrence (its own date) the link paid at link time —
+  // stored, never reassigned by later date edits. Both null when unlinked.
+  recurring_cost_id: number | null
+  occurrence_date: string | null
   description: string | null
   latitude: string | null
   longitude: string | null
@@ -31,6 +36,9 @@ export type TransactionInput =
       date: string
       walletId: number
       categoryId: number | null
+      // The optional Recurring Cost link (issue #57): Expenses only — the
+      // form sends null for Income, and Transfers never carry the field.
+      recurringCostId: number | null
       description: string
       latitude: string | null
       longitude: string | null
@@ -132,6 +140,7 @@ export async function createTransaction(
           ...base,
           wallet_id: input.walletId,
           category_id: input.categoryId,
+          recurring_cost_id: input.recurringCostId,
         }
   const response = await request('/transactions', {
     method: 'POST',
@@ -149,6 +158,10 @@ export async function updateTransaction(
     amount: string
     date: string
     categoryId?: number | null
+    // The link is sent only when it changed: a field absent from the PATCH
+    // leaves the stored pin untouched (a date edit must never reassign it,
+    // issue #57); a value links, null unlinks.
+    recurringCostId?: number | null
     description: string
     latitude?: string | null
     longitude?: string | null
@@ -164,6 +177,10 @@ export async function updateTransaction(
   // Transfers never carry a Category; omit category_id entirely for them.
   if (input.categoryId !== undefined) {
     body.category_id = input.categoryId
+  }
+  // Same contract for the Recurring Cost link: omitted when unchanged.
+  if (input.recurringCostId !== undefined) {
+    body.recurring_cost_id = input.recurringCostId
   }
   // The location is always sent: values set it, null clears it (the backend
   // applies any field present in the payload). The Place reference follows

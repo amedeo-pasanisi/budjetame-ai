@@ -114,6 +114,7 @@ describe('createTransaction', () => {
       date: '2026-08-01',
       walletId: 1,
       categoryId: null,
+      recurringCostId: null,
       description: '',
       latitude: '41.9028',
       longitude: '12.4964',

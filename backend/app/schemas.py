@@ -155,7 +155,10 @@ class TransactionCreate(BaseModel):
     Expense/Income use `wallet_id` (plus an optional matching `category_id`); a
     Transfer uses `source_wallet_id` and `destination_wallet_id` instead and
     never carries a Category (spec decision #6). `place_name`/`place_id` are
-    the optional Place reference, carried alongside the coordinates (ADR-0005)."""
+    the optional Place reference, carried alongside the coordinates (ADR-0005).
+    `recurring_cost_id` is the optional Recurring Cost link (issue #57):
+    Expenses only — Income and Transfer reject it; the link pays the cost's
+    oldest Unpaid Occurrence at link time, pinned on the row."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -166,6 +169,7 @@ class TransactionCreate(BaseModel):
     source_wallet_id: int | None = None
     destination_wallet_id: int | None = None
     category_id: int | None = None
+    recurring_cost_id: int | None = None
     description: str | None = Field(default=None, max_length=500)
     latitude: Decimal | None = Field(default=None, ge=-90, le=90)
     longitude: Decimal | None = Field(default=None, ge=-180, le=180)
@@ -195,6 +199,8 @@ class TransactionCreate(BaseModel):
                     "Transfers use source and destination Wallets and never "
                     "carry a Category"
                 )
+            if self.recurring_cost_id is not None:
+                raise ValueError("Transfers never carry a Recurring Cost link")
             if self.source_wallet_id is None or self.destination_wallet_id is None:
                 raise ValueError("Transfers need source and destination Wallets")
         else:
@@ -204,6 +210,8 @@ class TransactionCreate(BaseModel):
                 raise ValueError(
                     "source and destination Wallets are only for Transfers"
                 )
+            if self.type == "income" and self.recurring_cost_id is not None:
+                raise ValueError("Only Expenses can be linked to a Recurring Cost")
         return self
 
 
@@ -212,13 +220,19 @@ class TransactionUpdate(BaseModel):
     field present in the payload is applied even when null (clearing it); a
     field absent is untouched. Transfers never carry a Category — the service
     rejects a `category_id` on them. A `place_name`/`place_id` present in the
-    payload replaces the Place reference; null clears it (ADR-0005)."""
+    payload replaces the Place reference; null clears it (ADR-0005).
+    `recurring_cost_id` follows the same contract (issue #57): present with a
+    value, it links (or relinks) the Expense, paying the cost's oldest Unpaid
+    Occurrence at that moment; present as null, it unlinks, freeing the
+    Occurrence; absent, the stored pin is untouched — a date edit never
+    reassigns it. The service rejects it on Income and Transfer."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
     date: str | None = None
     category_id: int | None = None
+    recurring_cost_id: int | None = None
     description: str | None = Field(default=None, max_length=500)
     latitude: Decimal | None = Field(default=None, ge=-90, le=90)
     longitude: Decimal | None = Field(default=None, ge=-180, le=180)
@@ -441,7 +455,11 @@ class TransactionOut(BaseModel):
     Balance indicator (true only right after a write that made a Cash Wallet
     negative); `date` is the calendar day in Europe/Rome. Expense/Income fill
     `wallet_id`; a Transfer fills `source_wallet_id` and `destination_wallet_id`.
-    `place_name`/`place_id` are the optional Place reference (ADR-0005)."""
+    `place_name`/`place_id` are the optional Place reference (ADR-0005).
+    `recurring_cost_id` is the optional Recurring Cost link (issue #57);
+    `occurrence_date` is the Occurrence (its own date) the link paid at link
+    time — stored, never recomputed. Both are null when the Transaction
+    carries no link."""
 
     id: int
     type: TransactionType
@@ -451,6 +469,8 @@ class TransactionOut(BaseModel):
     source_wallet_id: int | None
     destination_wallet_id: int | None
     category_id: int | None
+    recurring_cost_id: int | None
+    occurrence_date: str | None
     description: str | None
     latitude: str | None
     longitude: str | None
@@ -548,9 +568,11 @@ class RecurringCostUpdate(BaseModel):
 class RecurringCostOut(BaseModel):
     """A Recurring Cost as seen through the API, with its derived state:
     `next_due_date` is the next Occurrence's due date (override applied,
-    clamping included) on or after today in Europe/Rome (issue #56).
-    `start_date` is the stored value — null when unset, meaning the creation
-    date."""
+    clamping included) on or after today in Europe/Rome (issue #56);
+    `next_unpaid_occurrence_date` is the next Occurrence a new linked Expense
+    would pay — the oldest Unpaid one's own date (issue #57), what the
+    transaction form's picker shows. `start_date` is the stored value — null
+    when unset, meaning the creation date."""
 
     id: int
     name: str
@@ -563,6 +585,7 @@ class RecurringCostOut(BaseModel):
     due_day: int | None
     due_month: int | None
     next_due_date: str
+    next_unpaid_occurrence_date: str
     created_at: datetime
 
     @field_validator("amount")

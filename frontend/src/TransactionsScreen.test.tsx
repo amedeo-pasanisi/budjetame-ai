@@ -20,6 +20,7 @@ vi.mock('./api', () => ({
   formatEuros: (value: string) => `€${value}`,
   fetchWallets: vi.fn(),
   fetchCategories: vi.fn(),
+  fetchRecurringCosts: vi.fn(),
   fetchTransactions: vi.fn(),
   createTransaction: vi.fn(),
   updateTransaction: vi.fn(),
@@ -35,6 +36,7 @@ import {
   createTransaction,
   deleteTransaction,
   fetchCategories,
+  fetchRecurringCosts,
   fetchTransactions,
   fetchWallets,
 } from './api'
@@ -108,6 +110,8 @@ const baseTransaction: Transaction = {
   source_wallet_id: null,
   destination_wallet_id: null,
   category_id: null,
+  recurring_cost_id: null,
+  occurrence_date: null,
   description: null,
   latitude: null,
   longitude: null,
@@ -127,6 +131,7 @@ const page2: TransactionPage = { items: [rent], next_cursor: null }
 const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
+const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const createTransactionMock = vi.mocked(createTransaction)
 const deleteTransactionMock = vi.mocked(deleteTransaction)
 
@@ -135,6 +140,7 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
   fetchWalletsMock.mockResolvedValue([wallet])
   fetchCategoriesMock.mockResolvedValue([])
+  fetchRecurringCostsMock.mockResolvedValue([])
   fetchTransactionsMock.mockImplementation(async (_token, _filters, _limit, cursor) =>
     cursor === 'c1' ? page2 : page1,
   )

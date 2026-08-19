@@ -3,11 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   PAGE_LIMIT,
   fetchCategories,
+  fetchRecurringCosts,
   fetchTransactions,
   fetchWallets,
   formatEuros,
   TOKEN_KEY,
   type Category,
+  type RecurringCost,
   type Transaction,
   type TransactionFilters,
   type Wallet,
@@ -37,6 +39,10 @@ export function TransactionsScreen({
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [categories, setCategories] = useState<Category[] | null>(null)
+  // The link picker's costs (issue #57): an auxiliary fetch, so a recurring-
+  // costs failure never takes down the ledger — the picker just shows no
+  // costs until the next reload.
+  const [recurringCosts, setRecurringCosts] = useState<RecurringCost[]>([])
   const [transactions, setTransactions] = useState<Transaction[] | null>(null)
   // The accumulated list pages one at a time: the sentinel at the bottom of
   // the list (IntersectionObserver) fetches the next page while scrolling.
@@ -122,6 +128,12 @@ export function TransactionsScreen({
         }
       })
       .catch(() => setLoadError('Could not load your data.'))
+    // The picker's "which Occurrence will this link pay" depends on the
+    // current links, so the costs refetch on every reload (any save or
+    // delete changes them). Failure is silent: the ledger still loads.
+    fetchRecurringCosts(token)
+      .then((data) => setRecurringCosts(data))
+      .catch(() => {})
   }, [token, requestFilters])
 
   // Any filter change refetches with it applied and resets to the first page.
@@ -451,6 +463,7 @@ export function TransactionsScreen({
         <TransactionModal
           wallets={wallets}
           categories={categories}
+          recurringCosts={recurringCosts}
           editing={form.kind === 'edit' ? form.transaction : null}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

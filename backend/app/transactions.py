@@ -86,6 +86,12 @@ def _transaction_out(
         source_wallet_id=source_wallet_id,
         destination_wallet_id=destination_wallet_id,
         category_id=category_id,
+        recurring_cost_id=transaction.recurring_cost_id,
+        occurrence_date=(
+            transaction.occurrence_date.isoformat()
+            if transaction.occurrence_date is not None
+            else None
+        ),
         description=transaction.description,
         latitude=fmt_coord(transaction.latitude),
         longitude=fmt_coord(transaction.longitude),
@@ -266,6 +272,7 @@ def create_transaction(
             source_wallet_id=payload.source_wallet_id,
             destination_wallet_id=payload.destination_wallet_id,
             category_id=payload.category_id,
+            recurring_cost_id=payload.recurring_cost_id,
             description=payload.description,
             latitude=payload.latitude,
             longitude=payload.longitude,
@@ -273,7 +280,9 @@ def create_transaction(
             place_id=payload.place_id,
         )
     except scoping.NotOwned:
-        raise HTTPException(status_code=403, detail="Wallet or Category not found")
+        raise HTTPException(
+            status_code=403, detail="Wallet, Category, or Recurring Cost not found"
+        )
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
     return _transaction_out(
@@ -300,7 +309,9 @@ def update_transaction(
             changes=payload.model_dump(exclude_unset=True),
         )
     except scoping.NotOwned:
-        raise HTTPException(status_code=403, detail="Wallet or Category not found")
+        raise HTTPException(
+            status_code=403, detail="Wallet, Category, or Recurring Cost not found"
+        )
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
     return _transaction_out(

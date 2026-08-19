@@ -9,7 +9,7 @@
  * JSX, moved.
  */
 
-import type { Category, Wallet } from './api'
+import type { Category, RecurringCost, Wallet } from './api'
 import { formatEuros } from './api'
 import type { TransferProjection } from './balanceProjection'
 import { NON_CONTACT_WALLET_TYPES } from './transactions'
@@ -158,6 +158,52 @@ export function CategoryField({
           </option>
         ))}
       </select>
+    </div>
+  )
+}
+
+/** The Recurring Cost select an Expense carries (issue #57): Expenses only —
+ * Income and Transfer never render it. Picking a cost signs it as paid, and
+ * the helper names the Occurrence the link will pay: `occurrenceDate` is the
+ * oldest Unpaid Occurrence's own date for a new link, or the stored pin when
+ * the form is editing the very link already on the Transaction (which must
+ * never be reassigned by a mere date edit). The None option unlinks. */
+export function RecurringCostField({
+  costs,
+  value,
+  occurrenceDate,
+  onChange,
+}: {
+  costs: RecurringCost[]
+  value: number | null
+  occurrenceDate: string | null
+  onChange: (costId: number | null) => void
+}) {
+  return (
+    <div>
+      <label htmlFor="tx-recurring-cost" className="block text-sm font-medium text-slate-700">
+        Recurring Cost
+      </label>
+      <select
+        id="tx-recurring-cost"
+        value={value ?? ''}
+        onChange={(event) =>
+          onChange(event.target.value === '' ? null : Number(event.target.value))
+        }
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+      >
+        <option value="">None</option>
+        {costs.map((cost) => (
+          <option key={cost.id} value={cost.id}>
+            {cost.name}
+          </option>
+        ))}
+      </select>
+      {value !== null && occurrenceDate !== null && (
+        <p className="mt-1 text-xs text-slate-500">
+          Pays the occurrence of {occurrenceDate}.
+        </p>
+      )}
     </div>
   )
 }
