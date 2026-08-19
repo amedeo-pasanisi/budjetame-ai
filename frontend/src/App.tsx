@@ -5,7 +5,7 @@ import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
-import { RecurringCostsScreen } from './RecurringCostsScreen'
+import { RecurringScreen } from './RecurringScreen'
 import { Screen } from './Screen'
 import { useTabSwipe } from './tabSwipe'
 import { TransactionsScreen } from './TransactionsScreen'
@@ -130,7 +130,7 @@ export function AppShell({
         {tab === 'wallets' && <WalletsScreen />}
         {tab === 'transactions' && <TransactionsScreen importState={importState} />}
         {tab === 'categories' && <CategoriesScreen />}
-        {tab === 'recurring' && <RecurringCostsScreen />}
+        {tab === 'recurring' && <RecurringScreen />}
       </main>
 
       {/* Five tabs (issue #56 added Recurring): one bottom row on a phone,

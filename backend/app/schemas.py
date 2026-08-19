@@ -600,6 +600,107 @@ class RecurringCostOut(BaseModel):
         return value.quantize(Decimal("0.01"))
 
 
+class RecurringIncomeCreate(BaseModel):
+    """Create a Recurring Income (issue #60), mirroring RecurringCostCreate
+    (ADR-0011). `interval_value` + `interval_unit` are the repetition (every
+    N days, weeks, months, or years); `start_date` is an optional Europe/Rome
+    calendar day (defaults to the creation date when unset);
+    `due_day`/`due_month` are the optional due-date override — a day-of-month
+    for month intervals, a month+day for year intervals, and never set for
+    day/week intervals (the per-unit combination is enforced by the service,
+    which sees the same rules as update's merged state). The optional
+    Category is income-only.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=80)
+    amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
+    wallet_id: int
+    category_id: int | None = None
+    interval_value: int = Field(ge=1)
+    interval_unit: IntervalUnit
+    start_date: str | None = None
+    due_day: int | None = Field(default=None, ge=1, le=31)
+    due_month: int | None = Field(default=None, ge=1, le=12)
+
+    @field_validator("start_date")
+    @classmethod
+    def _start_date_is_a_rome_day(cls, value: str | None) -> str | None:
+        return _valid_rome_day(value) if value is not None else None
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
+
+
+class RecurringIncomeUpdate(BaseModel):
+    """Edit a Recurring Income (issue #60), mirroring RecurringCostUpdate
+    (ADR-0011). Every field is editable — name, amount, Wallet, Category,
+    interval, start date, due-date override — and follows the
+    TransactionUpdate contract: a field present in the payload is applied
+    even when null (clearing it); a field absent is untouched. The service
+    re-validates the resulting override combination against the stored
+    definition."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
+    wallet_id: int | None = None
+    category_id: int | None = None
+    interval_value: int | None = Field(default=None, ge=1)
+    interval_unit: IntervalUnit | None = None
+    start_date: str | None = None
+    due_day: int | None = Field(default=None, ge=1, le=31)
+    due_month: int | None = Field(default=None, ge=1, le=12)
+
+    @field_validator("start_date")
+    @classmethod
+    def _start_date_is_a_rome_day(cls, value: str | None) -> str | None:
+        return _valid_rome_day(value) if value is not None else None
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal | None) -> Decimal | None:
+        return value.quantize(Decimal("0.01")) if value is not None else None
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> "RecurringIncomeUpdate":
+        if not self.model_fields_set:
+            raise ValueError("at least one field is required")
+        return self
+
+
+class RecurringIncomeOut(BaseModel):
+    """A Recurring Income as seen through the API (issue #60), mirroring
+    RecurringCostOut (ADR-0011). `next_due_date` is the next Occurrence's due
+    date (override applied, clamping included) on or after today in
+    Europe/Rome, derived on the fly from the stored definition — never
+    stored. `start_date` is the stored value — null when unset, meaning the
+    creation date. (The link state and the Backlog arrive with issues #61 and
+    #62, mirroring #57 and #58.)"""
+
+    id: int
+    name: str
+    amount: Decimal
+    wallet_id: int
+    category_id: int | None
+    interval_value: int
+    interval_unit: IntervalUnit
+    start_date: str | None
+    due_day: int | None
+    due_month: int | None
+    next_due_date: str
+    created_at: datetime
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
+
+
 class TransactionDeleteOut(BaseModel):
     """The result of a Transaction delete (US10/ID8): `warning` is the Cash
     negative-Balance indicator, true exactly when the delete left a Cash

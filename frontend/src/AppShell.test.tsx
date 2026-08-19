@@ -69,6 +69,10 @@ vi.mock('./api', async () => {
     createRecurringCost: vi.fn(),
     updateRecurringCost: vi.fn(),
     deleteRecurringCost: vi.fn(),
+    fetchRecurringIncomes: vi.fn(),
+    createRecurringIncome: vi.fn(),
+    updateRecurringIncome: vi.fn(),
+    deleteRecurringIncome: vi.fn(),
   }
 })
 
@@ -82,6 +86,7 @@ import {
   fetchDashboardSummary,
   fetchExpenseTrend,
   fetchRecurringCosts,
+  fetchRecurringIncomes,
   fetchTransactions,
   fetchWallets,
 } from './api'
@@ -92,6 +97,7 @@ const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchDashboardSummaryMock = vi.mocked(fetchDashboardSummary)
 const fetchExpenseTrendMock = vi.mocked(fetchExpenseTrend)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
+const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
@@ -132,6 +138,7 @@ beforeEach(() => {
   fetchWalletsMock.mockResolvedValue([])
   fetchCategoriesMock.mockResolvedValue([])
   fetchRecurringCostsMock.mockResolvedValue([])
+  fetchRecurringIncomesMock.mockResolvedValue([])
   fetchTransactionsMock.mockResolvedValue({ items: [], next_cursor: null })
   // Echo the requested month/range so the dashboard's loaded-state guards
   // pass; every number is zero so no charts render.

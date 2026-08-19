@@ -70,3 +70,12 @@ export {
   fetchRecurringCosts,
   updateRecurringCost,
 } from './recurringCosts'
+
+export {
+  type RecurringIncome,
+  type RecurringIncomeInput,
+  createRecurringIncome,
+  deleteRecurringIncome,
+  fetchRecurringIncomes,
+  updateRecurringIncome,
+} from './recurringIncomes'

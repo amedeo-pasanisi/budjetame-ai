@@ -52,7 +52,8 @@ class CategoryType(str, enum.Enum):
 
 
 class IntervalUnit(str, enum.Enum):
-    """The unit of a Recurring Cost's interval (every N units)."""
+    """The unit of a Recurring definition's interval (every N units) —
+    shared by Recurring Costs and Recurring Incomes (ADR-0011)."""
 
     DAYS = "days"
     WEEKS = "weeks"
@@ -213,6 +214,59 @@ class RecurringCost(Base):
         # Names are unique per Account, case-insensitively.
         Index(
             "uq_recurring_costs_account_name_lower",
+            "account_id",
+            text("lower(name)"),
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(80))
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    # Wallets are never hard-deleted (ADR-0002), so the FK never fires;
+    # CASCADE matches the Transaction convention.
+    wallet_id: Mapped[int] = mapped_column(
+        ForeignKey("wallets.id", ondelete="CASCADE"), index=True
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"), index=True
+    )
+    # The interval: every N days, weeks, months, or years.
+    interval_value: Mapped[int] = mapped_column(Integer)
+    interval_unit: Mapped[str] = mapped_column(String(10))
+    # The user's chosen first-Occurrence day (Europe/Rome calendar day);
+    # null means "the creation date".
+    start_date: Mapped[date | None] = mapped_column(Date)
+    # The optional due-date override (ADR-0010): due_day alone for month
+    # intervals; due_day + due_month for year intervals; both null for
+    # day/week intervals. The service enforces the per-unit combination.
+    due_day: Mapped[int | None] = mapped_column(Integer)
+    due_month: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RecurringIncome(Base):
+    """A definition of an income expected to repeat at a fixed interval
+    (ADR-0011).
+
+    The mirror of RecurringCost, deliberately not a generalization: the same
+    field set and the same derived Occurrences, sharing the pure recurrence
+    module (app.recurrence) unchanged. The optional Category is income-only;
+    the Wallet must be active and non-Contact (incomes behave like Income
+    Transactions). Deleting a Recurring Income is a hard delete (issue #60);
+    the link to Transactions arrives with issue #61.
+    """
+
+    __tablename__ = "recurring_incomes"
+    __table_args__ = (
+        # Names are unique per Account, case-insensitively.
+        Index(
+            "uq_recurring_incomes_account_name_lower",
             "account_id",
             text("lower(name)"),
             unique=True,
