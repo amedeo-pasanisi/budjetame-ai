@@ -5,6 +5,7 @@ import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
+import { RecurringCostsScreen } from './RecurringCostsScreen'
 import { Screen } from './Screen'
 import { useTabSwipe } from './tabSwipe'
 import { TransactionsScreen } from './TransactionsScreen'
@@ -15,10 +16,16 @@ type AuthState =
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; account: Account }
 
-type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories'
+type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
 /** The tabs in bottom-nav order — the swipe walks this list (issue #51). */
-const TAB_ORDER: readonly Tab[] = ['dashboard', 'wallets', 'transactions', 'categories']
+const TAB_ORDER: readonly Tab[] = [
+  'dashboard',
+  'wallets',
+  'transactions',
+  'categories',
+  'recurring',
+]
 
 function App() {
   const [auth, setAuth] = useState<AuthState>(() =>
@@ -123,13 +130,13 @@ export function AppShell({
         {tab === 'wallets' && <WalletsScreen />}
         {tab === 'transactions' && <TransactionsScreen importState={importState} />}
         {tab === 'categories' && <CategoriesScreen />}
+        {tab === 'recurring' && <RecurringCostsScreen />}
       </main>
 
-      {/* The History tab merged into Transactions (issue #33): four
-       * destinations fit one bottom row on a phone (T10), full-width, four
-       * equal columns. */}
+      {/* Five tabs (issue #56 added Recurring): one bottom row on a phone,
+       * full-width, five equal columns. */}
       <nav className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-sm grid-cols-4 gap-0.5 px-2 py-1.5">
+        <div className="mx-auto grid max-w-sm grid-cols-5 gap-0.5 px-2 py-1.5">
           <TabButton active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
             Dashboard
           </TabButton>
@@ -144,6 +151,9 @@ export function AppShell({
           </TabButton>
           <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
             Categories
+          </TabButton>
+          <TabButton active={tab === 'recurring'} onClick={() => setTab('recurring')}>
+            Recurring
           </TabButton>
         </div>
       </nav>

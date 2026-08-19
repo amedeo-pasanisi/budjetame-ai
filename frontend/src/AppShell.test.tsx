@@ -65,6 +65,10 @@ vi.mock('./api', async () => {
     previewImport: vi.fn(),
     confirmImport: vi.fn(),
     validateImportRow: vi.fn(),
+    fetchRecurringCosts: vi.fn(),
+    createRecurringCost: vi.fn(),
+    updateRecurringCost: vi.fn(),
+    deleteRecurringCost: vi.fn(),
   }
 })
 
@@ -77,6 +81,7 @@ import {
   fetchCategories,
   fetchDashboardSummary,
   fetchExpenseTrend,
+  fetchRecurringCosts,
   fetchTransactions,
   fetchWallets,
 } from './api'
@@ -86,8 +91,9 @@ const fetchCategoriesMock = vi.mocked(fetchCategories)
 const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchDashboardSummaryMock = vi.mocked(fetchDashboardSummary)
 const fetchExpenseTrendMock = vi.mocked(fetchExpenseTrend)
+const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 
-type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories'
+type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
 /** The one piece of each screen that identifies the active tab. */
 async function expectTab(tab: Tab) {
@@ -97,6 +103,9 @@ async function expectTab(tab: Tab) {
     await screen.findByRole('button', { name: 'New transaction' })
   }
   if (tab === 'categories') await screen.findByRole('button', { name: 'New category' })
+  if (tab === 'recurring') {
+    await screen.findByRole('button', { name: 'New recurring cost' })
+  }
 }
 
 async function renderShell() {
@@ -122,6 +131,7 @@ function swipe(
 beforeEach(() => {
   fetchWalletsMock.mockResolvedValue([])
   fetchCategoriesMock.mockResolvedValue([])
+  fetchRecurringCostsMock.mockResolvedValue([])
   fetchTransactionsMock.mockResolvedValue({ items: [], next_cursor: null })
   // Echo the requested month/range so the dashboard's loaded-state guards
   // pass; every number is zero so no charts render.
@@ -153,6 +163,8 @@ describe('AppShell swipe navigation', () => {
     await expectTab('transactions')
     swipe(main, { x: 400, y: 200 }, { x: 280, y: 205 })
     await expectTab('categories')
+    swipe(main, { x: 400, y: 200 }, { x: 280, y: 205 })
+    await expectTab('recurring')
     expect(screen.queryByText('Net Worth')).not.toBeInTheDocument()
   })
 
@@ -173,10 +185,10 @@ describe('AppShell swipe navigation', () => {
 
   it('does not wrap around from the last tab', async () => {
     await renderShell()
-    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
-    await expectTab('categories')
+    fireEvent.click(screen.getByRole('button', { name: 'Recurring' }))
+    await expectTab('recurring')
     swipe(screen.getByRole('main'), { x: 400, y: 200 }, { x: 280, y: 205 })
-    expect(screen.getByRole('button', { name: 'New category' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New recurring cost' })).toBeInTheDocument()
     expect(screen.queryByText('Net Worth')).not.toBeInTheDocument()
   })
 

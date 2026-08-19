@@ -60,3 +60,13 @@ export {
   previewImport,
   validateImportRow,
 } from './imports'
+
+export {
+  type IntervalUnit,
+  type RecurringCost,
+  type RecurringCostInput,
+  createRecurringCost,
+  deleteRecurringCost,
+  fetchRecurringCosts,
+  updateRecurringCost,
+} from './recurringCosts'

@@ -2,10 +2,10 @@
 
 ADR-0003: all data is scoped to the single Account, and foreign data is
 indistinguishable from absent data — one ownership check serves Wallets,
-Categories and Transactions, at both the HTTP layer (403) and the service
-layer (NotOwned). Names are unique case-insensitively within the Account
-(Wallets) or within the Account and Type (Categories) — one name-availability
-check serves both.
+Categories, Transactions and Recurring Costs, at both the HTTP layer (403)
+and the service layer (NotOwned). Names are unique case-insensitively within
+the Account (Wallets, Recurring Costs) or within the Account and Type
+(Categories) — one name-availability check serves all of them.
 """
 
 from typing import Any, Protocol, TypeVar
@@ -27,10 +27,11 @@ class Scoped(Protocol):
 
 
 class Named(Scoped, Protocol):
-    """A row with a per-Account unique name (Wallets, Categories)."""
+    """A row with a per-Account unique name (Wallets, Categories, Recurring
+    Costs). Not every named row carries a Type — `named_row`'s `type_value`
+    asks for it and only then touches the column."""
 
     name: Any
-    type: Any
 
 
 T = TypeVar("T", bound=Scoped)
@@ -67,7 +68,7 @@ def named_row(
         func.lower(model.name) == func.lower(name),
     )
     if type_value is not None:
-        stmt = stmt.where(model.type == type_value)
+        stmt = stmt.where(getattr(model, "type") == type_value)
     if exclude_id is not None:
         stmt = stmt.where(model.id != exclude_id)
     return session.scalar(stmt)
