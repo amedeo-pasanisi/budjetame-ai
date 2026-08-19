@@ -31,7 +31,13 @@ export function BottomSheet({ label, onClose, children }: BottomSheetProps) {
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      // The open modal owns its touches (issue #51): a swipe that starts
+      // anywhere inside the overlay — panel or backdrop — must never reach
+      // the page behind and switch tabs.
+      onTouchStart={(event) => event.stopPropagation()}
+    >
       {/* The backdrop is a sibling of the panel so clicks inside the panel
        * never reach it. */}
       <div className="absolute inset-0 bg-slate-900/50" onClick={onClose} aria-hidden="true" />

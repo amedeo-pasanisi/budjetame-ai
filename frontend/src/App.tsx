@@ -6,6 +6,7 @@ import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
 import { Screen } from './Screen'
+import { useTabSwipe } from './tabSwipe'
 import { TransactionsScreen } from './TransactionsScreen'
 import { WalletsScreen } from './WalletsScreen'
 
@@ -15,6 +16,9 @@ type AuthState =
   | { kind: 'signedIn'; account: Account }
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories'
+
+/** The tabs in bottom-nav order — the swipe walks this list (issue #51). */
+const TAB_ORDER: readonly Tab[] = ['dashboard', 'wallets', 'transactions', 'categories']
 
 function App() {
   const [auth, setAuth] = useState<AuthState>(() =>
@@ -84,6 +88,20 @@ export function AppShell({
   // survives the screen unmounting on a tab switch (issue #43).
   const importState = useImportDraft()
 
+  // Swipe between tabs (issue #51): one step per gesture, clamped at the
+  // ends. The gesture evaluator only ever asks for a direction, never a
+  // target tab, so tab state stays a plain value in the shell.
+  const handleTabSwipe = (direction: 1 | -1) => {
+    setTab((current) => {
+      const next = TAB_ORDER.indexOf(current) + direction
+      if (next < 0 || next >= TAB_ORDER.length) {
+        return current
+      }
+      return TAB_ORDER[next]
+    })
+  }
+  const swipeHandlers = useTabSwipe(handleTabSwipe)
+
   return (
     <div className="min-h-svh bg-slate-50 px-4 pt-6 pb-24">
       <header className="mx-auto flex max-w-sm items-center justify-between">
@@ -100,7 +118,7 @@ export function AppShell({
         </button>
       </header>
 
-      <main className="mx-auto mt-6 max-w-sm">
+      <main className="mx-auto mt-6 max-w-sm" {...swipeHandlers}>
         {tab === 'dashboard' && <DashboardScreen />}
         {tab === 'wallets' && <WalletsScreen />}
         {tab === 'transactions' && <TransactionsScreen importState={importState} />}
