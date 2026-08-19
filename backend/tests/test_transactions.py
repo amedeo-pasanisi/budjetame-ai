@@ -1357,6 +1357,146 @@ async def test_history_combines_wallet_date_and_category_filters(
     assert [t["amount"] for t in filtered] == ["2.00"]
 
 
+async def _create_expense(
+    client: AsyncClient,
+    token: str,
+    wallet_id: int,
+    amount: str,
+    date: str,
+    description: str | None = None,
+) -> int:
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": amount,
+            "date": date,
+            "wallet_id": wallet_id,
+            "description": description,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_search_matches_description_as_a_case_insensitive_substring(
+    client: AsyncClient,
+) -> None:
+    """q matches the Description as a literal substring, case-insensitively
+    (ADR-0009): a lowercase needle finds the uppercase row, and the needle
+    may sit in the middle of the Description."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Search Substring Wallet", "checking", "0.00")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-01", "Morning coffee")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-02", "COFFEE SHOP")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-03", "Afternoon tea")
+
+    matches = await _list_all(client, token, wallet_id=wallet_id, q="coffee")
+
+    assert [t["description"] for t in matches] == ["COFFEE SHOP", "Morning coffee"]
+
+
+async def test_search_requires_exact_accents(client: AsyncClient) -> None:
+    """Accents must match exactly: "caffe" does not find "caffè" — the
+    Categories search behaves the same way (ADR-0009)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Search Accent Wallet", "checking", "0.00")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-01", "caffè ristretto")
+
+    assert await _list_all(client, token, wallet_id=wallet_id, q="caffe") == []
+    assert [
+        t["description"]
+        for t in await _list_all(client, token, wallet_id=wallet_id, q="caffè")
+    ] == ["caffè ristretto"]
+
+
+async def test_search_treats_blank_q_as_absent(client: AsyncClient) -> None:
+    """A blank or whitespace-only q means no filter: the list is the same as
+    with q omitted entirely."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Search Blank Wallet", "checking", "0.00")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-01", "Morning coffee")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-02", "Afternoon tea")
+
+    everything = await _list_all(client, token, wallet_id=wallet_id)
+    for needle in ("", "   ", "\t"):
+        assert await _list_all(client, token, wallet_id=wallet_id, q=needle) == everything
+
+
+async def test_search_needle_wildcards_are_literal(client: AsyncClient) -> None:
+    """% and _ inside the needle match themselves, never act as LIKE
+    wildcards (ADR-0009)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Search Literal Wallet", "checking", "0.00")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-01", "sale 100% today")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-02", "sale 100_today")
+    await _create_expense(client, token, wallet_id, "5.00", "2026-08-03", "sale 100X today")
+
+    percent = await _list_all(client, token, wallet_id=wallet_id, q="100%")
+    assert [t["description"] for t in percent] == ["sale 100% today"]
+    underscore = await _list_all(client, token, wallet_id=wallet_id, q="100_")
+    assert [t["description"] for t in underscore] == ["sale 100_today"]
+
+
+async def test_search_composes_with_wallet_category_and_date_filters(
+    client: AsyncClient,
+) -> None:
+    """q joins the existing filters with AND semantics: every filter narrows
+    the others."""
+    token = await _login(client)
+    wallet_a = await _create_wallet(client, token, "Search Compose A", "checking", "0.00")
+    wallet_b = await _create_wallet(client, token, "Search Compose B", "checking", "0.00")
+    food = await _create_category(client, token, "Search Compose Food", "expense")
+    await _create_expense(client, token, wallet_a, "5.00", "2026-08-01", "Coffee and cake")
+    coffee_id = await _create_expense(client, token, wallet_a, "5.00", "2026-08-10", "Espresso coffee")
+    await _create_expense(client, token, wallet_a, "5.00", "2026-08-10", "Lunch")
+    await _create_expense(client, token, wallet_b, "5.00", "2026-08-10", "Espresso coffee")
+    await client.patch(
+        f"/transactions/{coffee_id}", json={"category_id": food}, headers=_auth(token)
+    )
+
+    narrowed = await _list_all(
+        client,
+        token,
+        wallet_id=wallet_a,
+        category_id=food,
+        from_date="2026-08-05",
+        to_date="2026-08-15",
+        q="coffee",
+    )
+
+    assert [t["id"] for t in narrowed] == [coffee_id]
+
+
+async def test_search_pages_within_results(client: AsyncClient) -> None:
+    """Cursor paging continues within the matching set: a walk with q applied
+    returns exactly the matching rows, newest first, no duplicates or leaks."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Search Pages Wallet", "checking", "0.00")
+    matching_ids: list[int] = []
+    for day in range(1, 8):  # 2026-08-01 .. 2026-08-07
+        description = "coffee run" if day % 2 == 0 else "grocery run"
+        row_id = await _create_expense(client, token, wallet_id, "5.00", f"2026-08-0{day}", description)
+        if day % 2 == 0:
+            matching_ids.append(row_id)
+
+    pages: list[list[dict]] = []
+    cursor: str | None = None
+    while True:
+        page = await _list_page(
+            client, token, wallet_id=wallet_id, q="coffee", limit=2, cursor=cursor
+        )
+        pages.append(page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+
+    assert [len(p) for p in pages] == [2, 1]
+    assert all(t["description"] == "coffee run" for p in pages for t in p)
+    assert [t["id"] for p in pages for t in p] == list(reversed(matching_ids))
+
+
 async def test_history_rejects_a_bad_date_filter(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "History Bad Date", "checking", "0.00")
@@ -1631,18 +1771,6 @@ async def test_over_length_place_values_are_rejected(client: AsyncClient) -> Non
 
 
 # --- Cursor pagination (#30) ---
-
-
-async def _create_expense(
-    client: AsyncClient, token: str, wallet_id: int, amount: str, date: str
-) -> int:
-    response = await client.post(
-        "/transactions",
-        json={"type": "expense", "amount": amount, "date": date, "wallet_id": wallet_id},
-        headers=_auth(token),
-    )
-    assert response.status_code == 201
-    return response.json()["id"]
 
 
 async def test_list_returns_the_paged_envelope(client: AsyncClient) -> None:

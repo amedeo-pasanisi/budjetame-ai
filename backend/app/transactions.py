@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_account
@@ -173,6 +173,7 @@ def list_transactions(
     category_id: int | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
+    q: str | None = None,
     limit: int = Query(default=_PAGE_LIMIT_DEFAULT, ge=1, le=_PAGE_LIMIT_MAX),
     cursor: str | None = None,
     account: Account = Depends(get_current_account),
@@ -185,9 +186,23 @@ def list_transactions(
     (`YYYY-MM-DD` days) — with the paging: a page is the first `limit` rows
     strictly after the cursor's (date, id), so rows inserted mid-scroll (e.g.
     by Import) can never duplicate or skip already-fetched rows. `next_cursor`
-    is null exactly when no further rows remain.
+    is null exactly when no further rows remain. `q` narrows to rows whose
+    Description contains the needle as a case-insensitive, accent-exact,
+    literal substring (ADR-0009); a blank or whitespace-only `q` is no
+    filter.
     """
     stmt = select(Transaction).where(Transaction.account_id == account.id)
+    needle = (q or "").strip()
+    if needle:
+        # ADR-0009: both sides are lowered (so the match is case-insensitive,
+        # accents untouched) and the needle's LIKE wildcards are escaped, so
+        # % and _ inside it match themselves.
+        escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(
+            func.lower(Transaction.description).like(
+                func.lower(f"%{escaped}%"), escape="\\"
+            )
+        )
     if wallet_id is not None:
         try:
             scoping.owned_or_raise(session, Wallet, account.id, wallet_id)

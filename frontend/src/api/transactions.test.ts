@@ -73,6 +73,35 @@ describe('fetchTransactions', () => {
       expect.anything(),
     )
   })
+
+  it('sends q on the query string when it is non-blank (ADR-0009)', async () => {
+    requestMock.mockResolvedValue(jsonResponse({ items: [], next_cursor: null }))
+
+    await fetchTransactions('token', { q: 'coffee', walletId: 3 })
+
+    expect(requestMock).toHaveBeenCalledWith(
+      '/transactions?wallet_id=3&q=coffee&limit=50',
+      expect.anything(),
+    )
+  })
+
+  it('omits q when it is blank or whitespace-only', async () => {
+    requestMock.mockResolvedValue(jsonResponse({ items: [], next_cursor: null }))
+
+    await fetchTransactions('token', { q: '' })
+    await fetchTransactions('token', { q: '   ' })
+
+    expect(requestMock).toHaveBeenNthCalledWith(
+      1,
+      `/transactions?limit=${PAGE_LIMIT}`,
+      expect.anything(),
+    )
+    expect(requestMock).toHaveBeenNthCalledWith(
+      2,
+      `/transactions?limit=${PAGE_LIMIT}`,
+      expect.anything(),
+    )
+  })
 })
 
 describe('createTransaction', () => {

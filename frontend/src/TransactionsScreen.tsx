@@ -46,6 +46,9 @@ export function TransactionsScreen({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState<FormDraft | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
+  // True only when the unfiltered, unsearched ledger is empty (issue #54):
+  // then the search bar hides — there is nothing to search.
+  const [ledgerEmpty, setLedgerEmpty] = useState(false)
 
   // Filters bar (issue #33): closed by default; every change refetches the
   // first page. Empty wallet/date/category values mean "all" (the tab keeps
@@ -56,6 +59,19 @@ export function TransactionsScreen({
   const [filterToDate, setFilterToDate] = useState('')
   const [filterCategoryId, setFilterCategoryId] = useState<number>(ALL_CATEGORIES)
 
+  // Search (issue #54, ADR-0009): the input updates instantly; the request
+  // needle is trimmed and debounced ~300ms, then refetches the first page
+  // like any filter. It lives in the screen, so leaving the tab resets it.
+  const [search, setSearch] = useState('')
+  const [searchNeedle, setSearchNeedle] = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchNeedle(search.trim())
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
   const filters = useCallback((): TransactionFilters => {
     const result: TransactionFilters = {}
     if (filterWalletId !== undefined) result.walletId = filterWalletId
@@ -64,6 +80,14 @@ export function TransactionsScreen({
     if (filterToDate !== '') result.toDate = filterToDate
     return result
   }, [filterWalletId, filterCategoryId, filterFromDate, filterToDate])
+
+  // The Filters bar and the search compose into one request (ADR-0009): the
+  // client omits a blank q, so a cleared search refetches the filtered list.
+  const requestFilters = useCallback((): TransactionFilters => {
+    const result = filters()
+    if (searchNeedle !== '') result.q = searchNeedle
+    return result
+  }, [filters, searchNeedle])
 
   const filtersActive = Object.keys(filters()).length > 0
 
@@ -77,21 +101,28 @@ export function TransactionsScreen({
     generation.current += 1
     setLoadError(null)
     setSavedWarning(null)
+    const active = requestFilters()
     // Frozen Wallets are included (issue #33): the Wallet filter lists them
     // and their rows stay viewable but read-only.
     Promise.all([
       fetchWallets(token, true),
       fetchCategories(token),
-      fetchTransactions(token, filters()),
+      fetchTransactions(token, active),
     ])
       .then(([walletData, categoryData, page]) => {
         setWallets(walletData)
         setCategories(categoryData)
         setTransactions(page.items)
         setNextCursor(page.next_cursor)
+        // The unfiltered, unsearched fetch is the truth about the ledger:
+        // only when it returns nothing is the ledger truly empty (and the
+        // search bar hidden — nothing to search).
+        if (Object.keys(active).length === 0) {
+          setLedgerEmpty(page.items.length === 0)
+        }
       })
       .catch(() => setLoadError('Could not load your data.'))
-  }, [token, filters])
+  }, [token, requestFilters])
 
   // Any filter change refetches with it applied and resets to the first page.
   useEffect(reload, [reload])
@@ -102,7 +133,7 @@ export function TransactionsScreen({
     }
     const gen = generation.current
     setLoadingMore(true)
-    fetchTransactions(token, filters(), PAGE_LIMIT, nextCursor)
+    fetchTransactions(token, requestFilters(), PAGE_LIMIT, nextCursor)
       .then((page) => {
         if (gen !== generation.current) {
           return
@@ -260,6 +291,19 @@ export function TransactionsScreen({
             </button>
           </div>
 
+          {!ledgerEmpty && (
+            <div className="mt-3">
+              <input
+                aria-label="Search transactions"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search transactions…"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+          )}
+
           {filtersOpen && (
             <div className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div>
@@ -345,9 +389,11 @@ export function TransactionsScreen({
             <p className="mt-3 text-sm text-slate-500">Loading…</p>
           ) : transactions.length === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
-              {filtersActive
-                ? 'No transactions match these filters.'
-                : 'Nothing here yet.'}
+              {searchNeedle !== ''
+                ? 'No transactions match your search.'
+                : filtersActive
+                  ? 'No transactions match these filters.'
+                  : 'Nothing here yet.'}
             </p>
           ) : (
             <ul className="mt-2 space-y-2">

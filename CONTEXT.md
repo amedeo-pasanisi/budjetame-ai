@@ -94,6 +94,7 @@ _Avoid_: fixing rows
 - A Frozen Wallet can be unfrozen at any time: its balance is always exactly €0 while frozen.
 - A Place is attached to a Geographic Location by a name-search pick or a tap on the Google map; a coordinates-only pick (Leaflet tap, GPS), an import, or removing the Location clears it.
 - An import row is a Duplicate when date, amount, type, wallet(s), category, and description all match an existing Transaction or an earlier row of the same file; a blank description matches a missing one.
+- Searching the ledger matches Transactions whose Description contains the needle, case-insensitively (accents must match exactly), combined with any other filters.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
 - All data is scoped to the single Account; foreign data gets a 403.
 

@@ -13,8 +13,10 @@ import { useImportDraft } from './importDraft'
 import type { Category, Transaction, TransactionPage, Wallet } from './api'
 
 vi.mock('./api', () => ({
+  ApiError: class ApiError extends Error {},
   TOKEN_KEY: 'budjetame.token',
   PAGE_LIMIT: 50,
+  apiErrorMessage: () => 'Could not save the transaction.',
   formatEuros: (value: string) => `€${value}`,
   fetchWallets: vi.fn(),
   fetchCategories: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock('./MapPicker', () => ({
 
 import {
   createTransaction,
+  deleteTransaction,
   fetchCategories,
   fetchTransactions,
   fetchWallets,
@@ -125,6 +128,7 @@ const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
 const createTransactionMock = vi.mocked(createTransaction)
+const deleteTransactionMock = vi.mocked(deleteTransaction)
 
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
@@ -135,6 +139,7 @@ beforeEach(() => {
     cursor === 'c1' ? page2 : page1,
   )
   createTransactionMock.mockResolvedValue(newCoffee)
+  deleteTransactionMock.mockResolvedValue({ warning: false })
 })
 
 afterEach(() => {
@@ -319,5 +324,264 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
     )
     expect(screen.queryByLabelText('Wallet')).not.toBeInTheDocument()
     expect(fetchTransactionsMock).toHaveBeenCalledWith('', {})
+  })
+})
+
+describe('TransactionsScreen search (issue #54)', () => {
+  const typeSearch = async (value: string) => {
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value } },
+    )
+  }
+
+  /** Fake timers scoped to setTimeout/clearTimeout only, so promises and
+   * React's scheduler keep running normally. */
+  const debounce = async () => {
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+  }
+
+  const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+  it('renders the search bar under the header row', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const search = screen.getByRole('searchbox', { name: 'Search transactions' })
+    const header = screen.getByRole('heading', { name: 'All transactions' })
+    const list = screen.getByRole('list')
+    expect(
+      header.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      search.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('hides the search bar when the ledger is truly empty', async () => {
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [],
+      next_cursor: null,
+    }))
+    render(<Harness />)
+
+    expect(await screen.findByText('Nothing here yet.')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('searchbox', { name: 'Search transactions' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('debounces typing into a first-page refetch with q', async () => {
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.q === 'caffe'
+        ? { items: [newCoffee], next_cursor: null }
+        : page1,
+    )
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    withFakeTimers()
+    await typeSearch('caf')
+    await typeSearch('caffe')
+    // Two keystrokes, one debounce window: nothing refetches yet.
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    await debounce()
+    vi.useRealTimers()
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { q: 'caffe' }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText(/New coffee/)).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+  })
+
+  it('keeps loading further pages within the search results', async () => {
+    const secondCoffee = { ...baseTransaction, id: 6, description: 'Coffee two' }
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}, _limit, cursor) => {
+      if (filters.q !== 'coffee') {
+        return page1
+      }
+      return cursor === 'c1'
+        ? { items: [secondCoffee], next_cursor: null }
+        : { items: [coffee], next_cursor: 'c1' }
+    })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    withFakeTimers()
+    await typeSearch('coffee')
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { q: 'coffee' }),
+    )
+
+    act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
+
+    expect(await screen.findByText(/Coffee two/)).toBeInTheDocument()
+    // The next page is fetched with the search applied alongside the cursor.
+    expect(fetchTransactionsMock).toHaveBeenLastCalledWith(
+      '',
+      { q: 'coffee' },
+      50,
+      'c1',
+    )
+    // Both pages of the search results are listed; nothing outside the
+    // search leaks in (the unfiltered page-2 row is "Rent").
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.queryByText(/Rent/)).not.toBeInTheDocument()
+  })
+
+  it('shows the no-match message when nothing matches', async () => {
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.q === 'zzz' ? { items: [], next_cursor: null } : page1,
+    )
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    withFakeTimers()
+    await typeSearch('zzz')
+    await debounce()
+    vi.useRealTimers()
+
+    expect(
+      await screen.findByText('No transactions match your search.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+  })
+
+  it('combines with the Filters bar and clearing restores the full list', async () => {
+    const frozenCoffee = {
+      ...baseTransaction,
+      id: 4,
+      wallet_id: 2,
+      description: 'Frozen coffee',
+    }
+    const frozenLunch = {
+      ...baseTransaction,
+      id: 5,
+      wallet_id: 2,
+      description: 'Frozen lunch',
+    }
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) => {
+      if (filters.walletId === 2 && filters.q === 'coffee') {
+        return { items: [frozenCoffee], next_cursor: null }
+      }
+      if (filters.walletId === 2) {
+        return { items: [frozenLunch], next_cursor: null }
+      }
+      return page1
+    })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    await screen.findByText(/Frozen lunch/)
+
+    // Searching narrows the already-filtered list: both travel together.
+    withFakeTimers()
+    await typeSearch('coffee')
+    await debounce()
+    vi.useRealTimers()
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        q: 'coffee',
+      }),
+    )
+    expect(await screen.findByText(/Frozen coffee/)).toBeInTheDocument()
+    expect(screen.queryByText(/Frozen lunch/)).not.toBeInTheDocument()
+
+    // Clearing the search restores the filtered list, not the whole ledger.
+    withFakeTimers()
+    await typeSearch('')
+    await debounce()
+    vi.useRealTimers()
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { walletId: 2 }),
+    )
+    expect(await screen.findByText(/Frozen lunch/)).toBeInTheDocument()
+
+    // Clearing the filter restores the full ledger.
+    fireEvent.change(screen.getByLabelText('Wallet'), { target: { value: '' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}),
+    )
+    expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
+  })
+
+  it('resets the search when the screen unmounts (a tab switch)', async () => {
+    const { unmount } = render(<Harness />)
+    await screen.findByText(/Coffee/)
+    withFakeTimers()
+    await typeSearch('coffee')
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { q: 'coffee' }),
+    )
+
+    unmount()
+    fetchTransactionsMock.mockClear()
+    render(<Harness />)
+
+    await screen.findByText(/Coffee/)
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('')
+    expect(fetchTransactionsMock).toHaveBeenCalledWith('', {})
+  })
+
+  it('refreshes with the search applied after saving a transaction', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+    withFakeTimers()
+    await typeSearch('coffee')
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { q: 'coffee' }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'New transaction' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+
+    // The post-write refresh carries the search, so the list never goes stale.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { q: 'coffee' }),
+    )
+  })
+
+  it('refreshes with the search applied after deleting a transaction', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+    withFakeTimers()
+    await typeSearch('coffee')
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { q: 'coffee' }),
+    )
+
+    fireEvent.click(screen.getByText('Coffee'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete transaction' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm' }))
+    await waitFor(() => expect(deleteTransactionMock).toHaveBeenCalled())
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { q: 'coffee' }),
+    )
   })
 })

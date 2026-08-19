@@ -55,6 +55,9 @@ export type TransactionFilters = {
   categoryId?: number
   fromDate?: string
   toDate?: string
+  /** The Description needle (ADR-0009): sent only when non-blank; the
+   * backend matches it case-insensitively as a literal substring. */
+  q?: string
 }
 
 /** The paged ledger response (issue #30): one page of rows, newest first, and
@@ -86,6 +89,11 @@ export async function fetchTransactions(
   }
   if (filters.toDate !== undefined && filters.toDate !== '') {
     params.set('to_date', filters.toDate)
+  }
+  // ADR-0009: q rides the query string only when non-blank — a blank or
+  // whitespace-only needle means no search (the backend treats it the same).
+  if (filters.q !== undefined && filters.q.trim() !== '') {
+    params.set('q', filters.q)
   }
   params.set('limit', String(limit))
   if (cursor !== null) {
