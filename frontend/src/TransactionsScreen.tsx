@@ -4,12 +4,14 @@ import {
   PAGE_LIMIT,
   fetchCategories,
   fetchRecurringCosts,
+  fetchRecurringIncomes,
   fetchTransactions,
   fetchWallets,
   formatEuros,
   TOKEN_KEY,
   type Category,
   type RecurringCost,
+  type RecurringIncome,
   type Transaction,
   type TransactionFilters,
   type Wallet,
@@ -43,6 +45,9 @@ export function TransactionsScreen({
   // costs failure never takes down the ledger — the picker just shows no
   // costs until the next reload.
   const [recurringCosts, setRecurringCosts] = useState<RecurringCost[]>([])
+  // The link picker's incomes (issue #61), the mirror of the costs fetch:
+  // auxiliary and silent, same reasoning.
+  const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
   const [transactions, setTransactions] = useState<Transaction[] | null>(null)
   // The accumulated list pages one at a time: the sentinel at the bottom of
   // the list (IntersectionObserver) fetches the next page while scrolling.
@@ -133,6 +138,10 @@ export function TransactionsScreen({
     // delete changes them). Failure is silent: the ledger still loads.
     fetchRecurringCosts(token)
       .then((data) => setRecurringCosts(data))
+      .catch(() => {})
+    // The incomes refetch for the same reason (issue #61).
+    fetchRecurringIncomes(token)
+      .then((data) => setRecurringIncomes(data))
       .catch(() => {})
   }, [token, requestFilters])
 
@@ -464,6 +473,7 @@ export function TransactionsScreen({
           wallets={wallets}
           categories={categories}
           recurringCosts={recurringCosts}
+          recurringIncomes={recurringIncomes}
           editing={form.kind === 'edit' ? form.transaction : null}
           onSaved={handleSaved}
           onDeleted={handleDeleted}

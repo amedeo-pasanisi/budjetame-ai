@@ -58,6 +58,8 @@ const income: RecurringIncome = {
   due_day: 1,
   due_month: null,
   next_due_date: '2030-03-01',
+
+  next_unpaid_occurrence_date: '2030-03-01',
   created_at: createdAt,
 }
 

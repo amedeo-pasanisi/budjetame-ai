@@ -9,12 +9,18 @@ date; an optional due-date override whose shape follows the interval unit
 (day-of-month for months, month+day for years, none for days/weeks).
 Occurrences and the next due date are derived, never stored — the pure
 recurrence module (app.recurrence) owns that math, reused unchanged.
-Deleting a Recurring Income is a hard delete (issue #60); the link to
-Transactions and the paid state arrive with issue #61.
+Deleting a Recurring Income is a hard delete (issue #60); linked Incomes
+(issue #61) are severed by the FK's ON DELETE SET NULL. The paid state also
+lives here: `paid_occurrence_dates` is the set of Occurrences the income's
+links cover and `oldest_unpaid_occurrence` the one a new link pays (the
+oldest Unpaid, future Occurrences included — receiving ahead) — what the
+transaction form's picker shows as `next_unpaid_occurrence_date` in the API
+view.
 """
 
 from datetime import date
 
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -22,10 +28,11 @@ from app.models import (
     CategoryType,
     IntervalUnit,
     RecurringIncome,
+    Transaction,
     Wallet,
     WalletType,
 )
-from app.recurrence import next_due_date, rome_day_of, rome_today
+from app.recurrence import next_due_date, occurrence_date, rome_day_of, rome_today
 from app.services import scoping
 
 
@@ -174,9 +181,17 @@ def update_recurring_income(
 
 
 def delete_recurring_income(session: Session, income: RecurringIncome) -> None:
-    """Hard-delete the definition (issue #60). No Transactions reference a
-    Recurring Income yet — the link arrives with issue #61, which severs it
-    here the way deleting a Recurring Cost severs its links."""
+    """Hard-delete the definition (issue #60). Linked Incomes (issue #61)
+    survive as ordinary Incomes: the link FK is ON DELETE SET NULL, and the
+    pinned Occurrence date goes with it — a severed link never carries an
+    Occurrence (ADR-0010/0011)."""
+    # The FK nulls recurring_income_id on its own; occurrence_date is a plain
+    # column, so the pin is cleared here, in the same transaction.
+    session.execute(
+        update(Transaction)
+        .where(Transaction.recurring_income_id == income.id)
+        .values(recurring_income_id=None, occurrence_date=None)
+    )
     session.delete(income)
     session.commit()
 
@@ -200,3 +215,52 @@ def next_due_date_for(income: RecurringIncome) -> date:
         income.due_month,
         rome_today(),
     )
+
+
+def paid_occurrence_dates(
+    session: Session, income_id: int, *, exclude_transaction_id: int | None = None
+) -> set[date]:
+    """The Occurrence dates this income's linked Incomes cover (issue #61) —
+    the paid set, mirroring the cost side. `exclude_transaction_id` drops one
+    link's own pin (the Transaction being relinked judges itself as not yet
+    paid, so it can re-pin the very Occurrence it already covers)."""
+    stmt = select(Transaction.occurrence_date).where(
+        Transaction.recurring_income_id == income_id,
+        Transaction.occurrence_date.is_not(None),
+    )
+    if exclude_transaction_id is not None:
+        stmt = stmt.where(Transaction.id != exclude_transaction_id)
+    return {
+        value for value in session.scalars(stmt).all() if value is not None
+    }
+
+
+def oldest_unpaid_occurrence(
+    session: Session,
+    income: RecurringIncome,
+    *,
+    exclude_transaction_id: int | None = None,
+) -> date:
+    """The Occurrence a new link pays (issue #61): the oldest Unpaid one —
+    the first of the derived sequence (from the start date, or the creation
+    date when unset, plus the interval) no linked Income covers. Future
+    Occurrences are included when nothing earlier is Unpaid, so receiving
+    early is natural; the sequence is infinite and the paid set finite, so
+    the walk always terminates. The pin is stored on the link at this moment
+    and never recomputed (ADR-0010/0011)."""
+    paid = paid_occurrence_dates(
+        session, income.id, exclude_transaction_id=exclude_transaction_id
+    )
+    start = (
+        income.start_date
+        if income.start_date is not None
+        else rome_day_of(income.created_at)
+    )
+    k = 0
+    while True:
+        occurrence = occurrence_date(
+            start, income.interval_value, income.interval_unit, k
+        )
+        if occurrence not in paid:
+            return occurrence
+        k += 1

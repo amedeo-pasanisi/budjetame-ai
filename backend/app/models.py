@@ -160,6 +160,18 @@ class Transaction(Base):
     # stored at link time and never recomputed. Uses the OccurrenceDate
     # alias: the column named `date` shadows the import in this class body.
     occurrence_date: Mapped[OccurrenceDate | None] = mapped_column(Date)
+    # The optional Recurring Income link (issue #61, ADR-0010/0011): the
+    # mirror of the Recurring Cost link above — an Income may pin one
+    # Recurring Income, paying exactly one Occurrence (the oldest Unpaid one
+    # at link time) via the same shared `occurrence_date` pin. The same
+    # invariants hold: the pin is stored, never recomputed; unlinking or
+    # deleting the Income nulls both columns (freeing the Occurrence);
+    # deleting the Recurring Income severs the link via ON DELETE SET NULL.
+    # A Transaction is one type, so the two links never coexist: Expenses
+    # carry only recurring_cost_id, Incomes only recurring_income_id.
+    recurring_income_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_incomes.id", ondelete="SET NULL"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -258,8 +270,9 @@ class RecurringIncome(Base):
     field set and the same derived Occurrences, sharing the pure recurrence
     module (app.recurrence) unchanged. The optional Category is income-only;
     the Wallet must be active and non-Contact (incomes behave like Income
-    Transactions). Deleting a Recurring Income is a hard delete (issue #60);
-    the link to Transactions arrives with issue #61.
+    Transactions). Deleting a Recurring Income is a hard delete; linked
+    Incomes (issue #61) survive as ordinary Incomes: the link FK is ON
+    DELETE SET NULL, mirroring the Recurring Cost sever (issue #57).
     """
 
     __tablename__ = "recurring_incomes"

@@ -37,11 +37,12 @@ def _owned_income_or_403(
         raise HTTPException(status_code=403, detail="Recurring Income not found") from None
 
 
-def _income_out(income: RecurringIncome) -> RecurringIncomeOut:
+def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut:
     """The API view of a Recurring Income, with the derived state: the next
     due date (override applied, clamping included — the pure recurrence
-    module owns that math). The link state and the Backlog arrive with
-    issues #61 and #62, mirroring #57 and #58."""
+    module owns that math) and the next Unpaid Occurrence date (issue #61):
+    the one a new linked Income would pay, what the transaction form's
+    picker shows. (The Backlog arrives with issue #62, mirroring #58.)"""
     return RecurringIncomeOut(
         id=income.id,
         name=income.name,
@@ -54,6 +55,9 @@ def _income_out(income: RecurringIncome) -> RecurringIncomeOut:
         due_day=income.due_day,
         due_month=income.due_month,
         next_due_date=recurring_service.next_due_date_for(income).isoformat(),
+        next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
+            session, income
+        ).isoformat(),
         created_at=income.created_at,
     )
 
@@ -79,7 +83,7 @@ def list_recurring_incomes(
         select(RecurringIncome).where(RecurringIncome.account_id == account.id)
     ).all()
     return sorted(
-        (_income_out(income) for income in incomes),
+        (_income_out(session, income) for income in incomes),
         key=lambda out: (out.next_due_date, out.name.lower()),
     )
 
@@ -110,7 +114,7 @@ def create_recurring_income(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringIncomeNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
-    return _income_out(income)
+    return _income_out(session, income)
 
 
 @router.patch("/{income_id}", response_model=RecurringIncomeOut)
@@ -133,7 +137,7 @@ def update_recurring_income(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringIncomeNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
-    return _income_out(income)
+    return _income_out(session, income)
 
 
 @router.delete("/{income_id}", status_code=204)

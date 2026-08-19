@@ -17,6 +17,10 @@ export type Transaction = {
   // cost, with the Occurrence (its own date) the link paid at link time —
   // stored, never reassigned by later date edits. Both null when unlinked.
   recurring_cost_id: number | null
+  // The optional Recurring Income link (issue #61): an Income pinning one
+  // Recurring Income, paying the same shared `occurrence_date` pin. A
+  // Transaction is one type, so the two links never coexist.
+  recurring_income_id: number | null
   occurrence_date: string | null
   description: string | null
   latitude: string | null
@@ -39,6 +43,9 @@ export type TransactionInput =
       // The optional Recurring Cost link (issue #57): Expenses only — the
       // form sends null for Income, and Transfers never carry the field.
       recurringCostId: number | null
+      // The optional Recurring Income link (issue #61): Incomes only — the
+      // form sends null for Expense, and Transfers never carry the field.
+      recurringIncomeId: number | null
       description: string
       latitude: string | null
       longitude: string | null
@@ -141,6 +148,7 @@ export async function createTransaction(
           wallet_id: input.walletId,
           category_id: input.categoryId,
           recurring_cost_id: input.recurringCostId,
+          recurring_income_id: input.recurringIncomeId,
         }
   const response = await request('/transactions', {
     method: 'POST',
@@ -162,6 +170,9 @@ export async function updateTransaction(
     // leaves the stored pin untouched (a date edit must never reassign it,
     // issue #57); a value links, null unlinks.
     recurringCostId?: number | null
+    // The Recurring Income link follows the same contract (issue #61):
+    // omitted when unchanged, value links, null unlinks.
+    recurringIncomeId?: number | null
     description: string
     latitude?: string | null
     longitude?: string | null
@@ -181,6 +192,10 @@ export async function updateTransaction(
   // Same contract for the Recurring Cost link: omitted when unchanged.
   if (input.recurringCostId !== undefined) {
     body.recurring_cost_id = input.recurringCostId
+  }
+  // Same contract for the Recurring Income link: omitted when unchanged.
+  if (input.recurringIncomeId !== undefined) {
+    body.recurring_income_id = input.recurringIncomeId
   }
   // The location is always sent: values set it, null clears it (the backend
   // applies any field present in the payload). The Place reference follows

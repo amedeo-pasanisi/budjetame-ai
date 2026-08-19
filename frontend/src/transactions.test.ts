@@ -17,6 +17,7 @@ const base: Transaction = {
   destination_wallet_id: null,
   category_id: null,
   recurring_cost_id: null,
+  recurring_income_id: null,
   occurrence_date: null,
   description: null,
   latitude: null,

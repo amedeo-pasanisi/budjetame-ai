@@ -9,6 +9,7 @@ import {
   updateTransaction,
   type Category,
   type RecurringCost,
+  type RecurringIncome,
   type Transaction,
   type TransactionInput,
   type Wallet,
@@ -16,6 +17,7 @@ import {
 import {
   CategoryField,
   RecurringCostField,
+  RecurringIncomeField,
   TransferBalancePreview,
   TransferWalletFields,
   TypeSelector,
@@ -46,6 +48,7 @@ type TransactionFormProps = {
   wallets: Wallet[]
   categories: Category[]
   recurringCosts: RecurringCost[]
+  recurringIncomes: RecurringIncome[]
   editing: Transaction | null
   onSaved: (transaction: Transaction) => void
   onDeleted: (warning: boolean) => void
@@ -60,6 +63,7 @@ export function TransactionForm({
   wallets,
   categories,
   recurringCosts,
+  recurringIncomes,
   editing,
   onSaved,
   onDeleted,
@@ -94,6 +98,12 @@ export function TransactionForm({
   // edited, so an untouched link is never re-sent (and never re-pinned).
   const [recurringCostId, setRecurringCostId] = useState<number | null>(
     editing?.recurring_cost_id ?? null,
+  )
+  // The optional Recurring Income link (issue #61), mirroring the cost
+  // link: an Income pins one Recurring Income, paying its oldest Unpaid
+  // Occurrence. Same seed-from-editing contract.
+  const [recurringIncomeId, setRecurringIncomeId] = useState<number | null>(
+    editing?.recurring_income_id ?? null,
   )
   const [description, setDescription] = useState(editing?.description ?? '')
   const descriptionField = useRef<HTMLTextAreaElement | null>(null)
@@ -155,6 +165,21 @@ export function TransactionForm({
       : isEditing && editing !== null && recurringCostId === editing.recurring_cost_id
         ? editing.occurrence_date
         : selectedCost.next_unpaid_occurrence_date
+
+  // The same read on the income side (issue #61): the stored pin while the
+  // form is editing the very link already on the Transaction, the freshest
+  // "next unpaid" from the API for any new or switched link.
+  const selectedIncome = recurringIncomes.find(
+    (income) => income.id === recurringIncomeId,
+  )
+  const payingIncomeOccurrenceDate =
+    selectedIncome === undefined
+      ? null
+      : isEditing &&
+          editing !== null &&
+          recurringIncomeId === editing.recurring_income_id
+        ? editing.occurrence_date
+        : selectedIncome.next_unpaid_occurrence_date
 
   const sourceWallet = wallets.find((w) => w.id === sourceWalletId)
   const destinationWallet = wallets.find((w) => w.id === destinationWalletId)
@@ -262,6 +287,7 @@ export function TransactionForm({
             walletId: walletId as number,
             categoryId,
             recurringCostId: type === 'expense' ? recurringCostId : null,
+            recurringIncomeId: type === 'income' ? recurringIncomeId : null,
             description,
             ...latLngToWire(finalLocation),
             ...placeToWire(place),
@@ -278,6 +304,12 @@ export function TransactionForm({
               // reassign the paid Occurrence (issue #57).
               ...(recurringCostId !== (editing.recurring_cost_id ?? null)
                 ? { recurringCostId }
+                : {}),
+              // The Recurring Income link follows the same contract (issue
+              // #61): only a changed link is sent, so an untouched pin is
+              // never re-pinned.
+              ...(recurringIncomeId !== (editing.recurring_income_id ?? null)
+                ? { recurringIncomeId }
                 : {}),
               ...latLngToWire(location),
               // The Place follows the location: values set it, null clears it
@@ -442,6 +474,15 @@ export function TransactionForm({
           value={recurringCostId}
           occurrenceDate={payingOccurrenceDate}
           onChange={setRecurringCostId}
+        />
+      )}
+
+      {!isTransfer && type === 'income' && (
+        <RecurringIncomeField
+          incomes={recurringIncomes}
+          value={recurringIncomeId}
+          occurrenceDate={payingIncomeOccurrenceDate}
+          onChange={setRecurringIncomeId}
         />
       )}
 

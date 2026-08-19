@@ -1,4 +1,10 @@
-import { type Category, type RecurringCost, type Transaction, type Wallet } from './api'
+import {
+  type Category,
+  type RecurringCost,
+  type RecurringIncome,
+  type Transaction,
+  type Wallet,
+} from './api'
 import { ModalShell } from './ModalShell'
 import { TransactionForm } from './TransactionForm'
 
@@ -6,6 +12,7 @@ type TransactionModalProps = {
   wallets: Wallet[]
   categories: Category[]
   recurringCosts: RecurringCost[]
+  recurringIncomes: RecurringIncome[]
   editing: Transaction | null
   onSaved: (transaction: Transaction) => void
   onDeleted: (warning: boolean) => void
@@ -20,6 +27,7 @@ export function TransactionModal({
   wallets,
   categories,
   recurringCosts,
+  recurringIncomes,
   editing,
   onSaved,
   onDeleted,
@@ -35,6 +43,7 @@ export function TransactionModal({
         wallets={wallets}
         categories={categories}
         recurringCosts={recurringCosts}
+        recurringIncomes={recurringIncomes}
         editing={editing}
         onSaved={onSaved}
         onDeleted={onDeleted}

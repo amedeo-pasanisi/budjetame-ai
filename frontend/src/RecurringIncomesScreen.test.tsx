@@ -65,6 +65,8 @@ const incomes: RecurringIncome[] = [
     due_day: 27,
     due_month: null,
     next_due_date: '2026-09-27',
+
+    next_unpaid_occurrence_date: '2026-09-27',
     created_at: createdAt,
   },
   {
@@ -79,6 +81,8 @@ const incomes: RecurringIncome[] = [
     due_day: 1,
     due_month: null,
     next_due_date: '2026-09-01',
+
+    next_unpaid_occurrence_date: '2026-09-01',
     created_at: createdAt,
   },
   {
@@ -93,6 +97,8 @@ const incomes: RecurringIncome[] = [
     due_day: 1,
     due_month: 12,
     next_due_date: '2026-12-01',
+
+    next_unpaid_occurrence_date: '2026-12-01',
     created_at: createdAt,
   },
 ]
@@ -182,6 +188,8 @@ describe('RecurringIncomesScreen create flow', () => {
       due_day: null,
       due_month: null,
       next_due_date: '2026-08-24',
+
+      next_unpaid_occurrence_date: '2026-08-24',
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)
@@ -242,6 +250,8 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
       ...incomes[0],
       amount: '2200.00',
       next_due_date: '2026-09-27',
+
+      next_unpaid_occurrence_date: '2026-09-27',
     })
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')

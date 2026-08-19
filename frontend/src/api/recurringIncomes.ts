@@ -23,6 +23,10 @@ export type RecurringIncome = {
   /** The next Occurrence's due date, derived on the backend (override
    * applied, clamping included). */
   next_due_date: string
+  /** The next Occurrence a new linked Income would receive — the oldest
+   * Unpaid one's own date (issue #61): what the transaction form's picker
+   * shows. */
+  next_unpaid_occurrence_date: string
   created_at: string
 }
 

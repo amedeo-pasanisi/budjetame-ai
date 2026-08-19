@@ -9,7 +9,7 @@
  * JSX, moved.
  */
 
-import type { Category, RecurringCost, Wallet } from './api'
+import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
 import { formatEuros } from './api'
 import type { TransferProjection } from './balanceProjection'
 import { NON_CONTACT_WALLET_TYPES } from './transactions'
@@ -196,6 +196,53 @@ export function RecurringCostField({
         {costs.map((cost) => (
           <option key={cost.id} value={cost.id}>
             {cost.name}
+          </option>
+        ))}
+      </select>
+      {value !== null && occurrenceDate !== null && (
+        <p className="mt-1 text-xs text-slate-500">
+          Pays the occurrence of {occurrenceDate}.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The Recurring Income select an Income carries (issue #61), mirroring the
+ * Recurring Cost select: Incomes only — Expense and Transfer never render
+ * it. Picking an income signs it as received, and the helper names the
+ * Occurrence the link will pay: `occurrenceDate` is the oldest Unpaid
+ * Occurrence's own date for a new link, or the stored pin when the form is
+ * editing the very link already on the Transaction (which must never be
+ * reassigned by a mere date edit). The None option unlinks. */
+export function RecurringIncomeField({
+  incomes,
+  value,
+  occurrenceDate,
+  onChange,
+}: {
+  incomes: RecurringIncome[]
+  value: number | null
+  occurrenceDate: string | null
+  onChange: (incomeId: number | null) => void
+}) {
+  return (
+    <div>
+      <label htmlFor="tx-recurring-income" className="block text-sm font-medium text-slate-700">
+        Recurring Income
+      </label>
+      <select
+        id="tx-recurring-income"
+        value={value ?? ''}
+        onChange={(event) =>
+          onChange(event.target.value === '' ? null : Number(event.target.value))
+        }
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+      >
+        <option value="">None</option>
+        {incomes.map((income) => (
+          <option key={income.id} value={income.id}>
+            {income.name}
           </option>
         ))}
       </select>

@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { TransactionForm } from './TransactionForm'
-import type { Category, RecurringCost, Transaction, Wallet } from './api'
+import type { Category, RecurringCost, RecurringIncome, Transaction, Wallet } from './api'
 import type { LatLng, Place } from './location'
 
 vi.mock('./api', () => ({
@@ -95,6 +95,39 @@ const recurringCosts: RecurringCost[] = [
   },
 ]
 
+const recurringIncomes: RecurringIncome[] = [
+  {
+    id: 1,
+    name: 'Salary',
+    amount: '2100.00',
+    wallet_id: 1,
+    category_id: null,
+    interval_value: 1,
+    interval_unit: 'months',
+    start_date: '2030-03-01',
+    due_day: null,
+    due_month: null,
+    next_due_date: '2030-03-01',
+    next_unpaid_occurrence_date: '2030-03-01',
+    created_at: '2026-08-01T10:00:00Z',
+  },
+  {
+    id: 2,
+    name: 'Rent from tenant',
+    amount: '600.00',
+    wallet_id: 1,
+    category_id: null,
+    interval_value: 1,
+    interval_unit: 'months',
+    start_date: '2030-06-01',
+    due_day: null,
+    due_month: null,
+    next_due_date: '2030-06-01',
+    next_unpaid_occurrence_date: '2030-06-01',
+    created_at: '2026-08-01T10:00:00Z',
+  },
+]
+
 const baseTransaction: Transaction = {
   id: 7,
   type: 'expense',
@@ -105,6 +138,7 @@ const baseTransaction: Transaction = {
   destination_wallet_id: null,
   category_id: null,
   recurring_cost_id: null,
+  recurring_income_id: null,
   occurrence_date: null,
   description: null,
   latitude: '41.9028',
@@ -128,12 +162,17 @@ beforeEach(() => {
   updateTransactionMock.mockResolvedValue({ ...baseTransaction })
 })
 
-function renderForm(editing: Transaction | null, costs: RecurringCost[] = recurringCosts) {
+function renderForm(
+  editing: Transaction | null,
+  costs: RecurringCost[] = recurringCosts,
+  incomes: RecurringIncome[] = recurringIncomes,
+) {
   return render(
     <TransactionForm
       wallets={[wallet]}
       categories={categories}
       recurringCosts={costs}
+      recurringIncomes={incomes}
       editing={editing}
       onSaved={() => {}}
       onDeleted={() => {}}
@@ -428,6 +467,119 @@ describe('TransactionForm recurring-cost link (issue #57)', () => {
       '',
       7,
       expect.objectContaining({ recurringCostId: 2 }),
+    )
+  })
+})
+
+describe('TransactionForm recurring-income link (issue #61)', () => {
+  const linkedIncomeTransaction: Transaction = {
+    ...baseTransaction,
+    type: 'income',
+    recurring_income_id: 1,
+    occurrence_date: '2030-02-15',
+  }
+
+  it('shows the picker in income mode only, listing the Account incomes', () => {
+    renderForm(null)
+
+    // Expense is the default type: the income picker is hidden.
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+
+    // Income mode shows the picker with every income; Transfer hides it.
+    fireEvent.click(screen.getByRole('button', { name: 'Income' }))
+    const picker = screen.getByLabelText('Recurring Income')
+    expect(
+      Array.from(picker.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['None', 'Salary', 'Rent from tenant'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+    // Expense never carries it either.
+    fireEvent.click(screen.getByRole('button', { name: 'Expense' }))
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+  })
+
+  it('picking an income shows the Occurrence the link will pay', () => {
+    renderForm(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Income' }))
+    fireEvent.change(screen.getByLabelText('Recurring Income'), {
+      target: { value: '1' },
+    })
+
+    expect(screen.getByText('Pays the occurrence of 2030-03-01.')).toBeInTheDocument()
+  })
+
+  it('create submits the chosen link', async () => {
+    renderForm(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Income' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.change(screen.getByLabelText('Recurring Income'), {
+      target: { value: '1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ recurringIncomeId: 1 }),
+    )
+  })
+
+  it('editing a linked Income shows its pinned Occurrence, not the fresher next unpaid', () => {
+    // The API's next unpaid for Salary is 2030-03-01; the Transaction pinned
+    // 2030-02-15 at link time. The form shows the pin: a later edit must
+    // never reassign the paid Occurrence (issue #61).
+    renderForm(linkedIncomeTransaction)
+
+    expect(screen.getByLabelText('Recurring Income')).toHaveValue('1')
+    expect(screen.getByText('Pays the occurrence of 2030-02-15.')).toBeInTheDocument()
+    expect(screen.queryByText('Pays the occurrence of 2030-03-01.')).not.toBeInTheDocument()
+  })
+
+  it('an edit that keeps the link leaves it out of the PATCH, so the pin stays', async () => {
+    renderForm(linkedIncomeTransaction)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.not.objectContaining({ recurringIncomeId: expect.anything() }),
+    )
+  })
+
+  it('unlinking on edit sends recurringIncomeId: null, freeing the Occurrence', async () => {
+    renderForm(linkedIncomeTransaction)
+
+    fireEvent.change(screen.getByLabelText('Recurring Income'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.objectContaining({ recurringIncomeId: null }),
+    )
+  })
+
+  it('changing the link on edit sends the new income id', async () => {
+    renderForm(linkedIncomeTransaction)
+
+    fireEvent.change(screen.getByLabelText('Recurring Income'), {
+      target: { value: '2' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.objectContaining({ recurringIncomeId: 2 }),
     )
   })
 })
