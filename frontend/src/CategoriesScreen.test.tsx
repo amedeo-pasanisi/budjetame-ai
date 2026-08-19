@@ -2,7 +2,7 @@
  * the list renders Expenses and Incomes as two sections, each sorted A→Z
  * case-insensitively; the search bar filters both sections live by
  * case-insensitive name substring and clearing restores the full list;
- * tapping a Category opens the edit form in a bottom-sheet modal (Type
+ * tapping a Category opens the edit form in a modal (Type
  * fixed; backdrop, Escape, and Cancel close without saving) and "New
  * category" opens the same modal for creation (Type selectable), the new
  * Category landing at the sorted position of its section. The API client is

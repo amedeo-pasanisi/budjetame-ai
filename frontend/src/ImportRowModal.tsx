@@ -1,6 +1,6 @@
 /** The Verification row editor (issue #46): any Preview row — ready,
- * duplicate, or problem — opens this bottom-sheet modal prefilled with its
- * fields. It reuses the Transaction form's shape (type picker, amount/date
+ * duplicate, or problem — opens this modal prefilled with its fields. It
+ * reuses the Transaction form's shape (type picker, amount/date
  * grid, the wallet/category vs source/destination cascade, description,
  * location) but edits *names*, not the Transaction form's resolved entities:
  * the row's Wallet and Category are free text that the re-validation
@@ -11,7 +11,7 @@
 import { useState, type FormEvent } from 'react'
 
 import type { ImportRow, ImportRowInput } from './api'
-import { BottomSheet } from './BottomSheet'
+import { ModalShell } from './ModalShell'
 import { TypeSelector, type TransactionFormType } from './transactionFields'
 
 type ImportRowModalProps = {
@@ -80,7 +80,7 @@ export function ImportRowModal({ row, onSave, onClose }: ImportRowModalProps) {
   }
 
   return (
-    <BottomSheet label={`Edit row ${row.row}`} onClose={onClose}>
+    <ModalShell label={`Edit row ${row.row}`} onClose={onClose}>
       <form
         onSubmit={handleSubmit}
         className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
@@ -261,6 +261,6 @@ export function ImportRowModal({ row, onSave, onClose }: ImportRowModalProps) {
           </button>
         </div>
       </form>
-    </BottomSheet>
+    </ModalShell>
   )
 }

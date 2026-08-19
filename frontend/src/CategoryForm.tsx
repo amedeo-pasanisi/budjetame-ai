@@ -41,7 +41,7 @@ type CategoryFormProps = {
   onCancel: () => void
 }
 
-/** The create/edit/delete form for a Category, hosted in the bottom-sheet
+/** The create/edit/delete form for a Category, hosted in the modal
  * shell (CategoryModal). The form itself is unchanged from the inline days:
  * Name and color/icon, plus a Type selector only while creating (the Type is
  * fixed when editing), and the tap-again delete confirmation. A rename that

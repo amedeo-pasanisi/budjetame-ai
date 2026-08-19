@@ -5,7 +5,7 @@
  * the selected rows; "Pick another file" stays above the list, out of the
  * bar.
  *
- * Import row editor (issue #46): tapping any row opens a bottom-sheet modal
+ * Import row editor (issue #46): tapping any row opens a modal
  * prefilled with its fields; saving re-validates the edited row server-side
  * and flips its status inline, auto-selecting rows that become Ready and
  * deselecting ones that stop being Ready; confirm sends the edited values.

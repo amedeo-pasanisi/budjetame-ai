@@ -30,7 +30,7 @@ type WalletFormProps = {
   onCancel: () => void
 }
 
-/** The create/edit/freeze form for a Wallet, hosted in the bottom-sheet
+/** The create/edit/freeze form for a Wallet, hosted in the modal
  * shell (WalletModal) (issue #49). The form itself is unchanged from the
  * inline days: Name, plus a Type selector and an Opening balance only while
  * creating, and the tap-again freeze confirmation only while editing. Cancel

@@ -16,14 +16,13 @@ const SECTION_LABELS: Record<CategoryType, string> = {
 const SECTION_TYPES: CategoryType[] = ['expense', 'income']
 
 /** The modal's draft: create (no Category) or edit (a Category). Null means
- * the modal is closed. Create and edit share the one bottom-sheet modal
- * (issue #41). */
+ * the modal is closed. Create and edit share the one modal (issue #41). */
 type ModalDraft = { kind: 'create' } | { kind: 'edit'; category: Category }
 
 /** The Categories tab (issue #41): the list is two sections — Expenses and
  * Incomes — each sorted A→Z case-insensitively, under a search bar that
  * filters both sections live by case-insensitive name substring. Creating
- * and editing happen in a bottom-sheet modal, replacing the inline form at
+ * and editing happen in a modal, replacing the inline form at
  * the end of the list. */
 export function CategoriesScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''

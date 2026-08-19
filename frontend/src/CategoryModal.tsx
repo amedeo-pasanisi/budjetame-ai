@@ -1,5 +1,5 @@
 import { type Category } from './api'
-import { BottomSheet } from './BottomSheet'
+import { ModalShell } from './ModalShell'
 import { CategoryForm } from './CategoryForm'
 
 type CategoryModalProps = {
@@ -12,8 +12,8 @@ type CategoryModalProps = {
   onClose: () => void
 }
 
-/** The create/edit/delete Category form inside the shared bottom-sheet
- * shell (issue #41). Create and edit share this one modal: the Type selector
+/** The create/edit/delete Category form inside the shared modal shell
+ * (issue #41). Create and edit share this one modal: the Type selector
  * only appears while creating, and the tap-again delete confirmation only
  * while editing. The shell adds the dismissal paths — backdrop click, Cancel,
  * and Escape all abandon the draft without saving. */
@@ -26,7 +26,7 @@ export function CategoryModal({
 }: CategoryModalProps) {
   const editing = category !== undefined
   return (
-    <BottomSheet label={editing ? 'Edit category' : 'New category'} onClose={onClose}>
+    <ModalShell label={editing ? 'Edit category' : 'New category'} onClose={onClose}>
       <CategoryForm
         key={editing ? category.id : 'create'}
         category={category}
@@ -35,6 +35,6 @@ export function CategoryModal({
         onMerged={onMerged}
         onCancel={onClose}
       />
-    </BottomSheet>
+    </ModalShell>
   )
 }

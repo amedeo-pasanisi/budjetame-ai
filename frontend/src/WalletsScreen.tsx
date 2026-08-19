@@ -31,14 +31,14 @@ const SECTION_LABELS: Record<WalletType, string> = {
 const SECTION_TYPES: WalletType[] = ['contact', 'checking', 'credit_card', 'cash']
 
 /** The modal's draft: create (no Wallet) or edit (a Wallet). Null means the
- * modal is closed. Create and edit share the one bottom-sheet modal, like the
+ * modal is closed. Create and edit share the one modal, like the
  * Categories tab (issue #49). */
 type ModalDraft = { kind: 'create' } | { kind: 'edit'; wallet: Wallet }
 
 /** The Wallets tab: the list is four sections — Contacts, Checking Accounts,
  * Credit Cards, Cash — each sorted A→Z case-insensitively, plus a collapsed
  * Frozen Wallets list. Creating and editing (rename, freeze) happen in a
- * bottom-sheet modal (issue #49), replacing the inline forms; the New wallet
+ * modal (issue #49), replacing the inline forms; the New wallet
  * button lives in the page header row like the Transactions tab. Frozen rows
  * keep their one-tap unfreeze. */
 export function WalletsScreen() {

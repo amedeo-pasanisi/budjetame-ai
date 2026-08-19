@@ -3,7 +3,7 @@
  * Cash — each sorted A→Z case-insensitively, empty sections hidden, and
  * every balance signed in the transaction-amount convention (+€ / -€, €0.00
  * unsigned). Rows keep their existing look; create, rename, and freeze now
- * live in a bottom-sheet modal with the New wallet button in the page header
+ * live in a modal with the New wallet button in the page header
  * (issue #49), behavior unchanged. The API client is mocked; the real display
  * helpers stay live. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

@@ -1,5 +1,5 @@
 import { type Category, type Transaction, type Wallet } from './api'
-import { BottomSheet } from './BottomSheet'
+import { ModalShell } from './ModalShell'
 import { TransactionForm } from './TransactionForm'
 
 type TransactionModalProps = {
@@ -11,8 +11,8 @@ type TransactionModalProps = {
   onClose: () => void
 }
 
-/** The create/edit/delete Transaction form inside the shared bottom-sheet
- * shell (US8–US10, issue #41). The form itself is unchanged from the inline
+/** The create/edit/delete Transaction form inside the shared modal shell
+ * (US8–US10, issue #41). The form itself is unchanged from the inline
  * days; the shell adds the dismissal paths — backdrop click, Cancel, and
  * Escape all abandon the draft without saving. */
 export function TransactionModal({
@@ -24,7 +24,7 @@ export function TransactionModal({
   onClose,
 }: TransactionModalProps) {
   return (
-    <BottomSheet
+    <ModalShell
       label={editing === null ? 'New transaction' : 'Edit transaction'}
       onClose={onClose}
     >
@@ -37,6 +37,6 @@ export function TransactionModal({
         onDeleted={onDeleted}
         onCancel={onClose}
       />
-    </BottomSheet>
+    </ModalShell>
   )
 }
