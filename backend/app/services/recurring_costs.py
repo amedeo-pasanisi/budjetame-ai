@@ -30,7 +30,13 @@ from app.models import (
     Wallet,
     WalletType,
 )
-from app.recurrence import next_due_date, occurrence_date, rome_day_of, rome_today
+from app.recurrence import (
+    backlog_count,
+    next_due_date,
+    occurrence_date,
+    rome_day_of,
+    rome_today,
+)
 from app.services import scoping
 
 
@@ -228,6 +234,30 @@ def paid_occurrence_dates(
     return {
         value for value in session.scalars(stmt).all() if value is not None
     }
+
+
+def backlog_count_for(session: Session, cost: RecurringCost) -> int:
+    """The cost's Backlog (issue #58): Unpaid Occurrences whose due date is
+    today or earlier in Europe/Rome — the "N unpaid" badge, and the Overdue
+    flag's source (a non-empty Backlog is Overdue). Unpaid means its own
+    date is not covered by a linked Expense: the pins are stored (issue
+    #57), so editing the interval or start date reshapes only the derived
+    future — an Occurrence a link covers is never counted back in."""
+    paid = paid_occurrence_dates(session, cost.id)
+    start = (
+        cost.start_date
+        if cost.start_date is not None
+        else rome_day_of(cost.created_at)
+    )
+    return backlog_count(
+        start,
+        cost.interval_value,
+        cost.interval_unit,
+        cost.due_day,
+        cost.due_month,
+        rome_today(),
+        paid,
+    )
 
 
 def oldest_unpaid_occurrence(

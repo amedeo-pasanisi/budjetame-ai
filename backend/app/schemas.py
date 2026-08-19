@@ -571,8 +571,12 @@ class RecurringCostOut(BaseModel):
     clamping included) on or after today in Europe/Rome (issue #56);
     `next_unpaid_occurrence_date` is the next Occurrence a new linked Expense
     would pay — the oldest Unpaid one's own date (issue #57), what the
-    transaction form's picker shows. `start_date` is the stored value — null
-    when unset, meaning the creation date."""
+    transaction form's picker shows. `backlog_count` is the Backlog (issue
+    #58): Unpaid Occurrences whose due date is today or earlier in
+    Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
+    pins, never stored; `overdue` is true exactly when the Backlog is
+    non-empty. `start_date` is the stored value — null when unset, meaning
+    the creation date."""
 
     id: int
     name: str
@@ -586,6 +590,8 @@ class RecurringCostOut(BaseModel):
     due_month: int | None
     next_due_date: str
     next_unpaid_occurrence_date: str
+    backlog_count: int
+    overdue: bool
     created_at: datetime
 
     @field_validator("amount")

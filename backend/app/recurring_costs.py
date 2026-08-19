@@ -30,10 +30,13 @@ def _owned_cost_or_403(
 
 
 def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
-    """The API view of a Recurring Cost, with the derived next due date
-    (override applied, clamping included — the pure recurrence module owns
-    that math) and the next Unpaid Occurrence date (issue #57): the one a
-    new linked Expense would pay, what the transaction form's picker shows."""
+    """The API view of a Recurring Cost, with the derived state: the next
+    due date (override applied, clamping included — the pure recurrence
+    module owns that math), the next Unpaid Occurrence date (issue #57): the
+    one a new linked Expense would pay, what the transaction form's picker
+    shows — and the Backlog (issue #58): Unpaid Occurrences due today or
+    earlier in Europe/Rome, with the Overdue flag."""
+    backlog = recurring_service.backlog_count_for(session, cost)
     return RecurringCostOut(
         id=cost.id,
         name=cost.name,
@@ -49,6 +52,8 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, cost
         ).isoformat(),
+        backlog_count=backlog,
+        overdue=backlog > 0,
         created_at=cost.created_at,
     )
 

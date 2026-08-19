@@ -72,6 +72,8 @@ const recurringCosts: RecurringCost[] = [
     due_month: null,
     next_due_date: '2030-03-01',
     next_unpaid_occurrence_date: '2030-03-01',
+    backlog_count: 0,
+    overdue: false,
     created_at: '2026-08-01T10:00:00Z',
   },
   {
@@ -87,6 +89,8 @@ const recurringCosts: RecurringCost[] = [
     due_month: null,
     next_due_date: '2030-06-01',
     next_unpaid_occurrence_date: '2030-06-01',
+    backlog_count: 0,
+    overdue: false,
     created_at: '2026-08-01T10:00:00Z',
   },
 ]

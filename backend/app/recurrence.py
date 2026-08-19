@@ -159,3 +159,47 @@ def next_due_date(
             k -= 1
         else:
             k += 1
+
+
+def backlog_count(
+    start: date,
+    n: int,
+    unit: str,
+    due_day: int | None,
+    due_month: int | None,
+    today: date,
+    paid: set[date],
+) -> int:
+    """The Backlog (issue #58): how many of the cost's Occurrences are
+    Unpaid and due `today` or earlier in Europe/Rome — the "N unpaid"
+    badge. `paid` is the set of Occurrence dates covered by linked Expenses
+    (the stored pins, issue #57): an Occurrence is Unpaid exactly when its
+    own date is not in it, so an Occurrence a link covers is never counted
+    back in, no matter how the definition (interval, start date) was edited
+    since the pin was stored.
+
+    The override can pull a due date ahead of its Occurrence (the 15th
+    occurrence due the 1st) or behind it, so the boundary walk mirrors
+    `next_due_date`'s: start at the interval estimate and adjust; due dates
+    are strictly increasing in k, so the first k whose due date is beyond
+    today ends the count.
+    """
+    k = _elapsed_intervals(start, n, unit, today)
+    while True:
+        due = due_date_for(occurrence_date(start, n, unit, k), unit, due_day, due_month)
+        if due > today:
+            if k == 0:
+                return 0
+            k -= 1
+            continue
+        if k == 0 or due_date_for(
+            occurrence_date(start, n, unit, k + 1), unit, due_day, due_month
+        ) > today:
+            break
+        k += 1
+    # k is the last Occurrence index due on or before today.
+    return sum(
+        1
+        for i in range(k + 1)
+        if occurrence_date(start, n, unit, i) not in paid
+    )

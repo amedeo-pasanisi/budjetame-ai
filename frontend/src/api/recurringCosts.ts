@@ -25,6 +25,12 @@ export type RecurringCost = {
   /** The next Occurrence a new linked Expense would pay — the oldest Unpaid
    * one's own date (issue #57): what the transaction form's picker shows. */
   next_unpaid_occurrence_date: string
+  /** The Backlog (issue #58): Unpaid Occurrences whose due date is today or
+   * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
+   * from the definition and the stored link pins, never stored. */
+  backlog_count: number
+  /** True exactly when the Backlog is non-empty — the Overdue mark. */
+  overdue: boolean
   created_at: string
 }
 

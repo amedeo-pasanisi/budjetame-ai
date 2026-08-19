@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.recurrence import (
+    backlog_count,
     due_date_for,
     next_due_date,
     occurrence_date,
@@ -183,6 +184,81 @@ def test_next_due_before_the_start_is_the_first_occurrence() -> None:
 def test_next_due_rejects_unknown_unit() -> None:
     with pytest.raises(ValueError):
         next_due_date(date(2026, 1, 1), 1, "fortnights", None, None, date(2026, 1, 1))
+
+
+# --- backlog_count: Unpaid Occurrences due today or earlier ---------------
+
+def test_backlog_counts_unpaid_occurrences_due_today_or_earlier() -> None:
+    # A daily cost starting 2026-01-01, judged on 2026-01-10: the first ten
+    # Occurrences (1st..10th) are due on or before today — the "10 unpaid"
+    # badge of a daily cost missed for ten days.
+    today = date(2026, 1, 10)
+    start = date(2026, 1, 1)
+    assert backlog_count(start, 1, "days", None, None, today, set()) == 10
+
+
+def test_backlog_skips_occurrences_covered_by_a_pin() -> None:
+    # The paid set is the stored Occurrence pins (issue #57): an Occurrence
+    # in it is never counted, even when its due date has passed. Paying the
+    # oldest two drops the badge 10 -> 8.
+    today = date(2026, 1, 10)
+    start = date(2026, 1, 1)
+    paid = {occurrence_date(start, 1, "days", k) for k in (0, 2)}
+    assert backlog_count(start, 1, "days", None, None, today, paid) == 8
+    # An Occurrence outside the derived sequence (e.g. after an interval
+    # edit reshaped it) simply never enters the count: it stays covered by
+    # its link, but it is not an Occurrence of the current definition.
+    paid_elsewhere = {date(2025, 12, 1)}
+    assert backlog_count(start, 1, "days", None, None, today, paid_elsewhere) == 10
+
+
+def test_backlog_counts_today_but_never_future_occurrences() -> None:
+    # Due today counts (CONTEXT.md: "today or earlier"); due tomorrow never
+    # does — future Occurrences appear as the next due date instead.
+    today = date(2026, 1, 10)
+    assert backlog_count(date(2026, 1, 10), 1, "days", None, None, today, set()) == 1
+    assert backlog_count(date(2026, 1, 11), 1, "days", None, None, today, set()) == 0
+
+
+def test_backlog_with_a_monthly_override_judges_the_due_date() -> None:
+    # The rent example: Occurrences on the 15th, due on the 1st. Judged on
+    # 2026-01-10, the October, November, December, and January Occurrences
+    # are all due on or before today — the January one is due the 1st, ahead
+    # of its own date (the override is the point).
+    today = date(2026, 1, 10)
+    start = date(2025, 10, 15)
+    assert backlog_count(start, 1, "months", 1, None, today, set()) == 4
+    # Paying the oldest two (October and November Occurrences) leaves two.
+    paid = {
+        occurrence_date(start, 1, "months", 0),
+        occurrence_date(start, 1, "months", 1),
+    }
+    assert backlog_count(start, 1, "months", 1, None, today, paid) == 2
+
+
+def test_backlog_with_a_yearly_override() -> None:
+    # Occurrences on May 10, due December 1: judged on 2026-05-01 the 2023,
+    # 2024, and 2025 Occurrences are due; judged on 2026-12-01 the 2026 one
+    # joins (due today counts).
+    start = date(2023, 5, 10)
+    assert backlog_count(start, 1, "years", 1, 12, date(2026, 5, 1), set()) == 3
+    assert backlog_count(start, 1, "years", 1, 12, date(2026, 12, 1), set()) == 4
+
+
+def test_backlog_walks_across_clamped_months() -> None:
+    # Every 3 months from 2025-04-30: 2025-04-30, 2025-07-30, 2025-10-30,
+    # 2026-01-30, ... Judged on 2026-01-10 the first three are due.
+    start = date(2025, 4, 30)
+    assert backlog_count(start, 3, "months", None, None, date(2026, 1, 10), set()) == 3
+
+
+def test_backlog_before_the_start_is_zero() -> None:
+    assert backlog_count(date(2026, 3, 15), 1, "months", None, None, date(2026, 2, 1), set()) == 0
+
+
+def test_backlog_rejects_unknown_unit() -> None:
+    with pytest.raises(ValueError):
+        backlog_count(date(2026, 1, 1), 1, "fortnights", None, None, date(2026, 1, 1), set())
 
 
 # --- rome_today -------------------------------------------------------------
