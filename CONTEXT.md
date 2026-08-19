@@ -36,12 +36,16 @@ _Avoid_: internal transfer, move
 A definition of a cost expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name, a fixed amount, and a Wallet. It produces derived Occurrences; each payment is still recorded by hand as a linked Expense — the app never creates Transactions on its own.
 _Avoid_: monthly cost, fixed cost, subscription, recurring transaction
 
+**Recurring Income**:
+A definition of an income expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name, a fixed amount, and a Wallet. It produces derived Occurrences; each receipt is still recorded by hand as a linked Income — the app never creates Transactions on its own.
+_Avoid_: recurring earning, paycheck, salary entry
+
 **Occurrence**:
-One derived due instance of a Recurring Cost, computed from its start date plus k×interval (an unset start date defaults to the creation date). Each Occurrence is either Paid — exactly one linked Expense covers it — or Unpaid. Its due date is its own date, unless the cost's optional override (day-of-month for months, month+day for years) shifts it.
+One derived due instance of a Recurring Cost or Recurring Income, computed from its start date plus k×interval (an unset start date defaults to the creation date). Each Occurrence is either Paid — exactly one linked Transaction of the matching type (an Expense for a Cost, an Income for a Recurring Income) covers it — or Unpaid. Its due date is its own date, unless the definition's optional override (day-of-month for months, month+day for years) shifts it.
 _Avoid_: instance, cycle, due event
 
 **Backlog**:
-A Recurring Cost's Unpaid Occurrences whose due date is today or earlier — the "N unpaid" badge on the Recurring Costs screen. A cost with a Backlog shows Overdue.
+A Recurring Cost's or Recurring Income's Unpaid Occurrences whose due date is today or earlier — the "N unpaid" badge on the Recurring screen. A definition with a Backlog shows Overdue.
 _Avoid_: arrears, overdue list
 
 **Category**:
@@ -108,10 +112,10 @@ _Avoid_: fixing rows
 - An import row is a Duplicate when date, amount, type, wallet(s), category, and description all match an existing Transaction or an earlier row of the same file; a blank description matches a missing one.
 - Searching the ledger matches Transactions whose Description contains the needle, case-insensitively (accents must match exactly), combined with any other filters.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
-- Recurring Costs are expense-side only and may be created only on active, non-Contact Wallets.
-- An Expense links to at most one Recurring Cost; linking pays exactly one Occurrence, the oldest Unpaid one, pinned at link time and never reassigned by later date edits. Unlinking or deleting the Expense frees the Occurrence.
-- Recurring Cost names are unique per Account, case-insensitively.
-- Deleting a Recurring Cost severs the links: linked Expenses remain as ordinary Expenses.
+- Recurring Costs are expense-side only and may be created only on active, non-Contact Wallets. Recurring Incomes are income-side only and may be created only on active, non-Contact Wallets.
+- An Expense links to at most one Recurring Cost; linking pays exactly one Occurrence, the oldest Unpaid one, pinned at link time and never reassigned by later date edits. Unlinking or deleting the Expense frees the Occurrence. An Income links to at most one Recurring Income under the same contract.
+- Recurring Cost names are unique per Account, case-insensitively; Recurring Income names are unique the same way.
+- Deleting a Recurring Cost severs the links: linked Expenses remain as ordinary Expenses. Deleting a Recurring Income severs the links: linked Incomes remain as ordinary Incomes.
 - Occurrences and Backlog are always derived from the definition; editing interval or start date reshapes only the derived future.
 - Imports never set the link.
 - All data is scoped to the single Account; foreign data gets a 403.
@@ -119,7 +123,7 @@ _Avoid_: fixing rows
 ## Non-goals
 
 - Registration and multi-user accounts
-- Auto-generated transactions: the app never creates them — Recurring Costs are tracking-only; budgets (budgets may come later)
+- Auto-generated transactions: the app never creates them — Recurring Costs and Recurring Incomes are tracking-only; budgets (budgets may come later)
 - Multi-currency
 - Bank sync via GoCardless (deferred to a later milestone)
 - Data export
