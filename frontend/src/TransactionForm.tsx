@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -86,6 +86,21 @@ export function TransactionForm({
   )
   const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
   const [description, setDescription] = useState(editing?.description ?? '')
+  const descriptionField = useRef<HTMLTextAreaElement | null>(null)
+  // Auto-grow (issue #53): rows follow the explicit line count so the field
+  // always holds every line; the measured-height effect below absorbs soft
+  // wraps (one long line folding over the field width), which line counts
+  // cannot see and jsdom cannot lay out.
+  const descriptionRows = Math.max(2, description.split('\n').length)
+  useLayoutEffect(() => {
+    const el = descriptionField.current
+    if (el === null) return
+    el.style.height = 'auto'
+    const contentHeight = el.scrollHeight
+    if (contentHeight > 0) {
+      el.style.height = `${contentHeight}px`
+    }
+  }, [description])
   const [location, setLocation] = useState<LatLng | null>(() =>
     latLngFromWire(editing?.latitude ?? null, editing?.longitude ?? null),
   )
@@ -395,14 +410,15 @@ export function TransactionForm({
         <label htmlFor="tx-description" className="block text-sm font-medium text-slate-700">
           Description
         </label>
-        <input
+        <textarea
+          ref={descriptionField}
           id="tx-description"
-          type="text"
+          rows={descriptionRows}
           maxLength={500}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="Optional note"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+          className="mt-1 w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
       </div>
 

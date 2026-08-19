@@ -285,3 +285,68 @@ describe('TransactionForm GPS feedback (issue #35)', () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe('TransactionForm readable description (issue #53)', () => {
+  const longDescription = [
+    'Groceries at the market',
+    'Fresh bread, cheese, and a bottle of wine',
+    'Dinner with friends on Saturday night',
+  ].join('\n')
+
+  it('shows the full Description, sized to its lines, when the modal opens', () => {
+    renderForm({ ...baseTransaction, description: longDescription })
+
+    const field = screen.getByLabelText('Description')
+    expect(field).toHaveValue(longDescription)
+    // The field is a multi-line box that grows to hold every line.
+    expect(field).toHaveAttribute('rows', '3')
+  })
+
+  it('grows as the user types more lines, and stays put for a single line', () => {
+    renderForm(null)
+
+    const field = screen.getByLabelText('Description')
+    expect(field).toHaveAttribute('rows', '2')
+
+    fireEvent.change(field, { target: { value: 'one line' } })
+    expect(field).toHaveAttribute('rows', '2')
+
+    fireEvent.change(field, { target: { value: 'one\ntwo\nthree\nfour' } })
+    expect(field).toHaveAttribute('rows', '4')
+  })
+
+  it('keeps the 500-character cap', () => {
+    renderForm(null)
+
+    expect(screen.getByLabelText('Description')).toHaveAttribute('maxlength', '500')
+  })
+
+  it('save submits the complete Description', async () => {
+    renderForm(null)
+
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.change(screen.getByLabelText('Description'), {
+      target: { value: longDescription },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ description: longDescription }),
+    )
+  })
+
+  it('save on edit keeps the complete Description', async () => {
+    renderForm({ ...baseTransaction, description: longDescription })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.objectContaining({ description: longDescription }),
+    )
+  })
+})
