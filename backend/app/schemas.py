@@ -695,9 +695,12 @@ class RecurringIncomeOut(BaseModel):
     Europe/Rome, derived on the fly from the stored definition — never
     stored. `next_unpaid_occurrence_date` is the next Occurrence a new linked
     Income would pay — the oldest Unpaid one's own date (issue #61), what the
-    transaction form's picker shows. `start_date` is the stored value — null
-    when unset, meaning the creation date. (The Backlog arrives with issue
-    #62, mirroring #58.)"""
+    transaction form's picker shows. `backlog_count` is the Backlog (issue
+    #62): Unpaid Occurrences whose due date is today or earlier in
+    Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
+    pins, never stored; `overdue` is true exactly when the Backlog is
+    non-empty. `start_date` is the stored value — null when unset, meaning
+    the creation date."""
 
     id: int
     name: str
@@ -711,6 +714,8 @@ class RecurringIncomeOut(BaseModel):
     due_month: int | None
     next_due_date: str
     next_unpaid_occurrence_date: str
+    backlog_count: int
+    overdue: bool
     created_at: datetime
 
     @field_validator("amount")

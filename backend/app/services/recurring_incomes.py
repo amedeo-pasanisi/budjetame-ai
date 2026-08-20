@@ -15,7 +15,10 @@ lives here: `paid_occurrence_dates` is the set of Occurrences the income's
 links cover and `oldest_unpaid_occurrence` the one a new link pays (the
 oldest Unpaid, future Occurrences included — receiving ahead) — what the
 transaction form's picker shows as `next_unpaid_occurrence_date` in the API
-view.
+view. The Backlog (issue #62) is derived on the fly from the definition and
+the stored pins: `backlog_count_for` counts Unpaid Occurrences whose due
+date is today or earlier in Europe/Rome, mirroring the cost side (issue
+#58, ADR-0011).
 """
 
 from datetime import date
@@ -32,7 +35,13 @@ from app.models import (
     Wallet,
     WalletType,
 )
-from app.recurrence import next_due_date, occurrence_date, rome_day_of, rome_today
+from app.recurrence import (
+    backlog_count,
+    next_due_date,
+    occurrence_date,
+    rome_day_of,
+    rome_today,
+)
 from app.services import scoping
 
 
@@ -233,6 +242,32 @@ def paid_occurrence_dates(
     return {
         value for value in session.scalars(stmt).all() if value is not None
     }
+
+
+def backlog_count_for(session: Session, income: RecurringIncome) -> int:
+    """The income's Backlog (issue #62): Unpaid Occurrences whose due date
+    is today or earlier in Europe/Rome — the "N unpaid" badge, and the
+    Overdue flag's source (a non-empty Backlog is Overdue). Unpaid means
+    its own date is not covered by a linked Income: the pins are stored
+    (issue #61), so editing the interval or start date reshapes only the
+    derived future — an Occurrence a link covers is never counted back in.
+    The pure recurrence module owns the boundary math, shared unchanged
+    with Recurring Costs (ADR-0011)."""
+    paid = paid_occurrence_dates(session, income.id)
+    start = (
+        income.start_date
+        if income.start_date is not None
+        else rome_day_of(income.created_at)
+    )
+    return backlog_count(
+        start,
+        income.interval_value,
+        income.interval_unit,
+        income.due_day,
+        income.due_month,
+        rome_today(),
+        paid,
+    )
 
 
 def oldest_unpaid_occurrence(

@@ -1,7 +1,9 @@
 """The Recurring Incomes resource (issue #60): definitions of incomes that
 repeat at a fixed interval, mirroring Recurring Costs (ADR-0011). The list
 exposes each income's next due date, derived on the fly (ADR-0010); the
-screen sorts by it. Guards: names unique per Account case-insensitively;
+screen sorts by it. The Backlog and the Overdue flag (issue #62) ride on
+the list too, mirroring #58: the "N unpaid" badge the Incomes side shows
+comes from here. Guards: names unique per Account case-insensitively;
 creation only on active, non-Contact Wallets; only income-only Categories
 attachable; all data scoped to the Account (foreign data is a 403,
 ADR-0003)."""
@@ -40,9 +42,11 @@ def _owned_income_or_403(
 def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut:
     """The API view of a Recurring Income, with the derived state: the next
     due date (override applied, clamping included — the pure recurrence
-    module owns that math) and the next Unpaid Occurrence date (issue #61):
+    module owns that math), the next Unpaid Occurrence date (issue #61):
     the one a new linked Income would pay, what the transaction form's
-    picker shows. (The Backlog arrives with issue #62, mirroring #58.)"""
+    picker shows — and the Backlog (issue #62): Unpaid Occurrences due
+    today or earlier in Europe/Rome, with the Overdue flag."""
+    backlog = recurring_service.backlog_count_for(session, income)
     return RecurringIncomeOut(
         id=income.id,
         name=income.name,
@@ -58,6 +62,8 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, income
         ).isoformat(),
+        backlog_count=backlog,
+        overdue=backlog > 0,
         created_at=income.created_at,
     )
 

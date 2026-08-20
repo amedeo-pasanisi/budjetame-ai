@@ -21,11 +21,15 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; income: RecurringIncome }
 /** The Recurring tab's Incomes side (issue #60): every Recurring Income
  * sorted by next due date — the screen's one order — each row showing name,
  * amount, interval, and the next due date (derived on the backend, override
- * applied, clamping included). The screen mirrors the Costs side (issue #56,
- * ADR-0011); the Backlog badge, the Overdue mark, and the summary line
- * arrive with issue #62. Create, edit, and delete live here, in a modal;
- * Wallets and Categories are fetched too, so the form's selectors are ready
- * the moment it opens. */
+ * applied, clamping included), plus the Backlog badge ("N unpaid", issue
+ * #62) and the Overdue mark. The summary line on top — "X incomes overdue ·
+ * N unpaid occurrences" — answers the original question at a glance: what
+ * remains to receive. The screen mirrors the Costs side (issue #56,
+ * ADR-0011). Create, edit, and delete live here, in a modal; Wallets and
+ * Categories are fetched too, so the form's selectors are ready the moment
+ * it opens. The badge, the mark, and the summary are all derived state from
+ * the API: they refresh whenever the list reloads (tab switch after a link
+ * change) or a saved definition comes back from the modal. */
 export function RecurringIncomesScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [incomes, setIncomes] = useState<RecurringIncome[] | null>(null)
@@ -79,6 +83,14 @@ export function RecurringIncomesScreen() {
     setModal(null)
   }
 
+  // The summary line (issue #62): totals over the loaded incomes. Only shown
+  // when there is at least one income — the empty state already answers
+  // "what remains to receive" for a screen with nothing on it.
+  const overdueCount =
+    incomes === null ? 0 : incomes.filter((income) => income.overdue).length
+  const unpaidCount =
+    incomes === null ? 0 : incomes.reduce((sum, income) => sum + income.backlog_count, 0)
+
   return (
     <>
       <div className="flex items-center justify-between">
@@ -93,6 +105,14 @@ export function RecurringIncomesScreen() {
       </div>
 
       {loadError !== null && <p className="mb-4 mt-2 text-sm text-red-600">{loadError}</p>}
+
+      {incomes !== null && incomes.length > 0 && (
+        <p className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+          {overdueCount} {overdueCount === 1 ? 'income overdue' : 'incomes overdue'} ·{' '}
+          {unpaidCount}{' '}
+          {unpaidCount === 1 ? 'unpaid occurrence' : 'unpaid occurrences'}
+        </p>
+      )}
 
       {incomes === null ? (
         <p className="mt-3 text-sm text-slate-500">Loading recurring incomes…</p>
@@ -117,9 +137,21 @@ export function RecurringIncomesScreen() {
                     {intervalText(income.interval_value, income.interval_unit)} · next
                     due {income.next_due_date}
                   </span>
+                  {income.overdue && (
+                    <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                      Overdue
+                    </span>
+                  )}
                 </span>
-                <span className="shrink-0 font-semibold text-slate-900">
-                  {formatEuros(income.amount)}
+                <span className="shrink-0 text-right">
+                  <span className="block font-semibold text-slate-900">
+                    {formatEuros(income.amount)}
+                  </span>
+                  {income.backlog_count > 0 && (
+                    <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                      {income.backlog_count} unpaid
+                    </span>
+                  )}
                 </span>
               </button>
             </li>

@@ -1,7 +1,7 @@
 /** Recurring Incomes resource (issue #60): definitions of incomes that
  * repeat at a fixed interval, mirroring Recurring Costs (ADR-0011).
- * Occurrences and `next_due_date` are derived on the backend, never stored
- * (ADR-0010). */
+ * Occurrences, `next_due_date`, and the Backlog are derived on the backend,
+ * never stored (ADR-0010). */
 
 import { request } from './transport'
 
@@ -27,6 +27,12 @@ export type RecurringIncome = {
    * Unpaid one's own date (issue #61): what the transaction form's picker
    * shows. */
   next_unpaid_occurrence_date: string
+  /** The Backlog (issue #62): Unpaid Occurrences whose due date is today or
+   * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
+   * from the definition and the stored link pins, never stored. */
+  backlog_count: number
+  /** True exactly when the Backlog is non-empty — the Overdue mark. */
+  overdue: boolean
   created_at: string
 }
 
