@@ -9,6 +9,12 @@ type RecurringCostModalProps = {
   onSaved: (cost: RecurringCost) => void
   onDeleted?: (costId: number) => void
   onClose: () => void
+  /** Inline entity creation (ADR-0013): opens the Category create modal
+   * hosted by the screen, stacked on top of this one. */
+  onAddCategory: () => void
+  /** The freshly created Category's id, reported back so the form's field
+   * selects it. */
+  categoryToSelect: number | null
 }
 
 /** The create/edit Recurring Cost form inside the shared modal shell
@@ -22,6 +28,8 @@ export function RecurringCostModal({
   onSaved,
   onDeleted,
   onClose,
+  onAddCategory,
+  categoryToSelect,
 }: RecurringCostModalProps) {
   const editing = cost !== undefined
   return (
@@ -34,6 +42,8 @@ export function RecurringCostModal({
         onSaved={onSaved}
         onDeleted={onDeleted}
         onCancel={onClose}
+        onAddCategory={onAddCategory}
+        categoryToSelect={categoryToSelect}
       />
     </ModalShell>
   )

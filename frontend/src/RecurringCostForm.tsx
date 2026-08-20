@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -13,6 +13,7 @@ import {
   type RecurringCostInput,
   type Wallet,
 } from './api'
+import { EntitySelect } from './EntitySelect'
 
 const UNIT_OPTIONS: { value: IntervalUnit; label: string }[] = [
   { value: 'days', label: 'Days' },
@@ -31,6 +32,12 @@ type RecurringCostFormProps = {
   onSaved: (cost: RecurringCost) => void
   onDeleted?: (costId: number) => void
   onCancel: () => void
+  /** Inline entity creation (ADR-0013): opens the Category create modal
+   * hosted by the screen. */
+  onAddCategory: () => void
+  /** The freshly created Category the screen reports back: the field selects
+   * it, leaving the rest of the draft untouched. */
+  categoryToSelect: number | null
 }
 
 /** The create/edit/delete form for a Recurring Cost, hosted in the modal
@@ -48,6 +55,8 @@ export function RecurringCostForm({
   onSaved,
   onDeleted,
   onCancel,
+  onAddCategory,
+  categoryToSelect,
 }: RecurringCostFormProps) {
   const editing = cost !== undefined
   // Costs live on active, non-Contact Wallets only (CONTEXT.md). While
@@ -82,6 +91,15 @@ export function RecurringCostForm({
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  // Inline entity creation (ADR-0013): when the screen's inner Category
+  // modal saves, it reports the new Category's id here so this field
+  // selects it — the only field that changes, the rest of the draft stays.
+  useEffect(() => {
+    if (categoryToSelect !== null) {
+      setCategoryId(categoryToSelect)
+    }
+  }, [categoryToSelect])
 
   // The year interval's override is a month+day pair: half a pair blocks the
   // save instead of silently dropping the override.
@@ -232,26 +250,15 @@ export function RecurringCostForm({
         </p>
       </div>
 
-      <div>
-        <label htmlFor="recurring-cost-category" className="block text-sm font-medium text-slate-700">
-          Category (optional)
-        </label>
-        <select
-          id="recurring-cost-category"
-          value={categoryId}
-          onChange={(event) =>
-            setCategoryId(event.target.value === '' ? '' : Number(event.target.value))
-          }
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-        >
-          <option value="">None</option>
-          {categoryOptions.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <EntitySelect
+        id="recurring-cost-category"
+        label="Category (optional)"
+        value={categoryId}
+        onChange={setCategoryId}
+        options={categoryOptions.map((category) => ({ id: category.id, label: category.name }))}
+        entity="category"
+        onAdd={onAddCategory}
+      />
 
       <div>
         <span className="block text-sm font-medium text-slate-700">Repeats</span>

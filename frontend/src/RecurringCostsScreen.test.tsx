@@ -37,10 +37,13 @@ vi.mock('./api', async () => {
     deleteRecurringCost: vi.fn(),
     fetchWallets: vi.fn(),
     fetchCategories: vi.fn(),
+    createCategory: vi.fn(),
   }
 })
 
 import {
+  ApiError,
+  createCategory,
   createRecurringCost,
   deleteRecurringCost,
   fetchCategories,
@@ -48,6 +51,7 @@ import {
   fetchWallets,
   updateRecurringCost,
 } from './api'
+import { SENTINEL_VALUE } from './EntitySelect'
 
 const createdAt = '2026-08-19T10:00:00Z'
 
@@ -124,6 +128,7 @@ const updateRecurringCostMock = vi.mocked(updateRecurringCost)
 const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
+const createCategoryMock = vi.mocked(createCategory)
 
 beforeEach(() => {
   fetchRecurringCostsMock.mockResolvedValue(costs)
@@ -244,7 +249,7 @@ describe('RecurringCostsScreen create flow', () => {
     const categorySelect = within(dialog).getByLabelText('Category (optional)')
     expect(
       Array.from(categorySelect.querySelectorAll('option')).map((option) => option.textContent),
-    ).toEqual(['None', 'Housing'])
+    ).toEqual(['None', 'Housing', '＋ Add category…'])
   })
 })
 
@@ -324,6 +329,270 @@ describe('RecurringCostsScreen edit and delete flows', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
     expect(createRecurringCostMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('RecurringCostsScreen inline category creation (issue #68)', () => {
+  /** Opens the New recurring cost modal. */
+  const openCreateForm = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'New recurring cost' }))
+    return await screen.findByRole('dialog', { name: 'New recurring cost' })
+  }
+
+  /** The Category select's options, in order. */
+  const categoryOptions = (dialog: HTMLElement) =>
+    Array.from(
+      within(dialog)
+        .getByLabelText('Category (optional)')
+        .querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  it('shows the sentinel as the last option, after None, in create and edit modes', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const createDialog = await openCreateForm()
+    expect(categoryOptions(createDialog)).toEqual([
+      'None',
+      'Housing',
+      '＋ Add category…',
+    ])
+    fireEvent.click(within(createDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Edit mode carries the same sentinel.
+    const rows = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+    fireEvent.click(rows.find((row) => row.textContent?.includes('Rent')) as HTMLElement)
+    const editDialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
+    expect(categoryOptions(editDialog)).toEqual([
+      'None',
+      'Housing',
+      '＋ Add category…',
+    ])
+  })
+
+  it('picking the sentinel opens the New category modal with Expense locked and reverts the dropdown', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    const categorySelect = within(dialog).getByLabelText('Category (optional)')
+    // A real selection first, so the revert is observable.
+    fireEvent.change(categorySelect, { target: { value: '1' } })
+    expect(categorySelect).toHaveValue('1')
+
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    // The Type selector is hidden and the type is fixed to Expense.
+    expect(within(categoryDialog).queryByLabelText('Type')).not.toBeInTheDocument()
+    expect(
+      within(categoryDialog).getByText('Expense · fixed for this form'),
+    ).toBeInTheDocument()
+    // The dropdown reverted to its previous value; the outer draft is intact.
+    expect(categorySelect).toHaveValue('1')
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('')
+  })
+
+  it('the full flow — sentinel, create, auto-select, submit — carries the new category id', async () => {
+    createCategoryMock.mockResolvedValue({
+      id: 5,
+      name: 'Groceries',
+      type: 'expense',
+      icon: null,
+      color: '#ef4444',
+      created_at: createdAt,
+    })
+    createRecurringCostMock.mockResolvedValue({
+      id: 9,
+      name: 'Grocery run',
+      amount: '42.00',
+      wallet_id: 1,
+      category_id: 5,
+      interval_value: 1,
+      interval_unit: 'months',
+      start_date: null,
+      due_day: null,
+      due_month: null,
+      next_due_date: '2026-09-01',
+      next_unpaid_occurrence_date: '2026-09-01',
+      backlog_count: 0,
+      overdue: false,
+      created_at: createdAt,
+    })
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Grocery run' } })
+    fireEvent.change(within(dialog).getByLabelText('Amount'), { target: { value: '42.00' } })
+
+    const categorySelect = within(dialog).getByLabelText('Category (optional)')
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Groceries' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    // The Category is created with the locked Expense type.
+    await waitFor(() =>
+      expect(createCategoryMock).toHaveBeenCalledWith('', {
+        name: 'Groceries',
+        type: 'expense',
+        icon: '',
+        color: '#ef4444',
+      }),
+    )
+    // Only the inner modal closes; the form and its draft survive.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New recurring cost' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Grocery run')
+    expect(within(dialog).getByLabelText('Amount')).toHaveValue(42)
+    // The new Category is selected and offered in the dropdown.
+    await waitFor(() => expect(categorySelect).toHaveValue('5'))
+    expect(categoryOptions(dialog)).toEqual([
+      'None',
+      'Housing',
+      'Groceries',
+      '＋ Add category…',
+    ])
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+
+    // Submitting the outer form sends the new Category's id.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create recurring cost' }))
+    await waitFor(() =>
+      expect(createRecurringCostMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({ name: 'Grocery run', categoryId: 5 }),
+      ),
+    )
+  })
+
+  it('Cancel, backdrop tap, and Escape close only the category modal and leave the form draft intact', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Grocery run' } })
+
+    // Opens the stacked Category modal on top of the open form.
+    const openCategoryModal = async () => {
+      fireEvent.change(within(dialog).getByLabelText('Category (optional)'), {
+        target: { value: SENTINEL_VALUE },
+      })
+      return await screen.findByRole('dialog', { name: 'New category' })
+    }
+    const formSurvives = () => {
+      expect(screen.getByRole('dialog', { name: 'New recurring cost' })).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('Name')).toHaveValue('Grocery run')
+    }
+
+    // Cancel closes only the inner modal.
+    let categoryDialog = await openCategoryModal()
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // Backdrop tap closes only the inner modal.
+    categoryDialog = await openCategoryModal()
+    fireEvent.click(categoryDialog.previousElementSibling as Element)
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // One Escape closes only the topmost modal; a second closes the form.
+    categoryDialog = await openCategoryModal()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(createCategoryMock).not.toHaveBeenCalled()
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+  })
+
+  it('a duplicate category name shows the validation error inside the modal and selects nothing', async () => {
+    createCategoryMock.mockRejectedValue(new ApiError('Conflict', 409))
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    const categorySelect = within(dialog).getByLabelText('Category (optional)')
+    fireEvent.change(categorySelect, { target: { value: '1' } })
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Housing' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    expect(
+      await within(categoryDialog).findByText('A category with this name already exists.'),
+    ).toBeInTheDocument()
+    // The modal stays open and nothing is selected; the outer draft is intact.
+    expect(screen.getByRole('dialog', { name: 'New category' })).toBeInTheDocument()
+    expect(categorySelect).toHaveValue('1')
+
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New recurring cost' })).toBeInTheDocument()
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+  })
+
+  it('works in edit mode: the inline Category is auto-selected and the edit carries its id', async () => {
+    createCategoryMock.mockResolvedValue({
+      id: 6,
+      name: 'Utilities',
+      type: 'expense',
+      icon: null,
+      color: '#ef4444',
+      created_at: createdAt,
+    })
+    updateRecurringCostMock.mockResolvedValue({ ...costs[0], category_id: 6 })
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const rows = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+    fireEvent.click(rows.find((row) => row.textContent?.includes('Rent')) as HTMLElement)
+    const dialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
+    const categorySelect = within(dialog).getByLabelText('Category (optional)')
+    expect(categorySelect).toHaveValue('1')
+
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Utilities' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    await waitFor(() => expect(createCategoryMock).toHaveBeenCalled())
+    // The dropdown reverted to the edited cost's Category, then the new one
+    // took its place; the rest of the draft (amount) is untouched.
+    await waitFor(() => expect(categorySelect).toHaveValue('6'))
+    expect(within(dialog).getByLabelText('Amount')).toHaveValue(850)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(updateRecurringCostMock).toHaveBeenCalledWith(
+        '',
+        1,
+        expect.objectContaining({ categoryId: 6 }),
+      ),
+    )
   })
 })
 

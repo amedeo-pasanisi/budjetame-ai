@@ -33,6 +33,11 @@ const TYPE_LABELS: Record<CategoryType, string> = {
 
 type CategoryFormProps = {
   category?: Category
+  /** Eligibility locking (ADR-0013): when set, the Type selector is hidden
+   * and the type preset — create mode only, for inline creation from a
+   * form whose field only accepts one type (e.g. an Expense form can only
+   * create expense Categories). */
+  lockedType?: CategoryType
   onSaved: (category: Category) => void
   onDeleted?: (categoryId: number) => void
   /** The confirmed merge (ADR-0007): the renamed Category is gone and the
@@ -52,6 +57,7 @@ type CategoryFormProps = {
  * without saving. */
 export function CategoryForm({
   category,
+  lockedType,
   onSaved,
   onDeleted,
   onMerged,
@@ -59,7 +65,7 @@ export function CategoryForm({
 }: CategoryFormProps) {
   const editing = category !== undefined
   const [name, setName] = useState(category?.name ?? '')
-  const [type, setType] = useState<CategoryType>(category?.type ?? 'expense')
+  const [type, setType] = useState<CategoryType>(category?.type ?? lockedType ?? 'expense')
   const [icon, setIcon] = useState(category?.icon ?? '')
   const [color, setColor] = useState(category?.color ?? PRESET_COLORS[0])
   const [error, setError] = useState<string | null>(null)
@@ -198,7 +204,13 @@ export function CategoryForm({
         />
       </div>
 
-      {!editing && (
+      {!editing && lockedType !== undefined && (
+        <p className="text-xs text-slate-500">
+          {TYPE_LABELS[lockedType]} · fixed for this form
+        </p>
+      )}
+
+      {!editing && lockedType === undefined && (
         <div>
           <label htmlFor="category-type" className="block text-sm font-medium text-slate-700">
             Type

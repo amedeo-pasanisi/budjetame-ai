@@ -10,6 +10,7 @@ import {
   type RecurringCost,
   type Wallet,
 } from './api'
+import { CategoryModal } from './CategoryModal'
 import { RecurringCostModal } from './RecurringCostModal'
 import { intervalText, sortByNextDue } from './recurringCosts'
 
@@ -36,6 +37,11 @@ export function RecurringCostsScreen() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalDraft | null>(null)
+  // Inline entity creation (ADR-0013): the inner Category create modal,
+  // stacked on top of the form's modal, and the new Category it created —
+  // reported back to the open form so its field selects it.
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [categoryToSelect, setCategoryToSelect] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -61,6 +67,23 @@ export function RecurringCostsScreen() {
     }
   }, [token])
 
+  // The inner Category modal's save (ADR-0013): add the Category to the
+  // list state (so the dropdown offers it again without a reload), close
+  // only the inner modal, and report the new id to the open form so the
+  // originating field selects it. The form's draft is untouched.
+  const handleCategoryCreated = (category: Category) => {
+    setCategories((current) => (current === null ? [category] : [...current, category]))
+    setCategoryToSelect(category.id)
+    setCategoryModalOpen(false)
+  }
+
+  // Closing the outer modal also clears the pending auto-select: a stale id
+  // must not be re-applied when the form opens again later.
+  const closeModal = () => {
+    setModal(null)
+    setCategoryToSelect(null)
+  }
+
   const handleSaved = (cost: RecurringCost) => {
     setCosts((current) => {
       if (current === null) {
@@ -72,14 +95,14 @@ export function RecurringCostsScreen() {
           : [...current, cost],
       )
     })
-    setModal(null)
+    closeModal()
   }
 
   const handleDeleted = (costId: number) => {
     setCosts((current) =>
       current === null ? current : current.filter((cost) => cost.id !== costId),
     )
-    setModal(null)
+    closeModal()
   }
 
   // The summary line (issue #58): totals over the loaded costs. Only shown
@@ -165,7 +188,17 @@ export function RecurringCostsScreen() {
           categories={categories}
           onSaved={handleSaved}
           onDeleted={handleDeleted}
-          onClose={() => setModal(null)}
+          onClose={closeModal}
+          onAddCategory={() => setCategoryModalOpen(true)}
+          categoryToSelect={categoryToSelect}
+        />
+      )}
+
+      {categoryModalOpen && (
+        <CategoryModal
+          lockedType="expense"
+          onSaved={handleCategoryCreated}
+          onClose={() => setCategoryModalOpen(false)}
         />
       )}
     </>

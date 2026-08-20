@@ -1,9 +1,13 @@
-import { type Category } from './api'
+import { type Category, type CategoryType } from './api'
 import { ModalShell } from './ModalShell'
 import { CategoryForm } from './CategoryForm'
 
 type CategoryModalProps = {
   category?: Category
+  /** Eligibility locking (ADR-0013): hides the Type selector and presets
+   * the type — create mode only, for inline creation from a form whose
+   * field only accepts one type. */
+  lockedType?: CategoryType
   onSaved: (category: Category) => void
   onDeleted?: (categoryId: number) => void
   /** The confirmed merge (ADR-0007): the renamed Category is gone and the
@@ -19,6 +23,7 @@ type CategoryModalProps = {
  * and Escape all abandon the draft without saving. */
 export function CategoryModal({
   category,
+  lockedType,
   onSaved,
   onDeleted,
   onMerged,
@@ -30,6 +35,7 @@ export function CategoryModal({
       <CategoryForm
         key={editing ? category.id : 'create'}
         category={category}
+        lockedType={lockedType}
         onSaved={onSaved}
         onDeleted={onDeleted}
         onMerged={onMerged}
