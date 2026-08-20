@@ -48,6 +48,26 @@ _Avoid_: instance, cycle, due event
 A Recurring Cost's or Recurring Income's Unpaid Occurrences whose due date is today or earlier — the "N unpaid" badge on the Recurring screen. A definition with a Backlog shows Overdue.
 _Avoid_: arrears, overdue list
 
+**Budget**:
+The per-month spending frame that answers "how much can I spend today": each day the Daily Allowance accrues into Spendable Today and Discretionary Expenses drain it. Each month is its own frame — the Budget resets on the 1st. It is purely derived from Recurring definitions and Transactions, never stored, and recomputes retroactively when they change.
+_Avoid_: allowance, daily budget, pocket money
+
+**Monthly Spendable**:
+A month's Budget total: the sum of the Recurring Income Occurrences due in that month minus the sum of the Recurring Cost Occurrences due in it, counted by due date whether paid or not. When negative, the Daily Allowance floors at 0.
+_Avoid_: monthly available, free money, disposable income
+
+**Daily Allowance**:
+The Monthly Spendable divided by the number of days in the month, floored to the cent, with the leftover remainder landing on the last day of the month. One unit accrues into Spendable Today per calendar day.
+_Avoid_: daily amount, per-day budget, daily rate
+
+**Spendable Today**:
+The Budget bucket right now: the Daily Allowances accrued from the 1st through today minus the Discretionary Expenses dated in that span. It may go negative — future accruals repay the debt — and while negative it is shown as 0. Resets to 0 on the 1st of each month.
+_Avoid_: available today, remaining budget, balance left
+
+**Discretionary Expense**:
+An Expense that does not pay a Recurring Cost Occurrence — i.e. it is not linked to a Recurring Cost. The only thing that drains Spendable Today.
+_Avoid_: free spending, unlinked expense, fun spending
+
 **Category**:
 A user-defined label that groups Transactions of one type. Each Category is either expense-only or income-only and can only be attached to Transactions of that type. Names are unique case-insensitively within their type: an expense "Food" and an income "Food" can coexist.
 _Avoid_: tag, label, group
@@ -117,13 +137,16 @@ _Avoid_: fixing rows
 - Recurring Cost names are unique per Account, case-insensitively; Recurring Income names are unique the same way.
 - Deleting a Recurring Cost severs the links: linked Expenses remain as ordinary Expenses. Deleting a Recurring Income severs the links: linked Incomes remain as ordinary Incomes.
 - Occurrences and Backlog are always derived from the definition; editing interval or start date reshapes only the derived future.
+- The Budget is always derived, never stored: editing a Recurring definition, a Transaction, or a link recomputes Monthly Spendable, Daily Allowance, and Spendable Today retroactively from the 1st of the month.
+- Monthly Spendable counts Occurrences by due date, paid or not; Expenses linked to a Recurring Cost never drain Spendable Today, and one-off Incomes never fill it.
+- Each month's Budget starts fresh at 0; Spendable Today may go negative within the month and is displayed as 0 until future accruals repay it.
 - Imports never set the link.
 - All data is scoped to the single Account; foreign data gets a 403.
 
 ## Non-goals
 
 - Registration and multi-user accounts
-- Auto-generated transactions: the app never creates them — Recurring Costs and Recurring Incomes are tracking-only; budgets (budgets may come later)
+- Auto-generated transactions: the app never creates them — Recurring Costs and Recurring Incomes are tracking-only
 - Multi-currency
 - Bank sync via GoCardless (deferred to a later milestone)
 - Data export
