@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -13,6 +13,7 @@ import {
   type RecurringIncomeInput,
   type Wallet,
 } from './api'
+import { EntitySelect } from './EntitySelect'
 
 const UNIT_OPTIONS: { value: IntervalUnit; label: string }[] = [
   { value: 'days', label: 'Days' },
@@ -31,12 +32,26 @@ type RecurringIncomeFormProps = {
   onSaved: (income: RecurringIncome) => void
   onDeleted?: (incomeId: number) => void
   onCancel: () => void
+  /** Inline entity creation (ADR-0013): opens the Category create modal
+   * hosted by the screen. */
+  onAddCategory: () => void
+  /** The freshly created Category the screen reports back: the field selects
+   * it, leaving the rest of the draft untouched. */
+  categoryToSelect: number | null
+  /** Inline entity creation (ADR-0013): opens the Wallet create modal
+   * hosted by the screen. */
+  onAddWallet: () => void
+  /** The freshly created Wallet the screen reports back: the field selects
+   * it, leaving the rest of the draft untouched. */
+  walletToSelect: number | null
 }
 
 /** The create/edit/delete form for a Recurring Income, hosted in the modal
  * shell (RecurringIncomeModal). Fields mirror the Costs side (issue #56,
  * ADR-0011): Name, Amount, Wallet (active, non-Contact only — incomes behave
- * like Income Transactions), an optional income-only Category, the interval
+ * like Income Transactions, with the inline "＋ Add wallet…" sentinel,
+ * ADR-0013), an optional income-only Category (with its own inline
+ * "＋ Add category…" sentinel, ADR-0013), the interval
  * (every N days/weeks/months/years), an optional start date (unset defaults
  * to the creation date), and the due-date override that follows the interval
  * unit — a day-of-month for months, a month+day for years, nothing for
@@ -49,6 +64,10 @@ export function RecurringIncomeForm({
   onSaved,
   onDeleted,
   onCancel,
+  onAddCategory,
+  categoryToSelect,
+  onAddWallet,
+  walletToSelect,
 }: RecurringIncomeFormProps) {
   const editing = income !== undefined
   // Incomes live on active, non-Contact Wallets only (CONTEXT.md). While
@@ -83,6 +102,24 @@ export function RecurringIncomeForm({
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  // Inline entity creation (ADR-0013): when the screen's inner Category
+  // modal saves, it reports the new Category's id here so this field
+  // selects it — the only field that changes, the rest of the draft stays.
+  useEffect(() => {
+    if (categoryToSelect !== null) {
+      setCategoryId(categoryToSelect)
+    }
+  }, [categoryToSelect])
+
+  // The Wallet select's inline creation, same contract as the Category
+  // field above: the new Wallet's id arrives from the screen and takes the
+  // field, leaving the rest of the draft untouched.
+  useEffect(() => {
+    if (walletToSelect !== null) {
+      setWalletId(walletToSelect)
+    }
+  }, [walletToSelect])
 
   // The year interval's override is a month+day pair: half a pair blocks the
   // save instead of silently dropping the override.
@@ -211,48 +248,29 @@ export function RecurringIncomeForm({
         />
       </div>
 
-      <div>
-        <label htmlFor="recurring-income-wallet" className="block text-sm font-medium text-slate-700">
-          Wallet
-        </label>
-        <select
-          id="recurring-income-wallet"
-          required
-          value={walletId}
-          onChange={(event) => setWalletId(Number(event.target.value))}
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-        >
-          {walletOptions.map((wallet) => (
-            <option key={wallet.id} value={wallet.id}>
-              {wallet.name}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-xs text-slate-500">
-          Incomes live on Checking, Credit Card, and Cash wallets.
-        </p>
-      </div>
+      <EntitySelect
+        id="recurring-income-wallet"
+        label="Wallet"
+        value={walletId}
+        onChange={setWalletId}
+        options={walletOptions.map((wallet) => ({ id: wallet.id, label: wallet.name }))}
+        entity="wallet"
+        onAdd={onAddWallet}
+        required
+      />
+      <p className="mt-1 text-xs text-slate-500">
+        Incomes live on Checking, Credit Card, and Cash wallets.
+      </p>
 
-      <div>
-        <label htmlFor="recurring-income-category" className="block text-sm font-medium text-slate-700">
-          Category (optional)
-        </label>
-        <select
-          id="recurring-income-category"
-          value={categoryId}
-          onChange={(event) =>
-            setCategoryId(event.target.value === '' ? '' : Number(event.target.value))
-          }
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-        >
-          <option value="">None</option>
-          {categoryOptions.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <EntitySelect
+        id="recurring-income-category"
+        label="Category (optional)"
+        value={categoryId}
+        onChange={setCategoryId}
+        options={categoryOptions.map((category) => ({ id: category.id, label: category.name }))}
+        entity="category"
+        onAdd={onAddCategory}
+      />
 
       <div>
         <span className="block text-sm font-medium text-slate-700">Repeats</span>

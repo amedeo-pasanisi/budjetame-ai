@@ -73,6 +73,8 @@ function renderForm(editing?: RecurringIncome) {
   const onSaved = vi.fn()
   const onDeleted = vi.fn()
   const onCancel = vi.fn()
+  const onAddCategory = vi.fn()
+  const onAddWallet = vi.fn()
   const view = render(
     <RecurringIncomeForm
       income={editing}
@@ -81,9 +83,13 @@ function renderForm(editing?: RecurringIncome) {
       onSaved={onSaved}
       onDeleted={onDeleted}
       onCancel={onCancel}
+      onAddCategory={onAddCategory}
+      categoryToSelect={null}
+      onAddWallet={onAddWallet}
+      walletToSelect={null}
     />,
   )
-  return { onSaved, onDeleted, onCancel, view }
+  return { onSaved, onDeleted, onCancel, onAddCategory, onAddWallet, view }
 }
 
 beforeEach(() => {

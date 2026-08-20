@@ -10,7 +10,9 @@ import {
   type RecurringIncome,
   type Wallet,
 } from './api'
+import { CategoryModal } from './CategoryModal'
 import { RecurringIncomeModal } from './RecurringIncomeModal'
+import { WalletModal } from './WalletModal'
 import { intervalText, sortByNextDue } from './recurringIncomes'
 
 /** The modal's draft: create (no income) or edit (an income). Null means the
@@ -37,6 +39,15 @@ export function RecurringIncomesScreen() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalDraft | null>(null)
+  // Inline entity creation (ADR-0013): the inner Category create modal,
+  // stacked on top of the form's modal, and the new Category it created —
+  // reported back to the open form so its field selects it.
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [categoryToSelect, setCategoryToSelect] = useState<number | null>(null)
+  // The inner Wallet create modal, same contract: restricted to the types
+  // the income form accepts (Checking, Credit Card, Cash — never Contact).
+  const [walletModalOpen, setWalletModalOpen] = useState(false)
+  const [walletToSelect, setWalletToSelect] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -62,6 +73,34 @@ export function RecurringIncomesScreen() {
     }
   }, [token])
 
+  // The inner Category modal's save (ADR-0013): add the Category to the
+  // list state (so the dropdown offers it again without a reload), close
+  // only the inner modal, and report the new id to the open form so the
+  // originating field selects it. The form's draft is untouched.
+  const handleCategoryCreated = (category: Category) => {
+    setCategories((current) => (current === null ? [category] : [...current, category]))
+    setCategoryToSelect(category.id)
+    setCategoryModalOpen(false)
+  }
+
+  // The inner Wallet modal's save (ADR-0013): add the Wallet to the list
+  // state (so the dropdown offers it again without a reload), close only
+  // the inner modal, and report the new id to the open form so the
+  // originating field selects it. The form's draft is untouched.
+  const handleWalletCreated = (wallet: Wallet) => {
+    setWallets((current) => [...current, wallet])
+    setWalletToSelect(wallet.id)
+    setWalletModalOpen(false)
+  }
+
+  // Closing the outer modal also clears the pending auto-selects: a stale
+  // id must not be re-applied when the form opens again later.
+  const closeModal = () => {
+    setModal(null)
+    setCategoryToSelect(null)
+    setWalletToSelect(null)
+  }
+
   const handleSaved = (income: RecurringIncome) => {
     setIncomes((current) => {
       if (current === null) {
@@ -73,14 +112,14 @@ export function RecurringIncomesScreen() {
           : [...current, income],
       )
     })
-    setModal(null)
+    closeModal()
   }
 
   const handleDeleted = (incomeId: number) => {
     setIncomes((current) =>
       current === null ? current : current.filter((income) => income.id !== incomeId),
     )
-    setModal(null)
+    closeModal()
   }
 
   // The summary line (issue #62): totals over the loaded incomes. Only shown
@@ -166,7 +205,27 @@ export function RecurringIncomesScreen() {
           categories={categories}
           onSaved={handleSaved}
           onDeleted={handleDeleted}
-          onClose={() => setModal(null)}
+          onClose={closeModal}
+          onAddCategory={() => setCategoryModalOpen(true)}
+          categoryToSelect={categoryToSelect}
+          onAddWallet={() => setWalletModalOpen(true)}
+          walletToSelect={walletToSelect}
+        />
+      )}
+
+      {categoryModalOpen && (
+        <CategoryModal
+          lockedType="income"
+          onSaved={handleCategoryCreated}
+          onClose={() => setCategoryModalOpen(false)}
+        />
+      )}
+
+      {walletModalOpen && (
+        <WalletModal
+          allowedTypes={['checking', 'credit_card', 'cash']}
+          onSaved={handleWalletCreated}
+          onClose={() => setWalletModalOpen(false)}
         />
       )}
     </>
