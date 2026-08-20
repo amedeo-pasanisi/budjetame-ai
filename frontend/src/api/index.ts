@@ -42,10 +42,12 @@ export {
 } from './transactions'
 
 export {
+  type BudgetView,
   type CategoryExpense,
   type DashboardSummary,
   type ExpenseTrend,
   type MonthBucket,
+  fetchBudget,
   fetchDashboardSummary,
   fetchExpenseTrend,
 } from './dashboard'

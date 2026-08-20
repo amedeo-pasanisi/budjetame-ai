@@ -62,6 +62,7 @@ vi.mock('./api', async () => {
     deleteTransaction: vi.fn(),
     fetchDashboardSummary: vi.fn(),
     fetchExpenseTrend: vi.fn(),
+    fetchBudget: vi.fn(),
     previewImport: vi.fn(),
     confirmImport: vi.fn(),
     validateImportRow: vi.fn(),
@@ -82,6 +83,7 @@ vi.mock('./MapPicker', () => ({
 }))
 
 import {
+  fetchBudget,
   fetchCategories,
   fetchDashboardSummary,
   fetchExpenseTrend,
@@ -96,6 +98,7 @@ const fetchCategoriesMock = vi.mocked(fetchCategories)
 const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchDashboardSummaryMock = vi.mocked(fetchDashboardSummary)
 const fetchExpenseTrendMock = vi.mocked(fetchExpenseTrend)
+const fetchBudgetMock = vi.mocked(fetchBudget)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 
@@ -154,6 +157,14 @@ beforeEach(() => {
     to_month: toMonth,
     months: [],
   }))
+  // The Budget card (issue #66): an all-zero month, hidden by the empty
+  // Recurring lists — this suite is about the shell, not the card.
+  fetchBudgetMock.mockResolvedValue({
+    month: '',
+    monthly_spendable: '0.00',
+    daily_allowance: '0.00',
+    spendable_today: '0.00',
+  })
 })
 
 afterEach(() => {

@@ -26,6 +26,12 @@ vi.mock('./api', () => ({
   fetchTransactions: vi.fn(),
   fetchDashboardSummary: vi.fn(),
   fetchExpenseTrend: vi.fn(),
+  fetchBudget: vi.fn().mockResolvedValue({
+    month: '',
+    monthly_spendable: '0.00',
+    daily_allowance: '0.00',
+    spendable_today: '0.00',
+  }),
   previewImport: vi.fn(),
   confirmImport: vi.fn(),
   validateImportRow: vi.fn(),

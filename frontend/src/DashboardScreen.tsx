@@ -2,9 +2,13 @@ import { useEffect, useState } from 'react'
 
 import {
   TOKEN_KEY,
+  fetchBudget,
   fetchDashboardSummary,
   fetchExpenseTrend,
+  fetchRecurringCosts,
+  fetchRecurringIncomes,
   formatEuros,
+  type BudgetView,
   type CategoryExpense,
   type DashboardSummary,
   type ExpenseTrend,
@@ -12,19 +16,26 @@ import {
 } from './api'
 import { todayInRome } from './transactions'
 
-/** The Dashboard: Net Worth, the reference month's Income vs Expenses and
- * expense pie, and a monthly expense trend over a user-picked range (T10,
- * T11, T12). All numbers come from the API — the frontend only renders
- * (spec decision #14): the bar chart's geometry and the month labels.
+/** The Dashboard: Net Worth, the Budget card for the current month, the
+ * reference month's Income vs Expenses and expense pie, and a monthly
+ * expense trend over a user-picked range (T10, T11, T12). All numbers come
+ * from the API — the frontend only renders (spec decision #14): the bar
+ * chart's geometry and the month labels.
  *
- * The reference-month selector drives the month-scoped cards; the trend card
- * has its own From/To range (US27, US28). */
+ * The reference-month selector drives the month-scoped cards; the Budget
+ * card always shows the current month (issue #66) and the trend card has
+ * its own From/To range (US27, US28). */
 export function DashboardScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const currentMonth = todayInRome().slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [budget, setBudget] = useState<BudgetView | null>(null)
+  const [budgetError, setBudgetError] = useState<string | null>(null)
+  // Null while unknown: the card only hides once both Recurring lists have
+  // loaded and proved the account has no definitions (issue #66).
+  const [hasDefinitions, setHasDefinitions] = useState<boolean | null>(null)
   const [trendFrom, setTrendFrom] = useState(() => monthsAgo(currentMonth, 5))
   const [trendTo, setTrendTo] = useState(currentMonth)
   const [trend, setTrend] = useState<ExpenseTrend | null>(null)
@@ -66,6 +77,38 @@ export function DashboardScreen() {
       cancelled = true
     }
   }, [token, month])
+
+  useEffect(() => {
+    let cancelled = false
+    // The Budget card always shows the current month (issue #66): unlike
+    // the summary, the endpoint takes no month parameter and the card
+    // ignores the reference-month selector — so this effect depends on the
+    // token only, and a month change never refetches it. A failed load
+    // must never look like an empty Budget, so the error is its own state.
+    setBudgetError(null)
+    fetchBudget(token)
+      .then((data) => {
+        if (!cancelled) setBudget(data)
+      })
+      .catch(() => {
+        if (!cancelled) setBudgetError('Could not load the budget.')
+      })
+    // The card hides entirely when the account has no Recurring definitions
+    // at all — an all-zero Budget can't tell "no definitions" from a month
+    // that nets to zero, so the Dashboard asks the two Recurring lists.
+    // Failure is silent and keeps the card visible: a failed load must
+    // never look like an empty Budget.
+    Promise.all([fetchRecurringCosts(token), fetchRecurringIncomes(token)])
+      .then(([costs, incomes]) => {
+        if (!cancelled) {
+          setHasDefinitions(costs.length > 0 || incomes.length > 0)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [token])
 
   useEffect(() => {
     let cancelled = false
@@ -115,6 +158,8 @@ export function DashboardScreen() {
         </p>
       </section>
 
+      <BudgetCard budget={budget} error={budgetError} hasDefinitions={hasDefinitions} />
+
       <div className="mt-4 flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-slate-700">Reference month</span>
         <input
@@ -149,6 +194,57 @@ export function DashboardScreen() {
   )
 }
 
+
+/** The Budget card (issue #66): Spendable Today for the current Europe/Rome
+ * month — the big number, the "X per day · Y this month" explanation line,
+ * and a small "you're X € over" note when the bucket is negative (the big
+ * number then shows 0: future accruals repay the debt). It ignores the
+ * reference-month selector and is hidden entirely when the account has no
+ * Recurring definitions at all — a "0,00 € per day" card would be noise.
+ * Everything is rendered from GET /dashboard/budget, no computation on the
+ * client; loading and error states match the other Dashboard cards, and a
+ * failed load never looks like an empty Budget. */
+function BudgetCard({
+  budget,
+  error,
+  hasDefinitions,
+}: {
+  budget: BudgetView | null
+  error: string | null
+  hasDefinitions: boolean | null
+}) {
+  if (hasDefinitions === false) {
+    return null
+  }
+  const negative = budget !== null && budget.spendable_today.startsWith('-')
+  return (
+    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      {error !== null ? (
+        <p className="text-sm text-red-600">{error}</p>
+      ) : budget === null ? (
+        <p className="text-sm text-slate-500">Loading…</p>
+      ) : (
+        <>
+          <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+            Spendable Today
+          </p>
+          <p className="mt-1 text-3xl font-semibold text-slate-900">
+            {negative ? formatEuros('0.00') : formatEuros(budget.spendable_today)}
+          </p>
+          {negative && (
+            <p className="mt-1 text-xs text-red-600">
+              You're {formatEuros(budget.spendable_today.slice(1))} over
+            </p>
+          )}
+          <p className="mt-1 text-xs text-slate-500">
+            {formatEuros(budget.daily_allowance)} per day ·{' '}
+            {formatEuros(budget.monthly_spendable)} this month
+          </p>
+        </>
+      )}
+    </section>
+  )
+}
 
 function MonthCard({ summary, month }: { summary: DashboardSummary; month: string }) {
   const income = Number.parseFloat(summary.income)

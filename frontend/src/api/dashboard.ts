@@ -30,6 +30,25 @@ export type ExpenseTrend = {
   months: MonthBucket[]
 }
 
+/** The Budget card (issue #66): the current Europe/Rome month's frame —
+ * deliberately no month parameter, the Budget is current-month-only by
+ * product decision. `spendable_today` is sent raw and may be negative;
+ * the card renders it as 0 until future accruals repay the debt. */
+export type BudgetView = {
+  month: string
+  monthly_spendable: string
+  daily_allowance: string
+  spendable_today: string
+}
+
+export async function fetchBudget(token: string): Promise<BudgetView> {
+  const response = await request('/dashboard/budget', {
+    token,
+    errorMessage: 'Could not load the budget',
+  })
+  return (await response.json()) as BudgetView
+}
+
 export async function fetchDashboardSummary(
   token: string,
   month?: string,
