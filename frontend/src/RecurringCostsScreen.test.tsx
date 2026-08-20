@@ -38,6 +38,7 @@ vi.mock('./api', async () => {
     fetchWallets: vi.fn(),
     fetchCategories: vi.fn(),
     createCategory: vi.fn(),
+    createWallet: vi.fn(),
   }
 })
 
@@ -45,6 +46,7 @@ import {
   ApiError,
   createCategory,
   createRecurringCost,
+  createWallet,
   deleteRecurringCost,
   fetchCategories,
   fetchRecurringCosts,
@@ -129,6 +131,7 @@ const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
 const createCategoryMock = vi.mocked(createCategory)
+const createWalletMock = vi.mocked(createWallet)
 
 beforeEach(() => {
   fetchRecurringCostsMock.mockResolvedValue(costs)
@@ -244,7 +247,7 @@ describe('RecurringCostsScreen create flow', () => {
     const walletSelect = within(dialog).getByLabelText('Wallet')
     expect(
       Array.from(walletSelect.querySelectorAll('option')).map((option) => option.textContent),
-    ).toEqual(['Intesa', 'Cash'])
+    ).toEqual(['Intesa', 'Cash', '＋ Add wallet…'])
 
     const categorySelect = within(dialog).getByLabelText('Category (optional)')
     expect(
@@ -591,6 +594,282 @@ describe('RecurringCostsScreen inline category creation (issue #68)', () => {
         '',
         1,
         expect.objectContaining({ categoryId: 6 }),
+      ),
+    )
+  })
+})
+
+describe('RecurringCostsScreen inline wallet creation (issue #69)', () => {
+  /** Opens the New recurring cost modal. */
+  const openCreateForm = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'New recurring cost' }))
+    return await screen.findByRole('dialog', { name: 'New recurring cost' })
+  }
+
+  /** The Wallet select's options, in order. */
+  const walletOptions = (dialog: HTMLElement) =>
+    Array.from(
+      within(dialog).getByLabelText('Wallet').querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  it('shows the sentinel as the last option, in create and edit modes', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const createDialog = await openCreateForm()
+    expect(walletOptions(createDialog)).toEqual([
+      'Intesa',
+      'Cash',
+      '＋ Add wallet…',
+    ])
+    fireEvent.click(within(createDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Edit mode carries the same sentinel.
+    const rows = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+    fireEvent.click(rows.find((row) => row.textContent?.includes('Rent')) as HTMLElement)
+    const editDialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
+    expect(walletOptions(editDialog)).toEqual([
+      'Intesa',
+      'Cash',
+      '＋ Add wallet…',
+    ])
+  })
+
+  it('shows the sentinel as the only row when no eligible wallets exist', async () => {
+    // Only ineligible wallets: a frozen one and a Contact one. The sentinel
+    // is the only row besides the empty state, so a wallet can still be
+    // created inline.
+    fetchWalletsMock.mockResolvedValue([
+      { id: 3, name: 'Frozen', type: 'checking', balance: '0.00', frozen: true, created_at: createdAt },
+      { id: 4, name: 'Marco', type: 'contact', balance: '0.00', frozen: false, created_at: createdAt },
+    ])
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    expect(walletOptions(dialog)).toEqual(['＋ Add wallet…'])
+  })
+
+  it('picking the sentinel opens the New wallet modal without Contact and reverts the dropdown', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    // A real selection first, so the revert is observable.
+    fireEvent.change(walletSelect, { target: { value: '2' } })
+    expect(walletSelect).toHaveValue('2')
+
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // The Type options are restricted to non-Contact wallets.
+    const typeSelect = within(walletDialog).getByLabelText('Type')
+    expect(
+      Array.from(typeSelect.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['Checking', 'Credit Card', 'Cash'])
+    // The dropdown reverted to its previous value; the outer draft is intact.
+    expect(walletSelect).toHaveValue('2')
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('')
+  })
+
+  it('the full flow — sentinel, create, auto-select, submit — carries the new wallet id', async () => {
+    createWalletMock.mockResolvedValue({
+      id: 7,
+      name: 'Revolut',
+      type: 'checking',
+      balance: '0.00',
+      frozen: false,
+      created_at: createdAt,
+    })
+    createRecurringCostMock.mockResolvedValue({
+      id: 9,
+      name: 'Gym',
+      amount: '45.00',
+      wallet_id: 7,
+      category_id: null,
+      interval_value: 1,
+      interval_unit: 'weeks',
+      start_date: null,
+      due_day: null,
+      due_month: null,
+      next_due_date: '2026-08-24',
+      next_unpaid_occurrence_date: '2026-08-24',
+      backlog_count: 1,
+      overdue: true,
+      created_at: createdAt,
+    })
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Gym' } })
+    fireEvent.change(within(dialog).getByLabelText('Amount'), { target: { value: '45.00' } })
+
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    // The wallet is created with a non-Contact type (the default Checking).
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '',
+      }),
+    )
+    // Only the inner modal closes; the form and its draft survive.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New recurring cost' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Gym')
+    expect(within(dialog).getByLabelText('Amount')).toHaveValue(45)
+    // The new wallet is selected and offered in the dropdown.
+    await waitFor(() => expect(walletSelect).toHaveValue('7'))
+    expect(walletOptions(dialog)).toEqual([
+      'Intesa',
+      'Cash',
+      'Revolut',
+      '＋ Add wallet…',
+    ])
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+
+    // Submitting the outer form sends the new wallet's id.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create recurring cost' }))
+    await waitFor(() =>
+      expect(createRecurringCostMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({ name: 'Gym', walletId: 7 }),
+      ),
+    )
+  })
+
+  it('Cancel, backdrop tap, and Escape close only the wallet modal and leave the form draft intact', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Gym' } })
+
+    // Opens the stacked Wallet modal on top of the open form.
+    const openWalletModal = async () => {
+      fireEvent.change(within(dialog).getByLabelText('Wallet'), {
+        target: { value: SENTINEL_VALUE },
+      })
+      return await screen.findByRole('dialog', { name: 'New wallet' })
+    }
+    const formSurvives = () => {
+      expect(screen.getByRole('dialog', { name: 'New recurring cost' })).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('Name')).toHaveValue('Gym')
+    }
+
+    // Cancel closes only the inner modal.
+    let walletDialog = await openWalletModal()
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // Backdrop tap closes only the inner modal.
+    walletDialog = await openWalletModal()
+    fireEvent.click(walletDialog.previousElementSibling as Element)
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // One Escape closes only the topmost modal; a second closes the form.
+    walletDialog = await openWalletModal()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(createWalletMock).not.toHaveBeenCalled()
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+  })
+
+  it('a duplicate wallet name shows the validation error inside the modal and selects nothing', async () => {
+    createWalletMock.mockRejectedValue(new ApiError('Conflict', 409))
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const dialog = await openCreateForm()
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    fireEvent.change(walletSelect, { target: { value: '2' } })
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Intesa' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    expect(
+      await within(walletDialog).findByText('A wallet with this name already exists.'),
+    ).toBeInTheDocument()
+    // The modal stays open and nothing is selected; the outer draft is intact.
+    expect(screen.getByRole('dialog', { name: 'New wallet' })).toBeInTheDocument()
+    expect(walletSelect).toHaveValue('2')
+
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New recurring cost' })).toBeInTheDocument()
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+  })
+
+  it('works in edit mode: the inline Wallet is auto-selected and the edit carries its id', async () => {
+    createWalletMock.mockResolvedValue({
+      id: 7,
+      name: 'Revolut',
+      type: 'checking',
+      balance: '0.00',
+      frozen: false,
+      created_at: createdAt,
+    })
+    updateRecurringCostMock.mockResolvedValue({ ...costs[0], wallet_id: 7 })
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const rows = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+    fireEvent.click(rows.find((row) => row.textContent?.includes('Rent')) as HTMLElement)
+    const dialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    expect(walletSelect).toHaveValue('1')
+
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    await waitFor(() => expect(createWalletMock).toHaveBeenCalled())
+    // The dropdown reverted to the edited cost's Wallet, then the new one
+    // took its place; the rest of the draft (amount) is untouched.
+    await waitFor(() => expect(walletSelect).toHaveValue('7'))
+    expect(within(dialog).getByLabelText('Amount')).toHaveValue(850)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(updateRecurringCostMock).toHaveBeenCalledWith(
+        '',
+        1,
+        expect.objectContaining({ walletId: 7 }),
       ),
     )
   })

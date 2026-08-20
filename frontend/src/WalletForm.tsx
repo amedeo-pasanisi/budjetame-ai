@@ -25,6 +25,11 @@ const WALLET_TYPE_OPTIONS = (Object.entries(TYPE_LABELS) as [WalletType, string]
 
 type WalletFormProps = {
   wallet?: Wallet
+  /** Eligibility locking (ADR-0013): when set, the Type selector only
+   * offers these types — create mode only, for inline creation from a form
+   * whose field only accepts some types (e.g. costs accept Checking, Credit
+   * Card, and Cash, never Contact). */
+  allowedTypes?: WalletType[]
   onSaved: (wallet: Wallet) => void
   onFrozen?: (walletId: number) => void
   onCancel: () => void
@@ -33,13 +38,19 @@ type WalletFormProps = {
 /** The create/edit/freeze form for a Wallet, hosted in the modal
  * shell (WalletModal) (issue #49). The form itself is unchanged from the
  * inline days: Name, plus a Type selector and an Opening balance only while
- * creating, and the tap-again freeze confirmation only while editing. Cancel
- * — like the shell's backdrop and Escape — abandons the draft without
- * saving. */
-export function WalletForm({ wallet, onSaved, onFrozen, onCancel }: WalletFormProps) {
+ * creating, and the tap-again freeze confirmation only while editing. When
+ * `allowedTypes` is set, the Type selector is restricted to those types
+ * (ADR-0013), so an inline wallet created from a form field can never be
+ * of a type the field would reject. Cancel — like the shell's backdrop and
+ * Escape — abandons the draft without saving. */
+export function WalletForm({ wallet, allowedTypes, onSaved, onFrozen, onCancel }: WalletFormProps) {
   const editing = wallet !== undefined
   const [name, setName] = useState(wallet?.name ?? '')
-  const [type, setType] = useState<WalletType>('checking')
+  const [type, setType] = useState<WalletType>(
+    wallet?.type ?? (allowedTypes !== undefined && !allowedTypes.includes('checking')
+      ? allowedTypes[0]
+      : 'checking'),
+  )
   const [openingBalance, setOpeningBalance] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -144,12 +155,20 @@ export function WalletForm({ wallet, onSaved, onFrozen, onCancel }: WalletFormPr
               onChange={(event) => setType(event.target.value as WalletType)}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
             >
-              {WALLET_TYPE_OPTIONS.map((option) => (
+              {WALLET_TYPE_OPTIONS.filter(
+                (option) => allowedTypes === undefined || allowedTypes.includes(option.value),
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
+            {allowedTypes !== undefined && (
+              <p className="mt-1 text-xs text-slate-500">
+                {allowedTypes.map((type) => TYPE_LABELS[type]).join(', ')} · fixed for this
+                form
+              </p>
+            )}
           </div>
           <div>
             <label htmlFor="opening-balance" className="block text-sm font-medium text-slate-700">

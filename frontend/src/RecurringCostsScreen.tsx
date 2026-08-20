@@ -12,6 +12,7 @@ import {
 } from './api'
 import { CategoryModal } from './CategoryModal'
 import { RecurringCostModal } from './RecurringCostModal'
+import { WalletModal } from './WalletModal'
 import { intervalText, sortByNextDue } from './recurringCosts'
 
 /** The modal's draft: create (no cost) or edit (a cost). Null means the
@@ -42,6 +43,10 @@ export function RecurringCostsScreen() {
   // reported back to the open form so its field selects it.
   const [categoryModalOpen, setCategoryModalOpen] = useState(false)
   const [categoryToSelect, setCategoryToSelect] = useState<number | null>(null)
+  // The inner Wallet create modal, same contract: restricted to the types
+  // the cost form accepts (Checking, Credit Card, Cash — never Contact).
+  const [walletModalOpen, setWalletModalOpen] = useState(false)
+  const [walletToSelect, setWalletToSelect] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -77,11 +82,22 @@ export function RecurringCostsScreen() {
     setCategoryModalOpen(false)
   }
 
-  // Closing the outer modal also clears the pending auto-select: a stale id
-  // must not be re-applied when the form opens again later.
+  // The inner Wallet modal's save (ADR-0013): add the Wallet to the list
+  // state (so the dropdown offers it again without a reload), close only
+  // the inner modal, and report the new id to the open form so the
+  // originating field selects it. The form's draft is untouched.
+  const handleWalletCreated = (wallet: Wallet) => {
+    setWallets((current) => [...current, wallet])
+    setWalletToSelect(wallet.id)
+    setWalletModalOpen(false)
+  }
+
+  // Closing the outer modal also clears the pending auto-selects: a stale
+  // id must not be re-applied when the form opens again later.
   const closeModal = () => {
     setModal(null)
     setCategoryToSelect(null)
+    setWalletToSelect(null)
   }
 
   const handleSaved = (cost: RecurringCost) => {
@@ -191,6 +207,8 @@ export function RecurringCostsScreen() {
           onClose={closeModal}
           onAddCategory={() => setCategoryModalOpen(true)}
           categoryToSelect={categoryToSelect}
+          onAddWallet={() => setWalletModalOpen(true)}
+          walletToSelect={walletToSelect}
         />
       )}
 
@@ -199,6 +217,14 @@ export function RecurringCostsScreen() {
           lockedType="expense"
           onSaved={handleCategoryCreated}
           onClose={() => setCategoryModalOpen(false)}
+        />
+      )}
+
+      {walletModalOpen && (
+        <WalletModal
+          allowedTypes={['checking', 'credit_card', 'cash']}
+          onSaved={handleWalletCreated}
+          onClose={() => setWalletModalOpen(false)}
         />
       )}
     </>

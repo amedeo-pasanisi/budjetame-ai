@@ -15,6 +15,12 @@ type RecurringCostModalProps = {
   /** The freshly created Category's id, reported back so the form's field
    * selects it. */
   categoryToSelect: number | null
+  /** Inline entity creation (ADR-0013): opens the Wallet create modal
+   * hosted by the screen, stacked on top of this one. */
+  onAddWallet: () => void
+  /** The freshly created Wallet's id, reported back so the form's field
+   * selects it. */
+  walletToSelect: number | null
 }
 
 /** The create/edit Recurring Cost form inside the shared modal shell
@@ -30,6 +36,8 @@ export function RecurringCostModal({
   onClose,
   onAddCategory,
   categoryToSelect,
+  onAddWallet,
+  walletToSelect,
 }: RecurringCostModalProps) {
   const editing = cost !== undefined
   return (
@@ -44,6 +52,8 @@ export function RecurringCostModal({
         onCancel={onClose}
         onAddCategory={onAddCategory}
         categoryToSelect={categoryToSelect}
+        onAddWallet={onAddWallet}
+        walletToSelect={walletToSelect}
       />
     </ModalShell>
   )
