@@ -276,11 +276,12 @@ class TransactionUpdate(BaseModel):
 
 
 class CategoryExpense(BaseModel):
-    """One slice of the Dashboard's expense pie (T11): a Category's expenses
-    in the reference month. `category_id` is null for the "Uncategorized"
-    slice — expenses whose Category was deleted (spec decision #10) — and then
-    `color` is null too: the frontend renders a neutral color for it. The
-    slices always sum to the month's total expenses."""
+    """One slice of the Dashboard's category pies (T11): a Category's
+    Expenses or Incomes in the reference month. `category_id` is null for
+    the "Uncategorized" slice — Transactions whose Category was deleted
+    (spec decision #10) — and then `color` is null too: the frontend renders
+    a neutral color for it. The slices always sum to the month's total for
+    the pie's side."""
 
     category_id: int | None
     name: str
@@ -300,13 +301,15 @@ class DashboardSummary(BaseModel):
     reference month's (default: the current Europe/Rome month) Income and
     Expense totals. Opening Balance Transactions never count toward the
     statistics; Transfers are excluded by construction. `expenses_by_category`
-    is the expense pie for the same month (T11)."""
+    is the expense pie and `incomes_by_category` the income pie for the same
+    month (T11) — the frontend toggles between them."""
 
     net_worth: Decimal
     month: str
     income: Decimal
     expenses: Decimal
     expenses_by_category: list[CategoryExpense]
+    incomes_by_category: list[CategoryExpense]
 
     @field_validator("net_worth", "income", "expenses")
     @classmethod
@@ -315,22 +318,25 @@ class DashboardSummary(BaseModel):
 
 
 class MonthBucket(BaseModel):
-    """One bucket of the expense trend (T12): a Europe/Rome month and the
-    total expenses recorded in it."""
+    """One bucket of a Dashboard trend (T12): a Europe/Rome month and the
+    total Expenses (`kind` expense) or Incomes (`kind` income) recorded in
+    it."""
 
     month: str
-    expenses: Decimal
+    amount: Decimal
 
-    @field_validator("expenses")
+    @field_validator("amount")
     @classmethod
     def _amount_in_euros(cls, value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.01"))
 
 
-class ExpenseTrend(BaseModel):
-    """The expense trend over an inclusive month range (T12): one bucket per
-    month, oldest first, zero-filled for months with no expenses, bucketed in
-    Europe/Rome server-side (US28)."""
+class Trend(BaseModel):
+    """A monthly trend over an inclusive month range (T12): one bucket per
+    month, oldest first, zero-filled for months with no Transactions of the
+    trend's kind, bucketed in Europe/Rome server-side (US28). `expense-trend`
+    serves Expenses and `income-trend` Incomes — same shape, the frontend
+    toggles between them."""
 
     from_month: str
     to_month: str
@@ -548,8 +554,6 @@ class RecurringCostCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=80)
     amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
-    wallet_id: int
-    category_id: int | None = None
     interval_value: int = Field(ge=1)
     interval_unit: IntervalUnit
     start_date: str | None = None
@@ -569,18 +573,16 @@ class RecurringCostCreate(BaseModel):
 
 class RecurringCostUpdate(BaseModel):
     """Edit a Recurring Cost (issue #56). Every field is editable — name,
-    amount, Wallet, Category, interval, start date, due-date override — and
-    follows the TransactionUpdate contract: a field present in the payload is
-    applied even when null (clearing it); a field absent is untouched. The
-    service re-validates the resulting override combination against the
-    stored definition."""
+    amount, interval, start date, due-date override — and follows the
+    TransactionUpdate contract: a field present in the payload is applied
+    even when null (clearing it); a field absent is untouched. The service
+    re-validates the resulting override combination against the stored
+    definition."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
     amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
-    wallet_id: int | None = None
-    category_id: int | None = None
     interval_value: int | None = Field(default=None, ge=1)
     interval_unit: IntervalUnit | None = None
     start_date: str | None = None
@@ -620,8 +622,6 @@ class RecurringCostOut(BaseModel):
     id: int
     name: str
     amount: Decimal
-    wallet_id: int
-    category_id: int | None
     interval_value: int
     interval_unit: IntervalUnit
     start_date: str | None
@@ -647,16 +647,13 @@ class RecurringIncomeCreate(BaseModel):
     `due_day`/`due_month` are the optional due-date override — a day-of-month
     for month intervals, a month+day for year intervals, and never set for
     day/week intervals (the per-unit combination is enforced by the service,
-    which sees the same rules as update's merged state). The optional
-    Category is income-only.
+    which sees the same rules as update's merged state).
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=80)
     amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
-    wallet_id: int
-    category_id: int | None = None
     interval_value: int = Field(ge=1)
     interval_unit: IntervalUnit
     start_date: str | None = None
@@ -676,19 +673,16 @@ class RecurringIncomeCreate(BaseModel):
 
 class RecurringIncomeUpdate(BaseModel):
     """Edit a Recurring Income (issue #60), mirroring RecurringCostUpdate
-    (ADR-0011). Every field is editable — name, amount, Wallet, Category,
-    interval, start date, due-date override — and follows the
-    TransactionUpdate contract: a field present in the payload is applied
-    even when null (clearing it); a field absent is untouched. The service
-    re-validates the resulting override combination against the stored
-    definition."""
+    (ADR-0011). Every field is editable — name, amount, interval, start
+    date, due-date override — and follows the TransactionUpdate contract: a
+    field present in the payload is applied even when null (clearing it); a
+    field absent is untouched. The service re-validates the resulting
+    override combination against the stored definition."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
     amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
-    wallet_id: int | None = None
-    category_id: int | None = None
     interval_value: int | None = Field(default=None, ge=1)
     interval_unit: IntervalUnit | None = None
     start_date: str | None = None
@@ -729,8 +723,6 @@ class RecurringIncomeOut(BaseModel):
     id: int
     name: str
     amount: Decimal
-    wallet_id: int
-    category_id: int | None
     interval_value: int
     interval_unit: IntervalUnit
     start_date: str | None

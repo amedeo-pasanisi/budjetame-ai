@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { RecurringCostForm } from './RecurringCostForm'
-import type { Category, RecurringCost, Wallet } from './api'
+import type { RecurringCost } from './api'
 
 vi.mock('./api', async () => {
   class ApiError extends Error {
@@ -37,21 +37,10 @@ import { createRecurringCost, deleteRecurringCost, updateRecurringCost } from '.
 
 const createdAt = '2026-08-19T10:00:00Z'
 
-const wallets: Wallet[] = [
-  { id: 1, name: 'Intesa', type: 'checking', balance: '0.00', frozen: false, created_at: createdAt },
-]
-
-const categories: Category[] = [
-  { id: 1, name: 'Housing', type: 'expense', icon: null, color: '#ef4444', created_at: createdAt },
-  { id: 2, name: 'Salary', type: 'income', icon: null, color: '#10b981', created_at: createdAt },
-]
-
 const cost: RecurringCost = {
   id: 1,
   name: 'Rent',
   amount: '850.00',
-  wallet_id: 1,
-  category_id: 1,
   interval_value: 1,
   interval_unit: 'months',
   start_date: '2030-03-15',
@@ -72,23 +61,15 @@ function renderForm(editing?: RecurringCost) {
   const onSaved = vi.fn()
   const onDeleted = vi.fn()
   const onCancel = vi.fn()
-  const onAddCategory = vi.fn()
-  const onAddWallet = vi.fn()
   const view = render(
     <RecurringCostForm
       cost={editing}
-      wallets={wallets}
-      categories={categories}
       onSaved={onSaved}
       onDeleted={onDeleted}
       onCancel={onCancel}
-      onAddCategory={onAddCategory}
-      categoryToSelect={null}
-      onAddWallet={onAddWallet}
-      walletToSelect={null}
     />,
   )
-  return { onSaved, onDeleted, onCancel, onAddCategory, onAddWallet, view }
+  return { onSaved, onDeleted, onCancel, view }
 }
 
 beforeEach(() => {
@@ -187,8 +168,6 @@ describe('RecurringCostForm edit and delete', () => {
 
     expect(screen.getByLabelText('Name')).toHaveValue('Rent')
     expect(screen.getByLabelText('Amount')).toHaveValue(850)
-    expect(screen.getByLabelText('Wallet')).toHaveValue('1')
-    expect(screen.getByLabelText('Category (optional)')).toHaveValue('1')
     expect(screen.getByLabelText('Every N')).toHaveValue(1)
     expect(screen.getByLabelText('Interval unit')).toHaveValue('months')
     expect(screen.getByLabelText('Start date (optional)')).toHaveValue('2030-03-15')
@@ -206,8 +185,6 @@ describe('RecurringCostForm edit and delete', () => {
     expect(updateRecurringCostMock.mock.calls[0][2]).toMatchObject({
       name: 'Rent',
       amount: '900.00',
-      walletId: 1,
-      categoryId: 1,
       intervalValue: 1,
       intervalUnit: 'months',
       startDate: '2030-03-15',

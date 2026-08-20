@@ -3,10 +3,8 @@ repeat at a fixed interval, mirroring Recurring Costs (ADR-0011). The list
 exposes each income's next due date, derived on the fly (ADR-0010); the
 screen sorts by it. The Backlog and the Overdue flag (issue #62) ride on
 the list too, mirroring #58: the "N unpaid" badge the Incomes side shows
-comes from here. Guards: names unique per Account case-insensitively;
-creation only on active, non-Contact Wallets; only income-only Categories
-attachable; all data scoped to the Account (foreign data is a 403,
-ADR-0003)."""
+comes from here. Guards: names unique per Account case-insensitively; all
+data scoped to the Account (foreign data is a 403, ADR-0003)."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -51,8 +49,6 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
         id=income.id,
         name=income.name,
         amount=income.amount,
-        wallet_id=income.wallet_id,
-        category_id=income.category_id,
         interval_value=income.interval_value,
         interval_unit=IntervalUnit(income.interval_unit),
         start_date=income.start_date.isoformat() if income.start_date is not None else None,
@@ -106,16 +102,12 @@ def create_recurring_income(
             account.id,
             name=payload.name,
             amount=payload.amount,
-            wallet_id=payload.wallet_id,
-            category_id=payload.category_id,
             interval_value=payload.interval_value,
             interval_unit=payload.interval_unit,
             start_date=payload.start_date,
             due_day=payload.due_day,
             due_month=payload.due_month,
         )
-    except scoping.NotOwned:
-        raise HTTPException(status_code=403, detail="Wallet or Category not found") from None
     except recurring_service.RecurringIncomeRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringIncomeNameTaken, IntegrityError) as cause:
@@ -137,8 +129,6 @@ def update_recurring_income(
             income,
             changes=payload.model_dump(exclude_unset=True),
         )
-    except scoping.NotOwned:
-        raise HTTPException(status_code=403, detail="Wallet or Category not found") from None
     except recurring_service.RecurringIncomeRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringIncomeNameTaken, IntegrityError) as cause:

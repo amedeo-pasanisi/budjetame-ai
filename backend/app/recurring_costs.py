@@ -41,8 +41,6 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
         id=cost.id,
         name=cost.name,
         amount=cost.amount,
-        wallet_id=cost.wallet_id,
-        category_id=cost.category_id,
         interval_value=cost.interval_value,
         interval_unit=IntervalUnit(cost.interval_unit),
         start_date=cost.start_date.isoformat() if cost.start_date is not None else None,
@@ -96,16 +94,12 @@ def create_recurring_cost(
             account.id,
             name=payload.name,
             amount=payload.amount,
-            wallet_id=payload.wallet_id,
-            category_id=payload.category_id,
             interval_value=payload.interval_value,
             interval_unit=payload.interval_unit,
             start_date=payload.start_date,
             due_day=payload.due_day,
             due_month=payload.due_month,
         )
-    except scoping.NotOwned:
-        raise HTTPException(status_code=403, detail="Wallet or Category not found") from None
     except recurring_service.RecurringCostRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringCostNameTaken, IntegrityError) as cause:
@@ -127,8 +121,6 @@ def update_recurring_cost(
             cost,
             changes=payload.model_dump(exclude_unset=True),
         )
-    except scoping.NotOwned:
-        raise HTTPException(status_code=403, detail="Wallet or Category not found") from None
     except recurring_service.RecurringCostRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringCostNameTaken, IntegrityError) as cause:

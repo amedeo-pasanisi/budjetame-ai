@@ -128,7 +128,7 @@ def _mid_previous_month() -> str:
 
 
 async def _create_recurring_cost(
-    client: AsyncClient, token: str, wallet_id: int, **overrides: object
+    client: AsyncClient, token: str, **overrides: object
 ) -> int:
     """A monthly cost started on the 15th of last month, due on the 1st —
     exactly one Occurrence due in the current month. Tests override what
@@ -136,7 +136,6 @@ async def _create_recurring_cost(
     payload: dict[str, object] = {
         "name": f"Budget cost {uuid4().hex[:8]}",
         "amount": "500.00",
-        "wallet_id": wallet_id,
         "interval_value": 1,
         "interval_unit": "months",
         "start_date": _mid_previous_month(),
@@ -151,14 +150,13 @@ async def _create_recurring_cost(
 
 
 async def _create_recurring_income(
-    client: AsyncClient, token: str, wallet_id: int, **overrides: object
+    client: AsyncClient, token: str, **overrides: object
 ) -> int:
     """A monthly income started on the 1st of this month — exactly one
     Occurrence due in the current month (k=0, on the 1st)."""
     payload: dict[str, object] = {
         "name": f"Budget income {uuid4().hex[:8]}",
         "amount": "3000.00",
-        "wallet_id": wallet_id,
         "interval_value": 1,
         "interval_unit": "months",
         "start_date": _first_day_of_current_month(),
@@ -254,10 +252,10 @@ async def test_monthly_spendable_sums_the_occurrences_due_in_the_month(
         # One income Occurrence due this month (start = the 1st) and one
         # cost Occurrence due on the 1st via its day-of-month override.
         await _create_recurring_income(
-            client, token, wallet, name="Budget Sum Salary", amount="3000.00"
+            client, token, name="Budget Sum Salary", amount="3000.00"
         )
         await _create_recurring_cost(
-            client, token, wallet, name="Budget Sum Rent", amount="500.00"
+            client, token, name="Budget Sum Rent", amount="500.00"
         )
 
         budget = await _budget(client, token)
@@ -289,7 +287,7 @@ async def test_an_occurrence_counts_in_its_due_month_not_the_payment_month(
         token = await _login(client, email=email, password="whatever")
         wallet = await _create_wallet(client, token, "Due Date Wallet")
         cost = await _create_recurring_cost(
-            client, token, wallet, name="Due Date Rent", amount="500.00"
+            client, token, name="Due Date Rent", amount="500.00"
         )
         # The payment is recorded next month — late, from this month's
         # point of view. The link pays the oldest Unpaid Occurrence (last
@@ -335,8 +333,7 @@ async def test_all_interval_units_and_overrides_count_by_due_date(
         await _create_recurring_cost(
             client,
             token,
-            wallet,
-            name="Intervals Daily",
+                        name="Intervals Daily",
             amount="1.00",
             interval_value=1,
             interval_unit="days",
@@ -348,8 +345,7 @@ async def test_all_interval_units_and_overrides_count_by_due_date(
         await _create_recurring_cost(
             client,
             token,
-            wallet,
-            name="Intervals Weekly",
+                        name="Intervals Weekly",
             amount="2.00",
             interval_value=1,
             interval_unit="weeks",
@@ -362,8 +358,7 @@ async def test_all_interval_units_and_overrides_count_by_due_date(
         await _create_recurring_cost(
             client,
             token,
-            wallet,
-            name="Intervals Clamped Month",
+                        name="Intervals Clamped Month",
             amount="4.00",
             due_day=31,
         )
@@ -372,8 +367,7 @@ async def test_all_interval_units_and_overrides_count_by_due_date(
         await _create_recurring_income(
             client,
             token,
-            wallet,
-            name="Intervals Clamped Year",
+                        name="Intervals Clamped Year",
             amount="8.00",
             interval_unit="years",
             start_date=f"{_current_month()}-10",
@@ -417,7 +411,6 @@ async def test_dashboard_budget_is_scoped_to_the_account(
                     account_id=account_id,
                     name="Their Rent",
                     amount="500.00",
-                    wallet_id=wallet.id,
                     interval_value=1,
                     interval_unit="months",
                 )
@@ -454,7 +447,7 @@ async def test_spendable_today_drains_only_discretionary_expenses(
     token = await _login(client)
     before = await _budget(client, token)
     wallet = await _create_wallet(client, token, "Drain Wallet")
-    cost = await _create_recurring_cost(client, token, wallet, name="Drain Rent")
+    cost = await _create_recurring_cost(client, token, name="Drain Rent")
     # The linked Expense pays the cost: Spendable Today must not move, but
     # the cost's Occurrence still counts in the Monthly Spendable.
     await _create_expense(
@@ -571,10 +564,10 @@ async def test_a_negative_month_floors_the_daily_allowance_at_zero(
         token = await _login(client, email=email, password="whatever")
         wallet = await _create_wallet(client, token, "Negative Month Wallet")
         await _create_recurring_income(
-            client, token, wallet, name="Neg Month Salary", amount="1000.00"
+            client, token, name="Neg Month Salary", amount="1000.00"
         )
         await _create_recurring_cost(
-            client, token, wallet, name="Neg Month Rent", amount="2000.00"
+            client, token, name="Neg Month Rent", amount="2000.00"
         )
 
         budget = await _budget(client, token)
@@ -602,7 +595,7 @@ async def test_editing_a_recurring_definition_recomputes_the_month(
     token = await _login(client)
     before = await _budget(client, token)
     wallet = await _create_wallet(client, token, "Edit Def Wallet")
-    cost = await _create_recurring_cost(client, token, wallet, name="Edit Def Rent")
+    cost = await _create_recurring_cost(client, token, name="Edit Def Rent")
     after_create = await _budget(client, token)
     assert Decimal(after_create["monthly_spendable"]) == Decimal(
         before["monthly_spendable"]

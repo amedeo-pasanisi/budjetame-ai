@@ -45,7 +45,9 @@ export function RecurringScreen() {
           Incomes
         </button>
       </div>
-      {side === 'costs' ? <RecurringCostsScreen /> : <RecurringIncomesScreen />}
+      <div className="mt-4">
+        {side === 'costs' ? <RecurringCostsScreen /> : <RecurringIncomesScreen />}
+      </div>
     </>
   )
 }

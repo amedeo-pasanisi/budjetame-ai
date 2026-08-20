@@ -11,8 +11,6 @@ export type RecurringIncome = {
   id: number
   name: string
   amount: string
-  wallet_id: number
-  category_id: number | null
   interval_value: number
   interval_unit: IntervalUnit
   /** The stored start date ("YYYY-MM-DD"); null when unset — the creation
@@ -38,12 +36,12 @@ export type RecurringIncome = {
 
 /** The fields the create/edit form edits. Null means "unset": an unset start
  * date defaults to the creation date; the due-date override is dropped when
- * the unit or an incomplete pair doesn't carry it. */
+ * the unit or an incomplete pair doesn't carry it. The Wallet and Category
+ * of a linked Income are chosen at Transaction creation time — the
+ * definition itself never carries them. */
 export type RecurringIncomeInput = {
   name: string
   amount: string
-  walletId: number
-  categoryId: number | null
   intervalValue: number
   intervalUnit: IntervalUnit
   startDate: string | null
@@ -55,8 +53,6 @@ function toPayload(input: RecurringIncomeInput) {
   return {
     name: input.name,
     amount: input.amount,
-    wallet_id: input.walletId,
-    category_id: input.categoryId,
     interval_value: input.intervalValue,
     interval_unit: input.intervalUnit,
     start_date: input.startDate,

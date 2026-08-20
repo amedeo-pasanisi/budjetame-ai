@@ -77,32 +77,6 @@ def _validate_override(
             )
 
 
-def _ensure_wallet(session: Session, account_id: int, wallet_id: int) -> None:
-    """The Wallet must belong to the Account (foreign data is
-    indistinguishable from absent data — scoping raises NotOwned, mapped to
-    403 by the HTTP layer) and be active and non-Contact: incomes behave like
-    Income Transactions (CONTEXT.md)."""
-    wallet = scoping.owned_or_raise(session, Wallet, account_id, wallet_id)
-    if wallet.frozen:
-        raise RecurringIncomeRuleError("A Recurring Income's Wallet must be active")
-    if wallet.type == WalletType.CONTACT.value:
-        raise RecurringIncomeRuleError("Recurring Incomes cannot use Contact Wallets")
-
-
-def _ensure_category(
-    session: Session, account_id: int, category_id: int | None
-) -> None:
-    """The optional Category must belong to the Account and be income-only:
-    Recurring Incomes are income-side only (CONTEXT.md)."""
-    if category_id is None:
-        return
-    category = scoping.owned_or_raise(session, Category, account_id, category_id)
-    if category.type != CategoryType.INCOME.value:
-        raise RecurringIncomeRuleError(
-            "A Recurring Income's Category must be income-only"
-        )
-
-
 def _parse_start_date(value: str | None) -> date | None:
     """The start date as a Europe/Rome calendar day (the schema validated the
     "YYYY-MM-DD" shape), or None — meaning the creation date."""
@@ -115,8 +89,6 @@ def create_recurring_income(
     *,
     name: str,
     amount,
-    wallet_id: int,
-    category_id: int | None,
     interval_value: int,
     interval_unit: IntervalUnit,
     start_date: str | None,
@@ -125,15 +97,11 @@ def create_recurring_income(
 ) -> RecurringIncome:
     if scoping.name_is_taken(session, RecurringIncome, account_id, name):
         raise RecurringIncomeNameTaken(name)
-    _ensure_wallet(session, account_id, wallet_id)
-    _ensure_category(session, account_id, category_id)
     _validate_override(interval_unit.value, due_day, due_month)
     income = RecurringIncome(
         account_id=account_id,
         name=name,
         amount=amount,
-        wallet_id=wallet_id,
-        category_id=category_id,
         interval_value=interval_value,
         interval_unit=interval_unit.value,
         start_date=_parse_start_date(start_date),
@@ -169,14 +137,8 @@ def update_recurring_income(
             session, RecurringIncome, income.account_id, name, exclude_id=income.id
         ):
             raise RecurringIncomeNameTaken(name)
-    if "wallet_id" in changes:
-        if changes["wallet_id"] is None:
-            raise RecurringIncomeRuleError("wallet_id is required")
-        _ensure_wallet(session, income.account_id, changes["wallet_id"])
-    if "category_id" in changes:
-        _ensure_category(session, income.account_id, changes["category_id"])
 
-    for field in ("name", "amount", "wallet_id", "category_id", "interval_value", "due_day", "due_month"):
+    for field in ("name", "amount", "interval_value", "due_day", "due_month"):
         if field in changes:
             setattr(income, field, changes[field])
     if "interval_unit" in changes:

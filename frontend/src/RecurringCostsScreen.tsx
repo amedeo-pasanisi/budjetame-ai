@@ -2,17 +2,11 @@ import { useEffect, useState } from 'react'
 
 import {
   TOKEN_KEY,
-  fetchCategories,
   fetchRecurringCosts,
-  fetchWallets,
   formatEuros,
-  type Category,
   type RecurringCost,
-  type Wallet,
 } from './api'
-import { CategoryModal } from './CategoryModal'
 import { RecurringCostModal } from './RecurringCostModal'
-import { WalletModal } from './WalletModal'
 import { intervalText, sortByNextDue } from './recurringCosts'
 
 /** The modal's draft: create (no cost) or edit (a cost). Null means the
@@ -26,43 +20,21 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; cost: RecurringCost }
  * the Backlog badge ("N unpaid", issue #58) and the Overdue mark. The
  * summary line on top — "X costs overdue · N unpaid occurrences" — answers
  * the original question at a glance. Create, edit, and delete live here, in
- * a modal; Wallets and Categories are fetched too, so the form's selectors
- * are ready the moment it opens. The badge, the mark, and the summary are
- * all derived state from the API: they refresh whenever the list reloads
- * (tab switch after a link change) or a saved definition comes back from
- * the modal. */
+ * a modal. The badge, the mark, and the summary are all derived state from
+ * the API: they refresh whenever the list reloads (tab switch after a link
+ * change) or a saved definition comes back from the modal. */
 export function RecurringCostsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [costs, setCosts] = useState<RecurringCost[] | null>(null)
-  const [wallets, setWallets] = useState<Wallet[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalDraft | null>(null)
-  // Inline entity creation (ADR-0013): the inner Category create modal,
-  // stacked on top of the form's modal, and the new Category it created —
-  // reported back to the open form so its field selects it.
-  const [categoryModalOpen, setCategoryModalOpen] = useState(false)
-  const [categoryToSelect, setCategoryToSelect] = useState<number | null>(null)
-  // The inner Wallet create modal, same contract: restricted to the types
-  // the cost form accepts (Checking, Credit Card, Cash — never Contact).
-  const [walletModalOpen, setWalletModalOpen] = useState(false)
-  const [walletToSelect, setWalletToSelect] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    // The list and the form's selectors load together; any failure is one
-    // load error. The form can still open — it just shows fewer choices
-    // (or a disabled save with no wallets) until a reload.
-    Promise.all([
-      fetchRecurringCosts(token),
-      fetchWallets(token, true),
-      fetchCategories(token),
-    ])
-      .then(([loadedCosts, loadedWallets, loadedCategories]) => {
+    fetchRecurringCosts(token)
+      .then((loadedCosts) => {
         if (cancelled) return
         setCosts(sortByNextDue(loadedCosts))
-        setWallets(loadedWallets)
-        setCategories(loadedCategories)
       })
       .catch(() => {
         if (!cancelled) setLoadError('Could not load your recurring costs.')
@@ -72,32 +44,8 @@ export function RecurringCostsScreen() {
     }
   }, [token])
 
-  // The inner Category modal's save (ADR-0013): add the Category to the
-  // list state (so the dropdown offers it again without a reload), close
-  // only the inner modal, and report the new id to the open form so the
-  // originating field selects it. The form's draft is untouched.
-  const handleCategoryCreated = (category: Category) => {
-    setCategories((current) => (current === null ? [category] : [...current, category]))
-    setCategoryToSelect(category.id)
-    setCategoryModalOpen(false)
-  }
-
-  // The inner Wallet modal's save (ADR-0013): add the Wallet to the list
-  // state (so the dropdown offers it again without a reload), close only
-  // the inner modal, and report the new id to the open form so the
-  // originating field selects it. The form's draft is untouched.
-  const handleWalletCreated = (wallet: Wallet) => {
-    setWallets((current) => [...current, wallet])
-    setWalletToSelect(wallet.id)
-    setWalletModalOpen(false)
-  }
-
-  // Closing the outer modal also clears the pending auto-selects: a stale
-  // id must not be re-applied when the form opens again later.
   const closeModal = () => {
     setModal(null)
-    setCategoryToSelect(null)
-    setWalletToSelect(null)
   }
 
   const handleSaved = (cost: RecurringCost) => {
@@ -200,31 +148,9 @@ export function RecurringCostsScreen() {
       {modal !== null && (
         <RecurringCostModal
           cost={modal.kind === 'edit' ? modal.cost : undefined}
-          wallets={wallets}
-          categories={categories}
           onSaved={handleSaved}
           onDeleted={handleDeleted}
           onClose={closeModal}
-          onAddCategory={() => setCategoryModalOpen(true)}
-          categoryToSelect={categoryToSelect}
-          onAddWallet={() => setWalletModalOpen(true)}
-          walletToSelect={walletToSelect}
-        />
-      )}
-
-      {categoryModalOpen && (
-        <CategoryModal
-          lockedType="expense"
-          onSaved={handleCategoryCreated}
-          onClose={() => setCategoryModalOpen(false)}
-        />
-      )}
-
-      {walletModalOpen && (
-        <WalletModal
-          allowedTypes={['checking', 'credit_card', 'cash']}
-          onSaved={handleWalletCreated}
-          onClose={() => setWalletModalOpen(false)}
         />
       )}
     </>

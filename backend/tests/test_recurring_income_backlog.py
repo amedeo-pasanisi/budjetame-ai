@@ -69,7 +69,6 @@ async def _create_wallet(client: AsyncClient, token: str, name: str) -> int:
 async def _create_income(
     client: AsyncClient,
     token: str,
-    wallet_id: int,
     *,
     name: str,
     start_date: str,
@@ -80,7 +79,6 @@ async def _create_income(
     payload: dict[str, object] = {
         "name": name,
         "amount": "10.00",
-        "wallet_id": wallet_id,
         "interval_value": interval_value,
         "interval_unit": interval_unit,
         "start_date": start_date,
@@ -138,7 +136,7 @@ async def test_a_daily_income_missed_for_ten_days_reads_ten_unpaid(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Backlog Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Backlog Freelance", start_date=_days(-9)
+        client, token, name="Backlog Freelance", start_date=_days(-9)
     )
 
     state = await _income_state(client, token, income_id)
@@ -155,7 +153,7 @@ async def test_receiving_one_occurrence_drops_the_count_to_nine(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Receive One Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Receive One Freelance", start_date=_days(-9)
+        client, token, name="Receive One Freelance", start_date=_days(-9)
     )
 
     first_pin = await _link_income(client, token, wallet_id, income_id)
@@ -176,7 +174,7 @@ async def test_receiving_the_whole_backlog_clears_overdue(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Clear Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Clear Freelance", start_date=_days(-9)
+        client, token, name="Clear Freelance", start_date=_days(-9)
     )
 
     for _ in range(10):
@@ -197,7 +195,7 @@ async def test_future_occurrences_are_never_counted_as_unpaid(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Future Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Future Rent", start_date=_days(5)
+        client, token, name="Future Rent", start_date=_days(5)
     )
 
     state = await _income_state(client, token, income_id)
@@ -220,7 +218,7 @@ async def test_an_occurrence_due_today_counts_in_the_backlog(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Today Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Today Freelance", start_date=_days(0)
+        client, token, name="Today Freelance", start_date=_days(0)
     )
 
     state = await _income_state(client, token, income_id)
@@ -246,8 +244,7 @@ async def test_the_override_shifts_which_occurrences_are_due(
     income_id = await _create_income(
         client,
         token,
-        wallet_id,
-        name="Override Rent",
+                name="Override Rent",
         start_date=_month_15(3),
         interval_unit="months",
         due_day=1,
@@ -277,7 +274,7 @@ async def test_editing_interval_or_start_date_never_unpays(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Edit Backlog Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Edit Backlog", start_date=_days(-4)
+        client, token, name="Edit Backlog", start_date=_days(-4)
     )
     pin = await _link_income(client, token, wallet_id, income_id)
     assert pin == _days(-4)
@@ -328,10 +325,10 @@ async def test_the_list_exposes_the_state_read_per_income(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B62 Summary Wallet")
     behind_id = await _create_income(
-        client, token, wallet_id, name="Summary Behind", start_date=_days(-2)
+        client, token, name="Summary Behind", start_date=_days(-2)
     )
     ahead_id = await _create_income(
-        client, token, wallet_id, name="Summary Ahead", start_date=_days(30),
+        client, token, name="Summary Ahead", start_date=_days(30),
         interval_unit="months",
     )
 

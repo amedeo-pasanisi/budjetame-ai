@@ -235,8 +235,6 @@ const rentCost: RecurringCost = {
   id: 11,
   name: 'Rent',
   amount: '850.00',
-  wallet_id: 1,
-  category_id: null,
   interval_value: 1,
   interval_unit: 'months',
   start_date: null,
@@ -254,8 +252,6 @@ const salaryIncome: RecurringIncome = {
   id: 12,
   name: 'Salary',
   amount: '2100.00',
-  wallet_id: 1,
-  category_id: null,
   interval_value: 1,
   interval_unit: 'months',
   start_date: null,
@@ -1486,18 +1482,10 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     // The dropdown reverted to its previous value; the outer draft is intact.
     expect(costSelect).toHaveValue('11')
     expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
-    // The recurring form's own Wallet and Category selects carry their
-    // sentinels too (ADR-0013's depth-3 chain: transaction → cost → wallet).
-    expect(
-      Array.from(
-        within(costDialog).getByLabelText('Wallet').querySelectorAll('option'),
-      ).map((option) => option.textContent),
-    ).toEqual(['Cash', '＋ Add wallet…'])
-    expect(
-      Array.from(
-        within(costDialog).getByLabelText('Category (optional)').querySelectorAll('option'),
-      ).map((option) => option.textContent),
-    ).toEqual(['None', '＋ Add category…'])
+    // The recurring form's own Name field is the first field — it has no
+    // Wallet or Category of its own to carry sentinels for (the definition
+    // never carries them).
+    expect(within(costDialog).getByLabelText('Name')).toBeInTheDocument()
   })
 
   it('the full flow — sentinel, create, auto-select, submit — carries the new cost id and shows the paid occurrence', async () => {
@@ -1528,7 +1516,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     await waitFor(() =>
       expect(createRecurringCostMock).toHaveBeenCalledWith(
         '',
-        expect.objectContaining({ name: 'Rent', amount: '850.00', walletId: 1 }),
+        expect.objectContaining({ name: 'Rent', amount: '850.00' }),
       ),
     )
     // Only the recurring modal closes; the form and its draft survive.
@@ -1595,7 +1583,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     await waitFor(() =>
       expect(createRecurringIncomeMock).toHaveBeenCalledWith(
         '',
-        expect.objectContaining({ name: 'Salary', amount: '2100.00', walletId: 1 }),
+        expect.objectContaining({ name: 'Salary', amount: '2100.00' }),
       ),
     )
     // Auto-selected in the Income form; the draft and the helper survive.
@@ -1672,93 +1660,6 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     expect(createTransactionMock).not.toHaveBeenCalled()
   })
 
-  it('a wallet and a category created inside the recurring cost modal land in its fields, not the transaction form\'s (depth-3 chain)', async () => {
-    fetchCategoriesMock.mockResolvedValue([foodCategory])
-    createWalletMock.mockResolvedValue({
-      id: 7,
-      name: 'Revolut',
-      type: 'checking',
-      balance: '0.00',
-      frozen: false,
-      created_at: '2026-01-01T00:00:00Z',
-    })
-    createCategoryMock.mockResolvedValue(groceryCategory)
-    render(<Harness />)
-    await screen.findByText(/Coffee/)
-
-    const dialog = await openCreateForm()
-    // The transaction form's Wallet and Category keep a draft value each,
-    // to prove the depth-3 saves never touch them.
-    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
-      target: { value: '12.50' },
-    })
-
-    fireEvent.change(within(dialog).getByLabelText('Recurring Cost'), {
-      target: { value: SENTINEL_VALUE },
-    })
-    const costDialog = await screen.findByRole('dialog', { name: 'New recurring cost' })
-
-    // Wallet first: the sentinel inside the recurring form opens the New
-    // wallet modal, restricted to non-Contact types.
-    fireEvent.change(within(costDialog).getByLabelText('Wallet'), {
-      target: { value: SENTINEL_VALUE },
-    })
-    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
-    const typeSelect = within(walletDialog).getByLabelText('Type')
-    expect(
-      Array.from(typeSelect.querySelectorAll('option')).map((option) => option.textContent),
-    ).toEqual(['Checking', 'Credit Card', 'Cash'])
-    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
-      target: { value: 'Revolut' },
-    })
-    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
-
-    // The new wallet lands in the recurring form's Wallet field only; the
-    // transaction form's Wallet stays Cash.
-    await waitFor(() =>
-      expect(within(costDialog).getByLabelText('Wallet')).toHaveValue('7'),
-    )
-    expect(within(dialog).getByLabelText('Wallet')).toHaveValue('1')
-
-    // Category next: the recurring form's sentinel opens the New category
-    // modal locked to Expense, and the save lands in its Category field.
-    fireEvent.change(within(costDialog).getByLabelText('Category (optional)'), {
-      target: { value: SENTINEL_VALUE },
-    })
-    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
-    expect(
-      within(categoryDialog).getByText('Expense · fixed for this form'),
-    ).toBeInTheDocument()
-    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
-      target: { value: 'Groceries' },
-    })
-    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
-
-    await waitFor(() =>
-      expect(within(costDialog).getByLabelText('Category (optional)')).toHaveValue('5'),
-    )
-    // The transaction form's Category field is untouched (still None).
-    expect(within(dialog).getByLabelText('Category')).toHaveValue('')
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12.5)
-    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-
-    // Completing the recurring form creates the definition and auto-selects
-    // it in the transaction form.
-    fireEvent.change(within(costDialog).getByLabelText('Name'), {
-      target: { value: 'Rent' },
-    })
-    fireEvent.change(within(costDialog).getByLabelText('Amount'), {
-      target: { value: '850.00' },
-    })
-    fireEvent.click(
-      within(costDialog).getByRole('button', { name: 'Create recurring cost' }),
-    )
-    await waitFor(() =>
-      expect(within(dialog).getByLabelText('Recurring Cost')).toHaveValue('11'),
-    )
-    expect(createTransactionMock).not.toHaveBeenCalled()
-  })
-
   it('works in edit mode: the inline Recurring Cost is auto-selected and the edit carries its id', async () => {
     fetchRecurringCostsMock.mockResolvedValue([])
     updateTransactionMock.mockResolvedValue({ ...baseTransaction, recurring_cost_id: 11 })
@@ -1801,54 +1702,5 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
   })
 })
 
-describe('TransactionsScreen recurring-modal routing regressions (issue #73)', () => {
-  it('a cancelled depth-3 wallet pick does not reroute a later transaction-form wallet save', async () => {
-    createWalletMock.mockResolvedValue({
-      id: 7,
-      name: 'Revolut',
-      type: 'checking',
-      balance: '0.00',
-      frozen: false,
-      created_at: '2026-01-01T00:00:00Z',
-    })
-    render(<Harness />)
-    await screen.findByText(/Coffee/)
 
-    fireEvent.click(screen.getByRole('button', { name: 'New transaction' }))
-    const dialog = await screen.findByRole('dialog', { name: 'New transaction' })
 
-    // Open the depth-3 chain, then abandon it at each level.
-    fireEvent.change(within(dialog).getByLabelText('Recurring Cost'), {
-      target: { value: SENTINEL_VALUE },
-    })
-    const costDialog = await screen.findByRole('dialog', { name: 'New recurring cost' })
-    fireEvent.change(within(costDialog).getByLabelText('Wallet'), {
-      target: { value: SENTINEL_VALUE },
-    })
-    let walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
-    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
-    )
-    fireEvent.click(within(costDialog).getByRole('button', { name: 'Cancel' }))
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('dialog', { name: 'New recurring cost' }),
-      ).not.toBeInTheDocument(),
-    )
-
-    // Now the transaction form's own sentinel: the new wallet must land in
-    // its Wallet field, not the stale recurring-form routing.
-    fireEvent.change(within(dialog).getByLabelText('Wallet'), {
-      target: { value: SENTINEL_VALUE },
-    })
-    walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
-    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
-      target: { value: 'Revolut' },
-    })
-    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
-
-    await waitFor(() => expect(within(dialog).getByLabelText('Wallet')).toHaveValue('7'))
-    expect(createWalletMock).toHaveBeenCalledTimes(1)
-  })
-})

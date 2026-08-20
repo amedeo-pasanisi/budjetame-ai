@@ -68,7 +68,6 @@ async def _create_wallet(client: AsyncClient, token: str, name: str) -> int:
 async def _create_cost(
     client: AsyncClient,
     token: str,
-    wallet_id: int,
     *,
     name: str,
     start_date: str,
@@ -79,7 +78,6 @@ async def _create_cost(
     payload: dict[str, object] = {
         "name": name,
         "amount": "10.00",
-        "wallet_id": wallet_id,
         "interval_value": interval_value,
         "interval_unit": interval_unit,
         "start_date": start_date,
@@ -137,7 +135,7 @@ async def test_a_daily_cost_missed_for_ten_days_reads_ten_unpaid(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Backlog Wallet")
     cost_id = await _create_cost(
-        client, token, wallet_id, name="Backlog Coffee", start_date=_days(-9)
+        client, token, name="Backlog Coffee", start_date=_days(-9)
     )
 
     state = await _cost_state(client, token, cost_id)
@@ -154,7 +152,7 @@ async def test_paying_one_occurrence_drops_the_count_to_nine(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Pay One Wallet")
     cost_id = await _create_cost(
-        client, token, wallet_id, name="Pay One Coffee", start_date=_days(-9)
+        client, token, name="Pay One Coffee", start_date=_days(-9)
     )
 
     first_pin = await _link_expense(client, token, wallet_id, cost_id)
@@ -175,7 +173,7 @@ async def test_paying_the_whole_backlog_clears_overdue(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Clear Wallet")
     cost_id = await _create_cost(
-        client, token, wallet_id, name="Clear Coffee", start_date=_days(-9)
+        client, token, name="Clear Coffee", start_date=_days(-9)
     )
 
     for _ in range(10):
@@ -196,7 +194,7 @@ async def test_future_occurrences_are_never_counted_as_unpaid(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Future Wallet")
     cost_id = await _create_cost(
-        client, token, wallet_id, name="Future Rent", start_date=_days(5)
+        client, token, name="Future Rent", start_date=_days(5)
     )
 
     state = await _cost_state(client, token, cost_id)
@@ -219,7 +217,7 @@ async def test_an_occurrence_due_today_counts_in_the_backlog(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Today Wallet")
     cost_id = await _create_cost(
-        client, token, wallet_id, name="Today Coffee", start_date=_days(0)
+        client, token, name="Today Coffee", start_date=_days(0)
     )
 
     state = await _cost_state(client, token, cost_id)
@@ -244,8 +242,7 @@ async def test_the_override_shifts_which_occurrences_are_due(
     cost_id = await _create_cost(
         client,
         token,
-        wallet_id,
-        name="Override Rent",
+                name="Override Rent",
         start_date=_month_15(3),
         interval_unit="months",
         due_day=1,
@@ -275,7 +272,7 @@ async def test_editing_interval_or_start_date_never_unpays(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Edit Backlog Wallet")
     cost_id = await _create_cost(
-        client, token, wallet_id, name="Edit Backlog", start_date=_days(-4)
+        client, token, name="Edit Backlog", start_date=_days(-4)
     )
     pin = await _link_expense(client, token, wallet_id, cost_id)
     assert pin == _days(-4)
@@ -326,10 +323,10 @@ async def test_the_list_exposes_the_state_read_per_cost(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Summary Wallet")
     behind_id = await _create_cost(
-        client, token, wallet_id, name="Summary Behind", start_date=_days(-2)
+        client, token, name="Summary Behind", start_date=_days(-2)
     )
     ahead_id = await _create_cost(
-        client, token, wallet_id, name="Summary Ahead", start_date=_days(30),
+        client, token, name="Summary Ahead", start_date=_days(30),
         interval_unit="months",
     )
 

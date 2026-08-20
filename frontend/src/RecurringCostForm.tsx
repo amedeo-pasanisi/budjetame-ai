@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -7,13 +7,10 @@ import {
   createRecurringCost,
   deleteRecurringCost,
   updateRecurringCost,
-  type Category,
   type IntervalUnit,
   type RecurringCost,
   type RecurringCostInput,
-  type Wallet,
 } from './api'
-import { EntitySelect } from './EntitySelect'
 
 const UNIT_OPTIONS: { value: IntervalUnit; label: string }[] = [
   { value: 'days', label: 'Days' },
@@ -27,68 +24,30 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1)
 
 type RecurringCostFormProps = {
   cost?: RecurringCost
-  wallets: Wallet[]
-  categories: Category[]
   onSaved: (cost: RecurringCost) => void
   onDeleted?: (costId: number) => void
   onCancel: () => void
-  /** Inline entity creation (ADR-0013): opens the Category create modal
-   * hosted by the screen. */
-  onAddCategory: () => void
-  /** The freshly created Category the screen reports back: the field selects
-   * it, leaving the rest of the draft untouched. */
-  categoryToSelect: number | null
-  /** Inline entity creation (ADR-0013): opens the Wallet create modal
-   * hosted by the screen. */
-  onAddWallet: () => void
-  /** The freshly created Wallet the screen reports back: the field selects
-   * it, leaving the rest of the draft untouched. */
-  walletToSelect: number | null
 }
 
 /** The create/edit/delete form for a Recurring Cost, hosted in the modal
- * shell (RecurringCostModal). Fields: Name, Amount, Wallet (active,
- * non-Contact only — costs behave like Expenses, with the inline
- * "＋ Add wallet…" sentinel, ADR-0013), an optional expense-only
- * Category (with its own inline sentinel), the interval
+ * shell (RecurringCostModal). Fields: Name, Amount, the interval
  * (every N days/weeks/months/years), an optional
  * start date (unset defaults to the creation date), and the due-date
  * override that follows the interval unit — a day-of-month for months, a
- * month+day for years, nothing for days/weeks (ADR-0010). Cancel — like the
- * shell's backdrop and Escape — abandons the draft without saving. */
+ * month+day for years, nothing for days/weeks (ADR-0010). The Wallet and
+ * Category of a linked Expense are chosen at Transaction creation time, so
+ * the definition itself never carries them. Cancel — like the shell's
+ * backdrop and Escape — abandons the draft without saving. */
 export function RecurringCostForm({
   cost,
-  wallets,
-  categories,
   onSaved,
   onDeleted,
   onCancel,
-  onAddCategory,
-  categoryToSelect,
-  onAddWallet,
-  walletToSelect,
 }: RecurringCostFormProps) {
   const editing = cost !== undefined
-  // Costs live on active, non-Contact Wallets only (CONTEXT.md). While
-  // editing, the cost's own Wallet stays selectable even if it no longer
-  // qualifies, so the backend guard — not a silent re-point — decides.
-  const eligibleWallets = wallets.filter(
-    (wallet) => !wallet.frozen && wallet.type !== 'contact',
-  )
-  const walletOptions =
-    editing && cost !== undefined && !eligibleWallets.some((w) => w.id === cost.wallet_id)
-      ? [wallets.find((w) => w.id === cost.wallet_id), ...eligibleWallets].filter(
-          (w): w is Wallet => w !== undefined,
-        )
-      : eligibleWallets
-  const categoryOptions = categories.filter((category) => category.type === 'expense')
 
   const [name, setName] = useState(cost?.name ?? '')
   const [amount, setAmount] = useState(cost?.amount ?? '')
-  const [walletId, setWalletId] = useState<number | ''>(
-    cost?.wallet_id ?? walletOptions[0]?.id ?? '',
-  )
-  const [categoryId, setCategoryId] = useState<number | ''>(cost?.category_id ?? '')
   const [intervalValue, setIntervalValue] = useState(
     String(cost?.interval_value ?? 1),
   )
@@ -102,24 +61,6 @@ export function RecurringCostForm({
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
-  // Inline entity creation (ADR-0013): when the screen's inner Category
-  // modal saves, it reports the new Category's id here so this field
-  // selects it — the only field that changes, the rest of the draft stays.
-  useEffect(() => {
-    if (categoryToSelect !== null) {
-      setCategoryId(categoryToSelect)
-    }
-  }, [categoryToSelect])
-
-  // The Wallet select's inline creation, same contract as the Category
-  // field above: the new Wallet's id arrives from the screen and takes the
-  // field, leaving the rest of the draft untouched.
-  useEffect(() => {
-    if (walletToSelect !== null) {
-      setWalletId(walletToSelect)
-    }
-  }, [walletToSelect])
-
   // The year interval's override is a month+day pair: half a pair blocks the
   // save instead of silently dropping the override.
   const yearOverrideIncomplete =
@@ -129,7 +70,6 @@ export function RecurringCostForm({
   const canSave =
     name.trim() !== '' &&
     amountNumber > 0 &&
-    walletId !== '' &&
     intervalNumber >= 1 &&
     !yearOverrideIncomplete
 
@@ -147,8 +87,6 @@ export function RecurringCostForm({
     return {
       name: name.trim(),
       amount,
-      walletId: walletId === '' ? 0 : walletId,
-      categoryId: categoryId === '' ? null : categoryId,
       intervalValue: intervalNumber,
       intervalUnit,
       startDate: startDate === '' ? null : startDate,
@@ -246,30 +184,6 @@ export function RecurringCostForm({
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
       </div>
-
-      <EntitySelect
-        id="recurring-cost-wallet"
-        label="Wallet"
-        value={walletId}
-        onChange={setWalletId}
-        options={walletOptions.map((wallet) => ({ id: wallet.id, label: wallet.name }))}
-        entity="wallet"
-        onAdd={onAddWallet}
-        required
-      />
-      <p className="mt-1 text-xs text-slate-500">
-        Costs live on Checking, Credit Card, and Cash wallets.
-      </p>
-
-      <EntitySelect
-        id="recurring-cost-category"
-        label="Category (optional)"
-        value={categoryId}
-        onChange={setCategoryId}
-        options={categoryOptions.map((category) => ({ id: category.id, label: category.name }))}
-        entity="category"
-        onAdd={onAddCategory}
-      />
 
       <div>
         <span className="block text-sm font-medium text-slate-700">Repeats</span>

@@ -52,7 +52,7 @@ async def _create_wallet(
 
 
 async def _create_income(
-    client: AsyncClient, token: str, wallet_id: int, **overrides: object
+    client: AsyncClient, token: str, **overrides: object
 ) -> int:
     """A monthly Recurring Income starting 2030-03-01; tests override what
     they exercise. The Occurrences are 2030-03-01, 2030-04-01, 2030-05-01,
@@ -60,7 +60,6 @@ async def _create_income(
     payload: dict[str, object] = {
         "name": "Salary",
         "amount": "2100.00",
-        "wallet_id": wallet_id,
         "interval_value": 1,
         "interval_unit": "months",
         "start_date": "2030-03-01",
@@ -115,7 +114,7 @@ async def test_linked_income_pays_the_oldest_unpaid_occurrence(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Link Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Link Salary")
+    income_id = await _create_income(client, token, name="Inc Link Salary")
 
     # Each new link pays the oldest Unpaid Occurrence: the sequence is
     # consumed in order, 2030-03-01, 2030-04-01, 2030-05-01.
@@ -133,7 +132,7 @@ async def test_link_receives_ahead_of_the_transaction_date(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Ahead Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Ahead Salary")
+    income_id = await _create_income(client, token, name="Inc Ahead Salary")
 
     # The Income is dated before the first Occurrence (receiving early): the
     # link still pays the oldest Unpaid Occurrence, 2030-03-01.
@@ -146,7 +145,7 @@ async def test_link_receives_ahead_of_the_transaction_date(
 async def test_transaction_reads_expose_the_link(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Read Link Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Read Salary")
+    income_id = await _create_income(client, token, name="Inc Read Salary")
     created = await _create_linked_income(client, token, wallet_id, income_id)
 
     items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
@@ -160,7 +159,7 @@ async def test_editing_the_date_does_not_reassign_the_pin(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Pin Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Pin Salary")
+    income_id = await _create_income(client, token, name="Inc Pin Salary")
     first = await _create_linked_income(client, token, wallet_id, income_id)
 
     # A later date edit keeps the pin: the Transaction still covers the
@@ -179,7 +178,7 @@ async def test_editing_the_date_does_not_reassign_the_pin(
 async def test_editing_other_fields_keeps_the_pin(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Pin Fields Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Pin Fields")
+    income_id = await _create_income(client, token, name="Inc Pin Fields")
     first = await _create_linked_income(client, token, wallet_id, income_id)
 
     response = await client.patch(
@@ -195,7 +194,7 @@ async def test_editing_other_fields_keeps_the_pin(client: AsyncClient) -> None:
 async def test_unlinking_frees_the_occurrence(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Unlink Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Unlink Salary")
+    income_id = await _create_income(client, token, name="Inc Unlink Salary")
     first = await _create_linked_income(client, token, wallet_id, income_id)
     await _create_linked_income(client, token, wallet_id, income_id)
 
@@ -215,7 +214,7 @@ async def test_unlinking_frees_the_occurrence(client: AsyncClient) -> None:
 async def test_relinking_pays_the_freed_occurrence(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Relink Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Relink Salary")
+    income_id = await _create_income(client, token, name="Inc Relink Salary")
     first = await _create_linked_income(client, token, wallet_id, income_id)
     second = await _create_linked_income(client, token, wallet_id, income_id)
     assert second["occurrence_date"] == "2030-04-01"
@@ -242,8 +241,8 @@ async def test_switching_income_pays_the_new_incomes_oldest_unpaid(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Switch Wallet")
-    first_income = await _create_income(client, token, wallet_id, name="Inc First")
-    second_income = await _create_income(client, token, wallet_id, name="Inc Second")
+    first_income = await _create_income(client, token, name="Inc First")
+    second_income = await _create_income(client, token, name="Inc Second")
     linked = await _create_linked_income(client, token, wallet_id, first_income)
     assert linked["occurrence_date"] == "2030-03-01"
 
@@ -266,7 +265,7 @@ async def test_deleting_a_linked_income_frees_the_occurrence(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Delete Link Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Delete Salary")
+    income_id = await _create_income(client, token, name="Inc Delete Salary")
     first = await _create_linked_income(client, token, wallet_id, income_id)
     await _create_linked_income(client, token, wallet_id, income_id)
 
@@ -281,7 +280,7 @@ async def test_deleting_a_linked_income_frees_the_occurrence(
 async def test_deleting_a_recurring_income_severs_links(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Sever Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Sever Salary")
+    income_id = await _create_income(client, token, name="Inc Sever Salary")
     linked = await _create_linked_income(client, token, wallet_id, income_id)
 
     response = await client.delete(
@@ -315,7 +314,7 @@ async def test_expense_and_transfer_reject_a_link(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Reject Link Wallet")
     contact_id = await _create_wallet(client, token, "Inc Reject Link Contact", "contact")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Reject Salary")
+    income_id = await _create_income(client, token, name="Inc Reject Salary")
 
     expense = await client.post(
         "/transactions",
@@ -351,7 +350,7 @@ async def test_editing_rejects_a_link_on_expense_and_transfer(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Edit Reject Wallet")
     contact_id = await _create_wallet(client, token, "Inc Edit Reject Contact", "contact")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Edit Reject")
+    income_id = await _create_income(client, token, name="Inc Edit Reject")
 
     expense = await client.post(
         "/transactions",
@@ -404,7 +403,6 @@ async def test_foreign_or_missing_income_link_is_rejected(
                 account_id=account_id,
                 name="Foreign Income",
                 amount="10.00",
-                wallet_id=foreign_wallet.id,
                 interval_value=1,
                 interval_unit="months",
                 start_date=None,
@@ -438,7 +436,7 @@ async def test_recurring_incomes_list_exposes_the_next_unpaid_occurrence(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Picker Wallet")
-    income_id = await _create_income(client, token, wallet_id, name="Inc Picker Salary")
+    income_id = await _create_income(client, token, name="Inc Picker Salary")
 
     async def picker_date() -> str:
         incomes = (await client.get("/recurring-incomes", headers=_auth(token))).json()
@@ -460,7 +458,7 @@ async def test_the_pin_survives_income_definition_edits(client: AsyncClient) -> 
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Definition Edit Wallet")
     income_id = await _create_income(
-        client, token, wallet_id, name="Inc Definition Edit Salary"
+        client, token, name="Inc Definition Edit Salary"
     )
     linked = await _create_linked_income(client, token, wallet_id, income_id)
 

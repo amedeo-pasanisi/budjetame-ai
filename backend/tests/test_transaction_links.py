@@ -50,14 +50,13 @@ async def _create_wallet(
 
 
 async def _create_cost(
-    client: AsyncClient, token: str, wallet_id: int, **overrides: object
+    client: AsyncClient, token: str, **overrides: object
 ) -> int:
     """A monthly Recurring Cost starting 2030-03-01; tests override what they
     exercise. The Occurrences are 2030-03-01, 2030-04-01, 2030-05-01, ..."""
     payload: dict[str, object] = {
         "name": "Rent",
         "amount": "850.00",
-        "wallet_id": wallet_id,
         "interval_value": 1,
         "interval_unit": "months",
         "start_date": "2030-03-01",
@@ -112,7 +111,7 @@ async def test_linked_expense_pays_the_oldest_unpaid_occurrence(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Link Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Link Rent")
+    cost_id = await _create_cost(client, token, name="Link Rent")
 
     # Each new link pays the oldest Unpaid Occurrence: the sequence is
     # consumed in order, 2030-03-01, 2030-04-01, 2030-05-01.
@@ -128,7 +127,7 @@ async def test_linked_expense_pays_the_oldest_unpaid_occurrence(
 async def test_link_pays_ahead_of_the_transaction_date(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Ahead Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Ahead Rent")
+    cost_id = await _create_cost(client, token, name="Ahead Rent")
 
     # The Expense is dated before the first Occurrence (paying ahead): the
     # link still pays the oldest Unpaid Occurrence, 2030-03-01.
@@ -141,7 +140,7 @@ async def test_link_pays_ahead_of_the_transaction_date(client: AsyncClient) -> N
 async def test_transaction_reads_expose_the_link(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Read Link Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Read Link Rent")
+    cost_id = await _create_cost(client, token, name="Read Link Rent")
     created = await _create_linked_expense(client, token, wallet_id, cost_id)
 
     items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
@@ -155,7 +154,7 @@ async def test_editing_the_date_does_not_reassign_the_pin(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Pin Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Pin Rent")
+    cost_id = await _create_cost(client, token, name="Pin Rent")
     first = await _create_linked_expense(client, token, wallet_id, cost_id)
 
     # A later date edit keeps the pin: the Transaction still covers the
@@ -174,7 +173,7 @@ async def test_editing_the_date_does_not_reassign_the_pin(
 async def test_editing_other_fields_keeps_the_pin(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Pin Fields Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Pin Fields Rent")
+    cost_id = await _create_cost(client, token, name="Pin Fields Rent")
     first = await _create_linked_expense(client, token, wallet_id, cost_id)
 
     response = await client.patch(
@@ -190,7 +189,7 @@ async def test_editing_other_fields_keeps_the_pin(client: AsyncClient) -> None:
 async def test_unlinking_frees_the_occurrence(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Unlink Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Unlink Rent")
+    cost_id = await _create_cost(client, token, name="Unlink Rent")
     first = await _create_linked_expense(client, token, wallet_id, cost_id)
     await _create_linked_expense(client, token, wallet_id, cost_id)
 
@@ -210,7 +209,7 @@ async def test_unlinking_frees_the_occurrence(client: AsyncClient) -> None:
 async def test_relinking_pays_the_freed_occurrence(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Relink Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Relink Rent")
+    cost_id = await _create_cost(client, token, name="Relink Rent")
     first = await _create_linked_expense(client, token, wallet_id, cost_id)
     second = await _create_linked_expense(client, token, wallet_id, cost_id)
     assert second["occurrence_date"] == "2030-04-01"
@@ -237,8 +236,8 @@ async def test_switching_cost_pays_the_new_costs_oldest_unpaid(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Switch Cost Wallet")
-    first_cost = await _create_cost(client, token, wallet_id, name="First")
-    second_cost = await _create_cost(client, token, wallet_id, name="Second")
+    first_cost = await _create_cost(client, token, name="First")
+    second_cost = await _create_cost(client, token, name="Second")
     linked = await _create_linked_expense(client, token, wallet_id, first_cost)
     assert linked["occurrence_date"] == "2030-03-01"
 
@@ -261,7 +260,7 @@ async def test_deleting_a_linked_expense_frees_the_occurrence(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Delete Link Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Delete Link Rent")
+    cost_id = await _create_cost(client, token, name="Delete Link Rent")
     first = await _create_linked_expense(client, token, wallet_id, cost_id)
     await _create_linked_expense(client, token, wallet_id, cost_id)
 
@@ -276,7 +275,7 @@ async def test_deleting_a_linked_expense_frees_the_occurrence(
 async def test_deleting_a_recurring_cost_severs_links(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Sever Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Sever Rent")
+    cost_id = await _create_cost(client, token, name="Sever Rent")
     linked = await _create_linked_expense(client, token, wallet_id, cost_id)
 
     response = await client.delete(f"/recurring-costs/{cost_id}", headers=_auth(token))
@@ -308,7 +307,7 @@ async def test_income_and_transfer_reject_a_link(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Reject Link Wallet")
     contact_id = await _create_wallet(client, token, "Reject Link Contact", "contact")
-    cost_id = await _create_cost(client, token, wallet_id, name="Reject Link Rent")
+    cost_id = await _create_cost(client, token, name="Reject Link Rent")
 
     income = await client.post(
         "/transactions",
@@ -344,7 +343,7 @@ async def test_editing_rejects_a_link_on_income_and_transfer(
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Edit Reject Wallet")
     contact_id = await _create_wallet(client, token, "Edit Reject Contact", "contact")
-    cost_id = await _create_cost(client, token, wallet_id, name="Edit Reject Rent")
+    cost_id = await _create_cost(client, token, name="Edit Reject Rent")
 
     income = await client.post(
         "/transactions",
@@ -397,7 +396,6 @@ async def test_foreign_or_missing_cost_link_is_rejected(
                 account_id=account_id,
                 name="Foreign Cost",
                 amount="10.00",
-                wallet_id=foreign_wallet.id,
                 interval_value=1,
                 interval_unit="months",
                 start_date=None,
@@ -431,7 +429,7 @@ async def test_recurring_costs_list_exposes_the_next_unpaid_occurrence(
 ) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Picker Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Picker Rent")
+    cost_id = await _create_cost(client, token, name="Picker Rent")
 
     async def picker_date() -> str:
         costs = (await client.get("/recurring-costs", headers=_auth(token))).json()
@@ -448,7 +446,7 @@ async def test_recurring_costs_list_exposes_the_next_unpaid_occurrence(
 async def test_the_pin_survives_cost_definition_edits(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Definition Edit Wallet")
-    cost_id = await _create_cost(client, token, wallet_id, name="Definition Edit Rent")
+    cost_id = await _create_cost(client, token, name="Definition Edit Rent")
     linked = await _create_linked_expense(client, token, wallet_id, cost_id)
 
     response = await client.patch(

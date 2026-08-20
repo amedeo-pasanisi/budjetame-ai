@@ -1,26 +1,12 @@
-import type { Category, RecurringCost, Wallet } from './api'
+import type { RecurringCost } from './api'
 import { ModalShell } from './ModalShell'
 import { RecurringCostForm } from './RecurringCostForm'
 
 type RecurringCostModalProps = {
   cost?: RecurringCost
-  wallets: Wallet[]
-  categories: Category[]
   onSaved: (cost: RecurringCost) => void
   onDeleted?: (costId: number) => void
   onClose: () => void
-  /** Inline entity creation (ADR-0013): opens the Category create modal
-   * hosted by the screen, stacked on top of this one. */
-  onAddCategory: () => void
-  /** The freshly created Category's id, reported back so the form's field
-   * selects it. */
-  categoryToSelect: number | null
-  /** Inline entity creation (ADR-0013): opens the Wallet create modal
-   * hosted by the screen, stacked on top of this one. */
-  onAddWallet: () => void
-  /** The freshly created Wallet's id, reported back so the form's field
-   * selects it. */
-  walletToSelect: number | null
 }
 
 /** The create/edit Recurring Cost form inside the shared modal shell
@@ -29,15 +15,9 @@ type RecurringCostModalProps = {
  * Cancel all abandon the draft without saving. */
 export function RecurringCostModal({
   cost,
-  wallets,
-  categories,
   onSaved,
   onDeleted,
   onClose,
-  onAddCategory,
-  categoryToSelect,
-  onAddWallet,
-  walletToSelect,
 }: RecurringCostModalProps) {
   const editing = cost !== undefined
   return (
@@ -45,15 +25,9 @@ export function RecurringCostModal({
       <RecurringCostForm
         key={editing ? cost.id : 'create'}
         cost={cost}
-        wallets={wallets}
-        categories={categories}
         onSaved={onSaved}
         onDeleted={onDeleted}
         onCancel={onClose}
-        onAddCategory={onAddCategory}
-        categoryToSelect={categoryToSelect}
-        onAddWallet={onAddWallet}
-        walletToSelect={walletToSelect}
       />
     </ModalShell>
   )

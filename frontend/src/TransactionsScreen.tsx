@@ -87,13 +87,6 @@ export function TransactionsScreen({
     id: number
     target: WalletTarget
   } | null>(null)
-  // Which form's Wallet sentinel opened the inner Wallet modal: the
-  // transaction form itself (null) or the Recurring Cost ('cost') /
-  // Recurring Income ('income') modal stacked on top of it. The save routes
-  // the new Wallet's id to exactly that form's Wallet field — a wallet
-  // created inside a Recurring modal must land there, never in the
-  // transaction form's field.
-  const [walletModalOrigin, setWalletModalOrigin] = useState<'cost' | 'income' | null>(null)
   // Inline entity creation (ADR-0013): the inner Recurring Cost create
   // modal, stacked on top of the transaction form's modal (depth 2 of the
   // chain: transaction → recurring cost), and the new definition it created
@@ -107,22 +100,6 @@ export function TransactionsScreen({
   // #61): same contract, reported back to the Recurring Income field.
   const [recurringIncomeModalOpen, setRecurringIncomeModalOpen] = useState(false)
   const [recurringIncomeToSelect, setRecurringIncomeToSelect] = useState<number | null>(null)
-  // The recurring modals' own inline sentinels (depth-3 chain, ADR-0013):
-  // a Category or Wallet created inside the Recurring Cost modal must be
-  // auto-selected in that form's field — the transaction form's fields stay
-  // untouched. Each modal gets its own pending selects, so a save lands in
-  // exactly the right form at every level.
-  const [costCategoryToSelect, setCostCategoryToSelect] = useState<number | null>(null)
-  const [costWalletToSelect, setCostWalletToSelect] = useState<number | null>(null)
-  const [incomeCategoryToSelect, setIncomeCategoryToSelect] = useState<number | null>(null)
-  const [incomeWalletToSelect, setIncomeWalletToSelect] = useState<number | null>(null)
-  // Which form's sentinel opened the inner Category modal: the transaction
-  // form ('transaction') or the Recurring Cost ('cost') / Recurring Income
-  // ('income') modal stacked on top of it. The save routes the new
-  // Category's id to exactly that form's Category field.
-  const [categoryModalTarget, setCategoryModalTarget] = useState<
-    'transaction' | 'cost' | 'income'
-  >('transaction')
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
   // then the search bar hides — there is nothing to search.
@@ -310,19 +287,11 @@ export function TransactionsScreen({
   // The inner Category modal's save (ADR-0013): add the Category to the
   // list state (so the dropdown offers it again without a reload), close
   // only the inner modal, and report the new id to the open form so the
-  // originating field selects it — the transaction form's Category field,
-  // or the Recurring Cost/Income form's Category field when the category
-  // was created inside that stacked modal (depth-3 chain). The form's
-  // draft is untouched.
+  // originating field selects it — the transaction form's Category field.
+  // The form's draft is untouched.
   const handleCategoryCreated = (category: Category) => {
     setCategories((current) => (current === null ? [category] : [...current, category]))
-    if (categoryModalTarget === 'cost') {
-      setCostCategoryToSelect(category.id)
-    } else if (categoryModalTarget === 'income') {
-      setIncomeCategoryToSelect(category.id)
-    } else {
-      setCategoryToSelect(category.id)
-    }
+    setCategoryToSelect(category.id)
     setCategoryModalOpen(false)
   }
 
@@ -330,20 +299,13 @@ export function TransactionsScreen({
   // state (so the dropdown offers it again without a reload), close only
   // the inner modal, and report the new id to the open form so the
   // originating field selects it — the transaction form's exact field whose
-  // sentinel was picked, or the Recurring Cost/Income form's Wallet field
-  // when the wallet was created inside that stacked modal (depth-3 chain).
-  // The form's draft is untouched.
+  // sentinel was picked. The form's draft is untouched.
   const handleWalletCreated = (wallet: Wallet) => {
     setWallets((current) => (current === null ? [wallet] : [...current, wallet]))
-    if (walletModalOrigin === 'cost') {
-      setCostWalletToSelect(wallet.id)
-    } else if (walletModalOrigin === 'income') {
-      setIncomeWalletToSelect(wallet.id)
-    } else if (walletModalTarget !== null) {
+    if (walletModalTarget !== null) {
       setWalletToSelect({ id: wallet.id, target: walletModalTarget })
     }
     setWalletModalTarget(null)
-    setWalletModalOrigin(null)
   }
 
   // The inner Recurring Cost modal's save (ADR-0013): add the definition to
@@ -375,10 +337,6 @@ export function TransactionsScreen({
     setWalletToSelect(null)
     setRecurringCostToSelect(null)
     setRecurringIncomeToSelect(null)
-    setCostCategoryToSelect(null)
-    setCostWalletToSelect(null)
-    setIncomeCategoryToSelect(null)
-    setIncomeWalletToSelect(null)
   }
 
   const handleSaved = (transaction: Transaction) => {
@@ -621,15 +579,10 @@ export function TransactionsScreen({
           onClose={closeForm}
           onAddCategory={(type) => {
             setCategoryModalType(type)
-            setCategoryModalTarget('transaction')
             setCategoryModalOpen(true)
           }}
           categoryToSelect={categoryToSelect}
           onAddWallet={(target) => {
-            // A fresh open from the transaction form: any earlier origin
-            // (a cancelled depth-3 pick inside a Recurring modal) is stale
-            // and must not reroute this save.
-            setWalletModalOrigin(null)
             setWalletModalTarget(target)
           }}
           walletToSelect={walletToSelect}
@@ -640,46 +593,17 @@ export function TransactionsScreen({
         />
       )}
 
-      {recurringCostModalOpen && wallets !== null && categories !== null && (
+      {recurringCostModalOpen && (
         <RecurringCostModal
-          wallets={wallets}
-          categories={categories}
           onSaved={handleRecurringCostCreated}
           onClose={() => setRecurringCostModalOpen(false)}
-          onAddCategory={() => {
-            setCategoryModalType('expense')
-            setCategoryModalTarget('cost')
-            setCategoryModalOpen(true)
-          }}
-          categoryToSelect={costCategoryToSelect}
-          onAddWallet={() => {
-            // Costs live on Checking, Credit Card, and Cash only: the same
-            // eligibility lock as the Expense Wallet field ('wallet'), but
-            // the save must land in the recurring form's Wallet field.
-            setWalletModalOrigin('cost')
-            setWalletModalTarget('wallet')
-          }}
-          walletToSelect={costWalletToSelect}
         />
       )}
 
-      {recurringIncomeModalOpen && wallets !== null && categories !== null && (
+      {recurringIncomeModalOpen && (
         <RecurringIncomeModal
-          wallets={wallets}
-          categories={categories}
           onSaved={handleRecurringIncomeCreated}
           onClose={() => setRecurringIncomeModalOpen(false)}
-          onAddCategory={() => {
-            setCategoryModalType('income')
-            setCategoryModalTarget('income')
-            setCategoryModalOpen(true)
-          }}
-          categoryToSelect={incomeCategoryToSelect}
-          onAddWallet={() => {
-            setWalletModalOrigin('income')
-            setWalletModalTarget('wallet')
-          }}
-          walletToSelect={incomeWalletToSelect}
         />
       )}
 
@@ -704,7 +628,6 @@ export function TransactionsScreen({
             // later pick from another form must not inherit the stale
             // routing.
             setWalletModalTarget(null)
-            setWalletModalOrigin(null)
           }}
         />
       )}

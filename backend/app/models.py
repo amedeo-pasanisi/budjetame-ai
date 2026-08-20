@@ -238,14 +238,6 @@ class RecurringCost(Base):
     )
     name: Mapped[str] = mapped_column(String(80))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    # Wallets are never hard-deleted (ADR-0002), so the FK never fires;
-    # CASCADE matches the Transaction convention.
-    wallet_id: Mapped[int] = mapped_column(
-        ForeignKey("wallets.id", ondelete="CASCADE"), index=True
-    )
-    category_id: Mapped[int | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), index=True
-    )
     # The interval: every N days, weeks, months, or years.
     interval_value: Mapped[int] = mapped_column(Integer)
     interval_unit: Mapped[str] = mapped_column(String(10))
@@ -268,11 +260,9 @@ class RecurringIncome(Base):
 
     The mirror of RecurringCost, deliberately not a generalization: the same
     field set and the same derived Occurrences, sharing the pure recurrence
-    module (app.recurrence) unchanged. The optional Category is income-only;
-    the Wallet must be active and non-Contact (incomes behave like Income
-    Transactions). Deleting a Recurring Income is a hard delete; linked
-    Incomes (issue #61) survive as ordinary Incomes: the link FK is ON
-    DELETE SET NULL, mirroring the Recurring Cost sever (issue #57).
+    module (app.recurrence) unchanged. Deleting a Recurring Income is a hard
+    delete; linked Incomes (issue #61) survive as ordinary Incomes: the link
+    FK is ON DELETE SET NULL, mirroring the Recurring Cost sever (issue #57).
     """
 
     __tablename__ = "recurring_incomes"
@@ -292,14 +282,6 @@ class RecurringIncome(Base):
     )
     name: Mapped[str] = mapped_column(String(80))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    # Wallets are never hard-deleted (ADR-0002), so the FK never fires;
-    # CASCADE matches the Transaction convention.
-    wallet_id: Mapped[int] = mapped_column(
-        ForeignKey("wallets.id", ondelete="CASCADE"), index=True
-    )
-    category_id: Mapped[int | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), index=True
-    )
     # The interval: every N days, weeks, months, or years.
     interval_value: Mapped[int] = mapped_column(Integer)
     interval_unit: Mapped[str] = mapped_column(String(10))

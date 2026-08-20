@@ -33,11 +33,11 @@ A Transaction that moves money from a Source Wallet to a Destination Wallet. Net
 _Avoid_: internal transfer, move
 
 **Recurring Cost**:
-A definition of a cost expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name, a fixed amount, and a Wallet. It produces derived Occurrences; each payment is still recorded by hand as a linked Expense — the app never creates Transactions on its own.
+A definition of a cost expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name and a fixed amount. It produces derived Occurrences; each payment is still recorded by hand as a linked Expense, whose Wallet and Category are chosen at Transaction creation time — the definition itself never carries them. The app never creates Transactions on its own.
 _Avoid_: monthly cost, fixed cost, subscription, recurring transaction
 
 **Recurring Income**:
-A definition of an income expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name, a fixed amount, and a Wallet. It produces derived Occurrences; each receipt is still recorded by hand as a linked Income — the app never creates Transactions on its own.
+A definition of an income expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name and a fixed amount. It produces derived Occurrences; each receipt is still recorded by hand as a linked Income, whose Wallet and Category are chosen at Transaction creation time — the definition itself never carries them. The app never creates Transactions on its own.
 _Avoid_: recurring earning, paycheck, salary entry
 
 **Occurrence**:
@@ -132,7 +132,7 @@ _Avoid_: fixing rows
 - An import row is a Duplicate when date, amount, type, wallet(s), category, and description all match an existing Transaction or an earlier row of the same file; a blank description matches a missing one.
 - Searching the ledger matches Transactions whose Description contains the needle, case-insensitively (accents must match exactly), combined with any other filters.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
-- Recurring Costs are expense-side only and may be created only on active, non-Contact Wallets. Recurring Incomes are income-side only and may be created only on active, non-Contact Wallets.
+- Recurring Costs and Recurring Incomes carry no Wallet and no Category: the Wallet and Category of a linked Transaction are chosen at Transaction creation time.
 - An Expense links to at most one Recurring Cost; linking pays exactly one Occurrence, the oldest Unpaid one, pinned at link time and never reassigned by later date edits. Unlinking or deleting the Expense frees the Occurrence. An Income links to at most one Recurring Income under the same contract.
 - Recurring Cost names are unique per Account, case-insensitively; Recurring Income names are unique the same way.
 - Deleting a Recurring Cost severs the links: linked Expenses remain as ordinary Expenses. Deleting a Recurring Income severs the links: linked Incomes remain as ordinary Incomes.
