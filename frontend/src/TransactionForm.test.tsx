@@ -195,6 +195,10 @@ function renderForm(
       categoryToSelect={null}
       onAddWallet={() => {}}
       walletToSelect={null}
+      onAddRecurringCost={() => {}}
+      recurringCostToSelect={null}
+      onAddRecurringIncome={() => {}}
+      recurringIncomeToSelect={null}
     />,
   )
 }
@@ -393,11 +397,12 @@ describe('TransactionForm recurring-cost link (issue #57)', () => {
   it('shows the picker in expense mode only, listing the Account costs', () => {
     renderForm(null)
 
-    // Expense is the default type: the picker is visible with every cost.
+    // Expense is the default type: the picker is visible with every cost,
+    // plus the inline create sentinel (ADR-0013) last.
     const picker = screen.getByLabelText('Recurring Cost')
     expect(
       Array.from(picker.querySelectorAll('option')).map((option) => option.textContent),
-    ).toEqual(['None', 'Rent', 'Insurance'])
+    ).toEqual(['None', 'Rent', 'Insurance', '＋ Add recurring cost…'])
 
     // Income and Transfer never carry a link: the picker hides.
     fireEvent.click(screen.getByRole('button', { name: 'Income' }))
@@ -508,7 +513,7 @@ describe('TransactionForm recurring-income link (issue #61)', () => {
     const picker = screen.getByLabelText('Recurring Income')
     expect(
       Array.from(picker.querySelectorAll('option')).map((option) => option.textContent),
-    ).toEqual(['None', 'Salary', 'Rent from tenant'])
+    ).toEqual(['None', 'Salary', 'Rent from tenant', '＋ Add recurring income…'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
     expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()

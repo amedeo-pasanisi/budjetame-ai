@@ -72,6 +72,23 @@ type TransactionFormProps = {
    * whose sentinel was picked: that exact field selects it, leaving the
    * rest of the draft untouched. */
   walletToSelect: { id: number; target: WalletTarget } | null
+  /** Inline entity creation (ADR-0013): opens the Recurring Cost create
+   * modal hosted by the screen, stacked on top of this one — an Expense's
+   * Recurring Cost field sentinel. */
+  onAddRecurringCost: () => void
+  /** The freshly created Recurring Cost the screen reports back: the field
+   * selects it — which per the linking contract immediately pays the new
+   * definition's oldest Unpaid Occurrence — leaving the rest of the draft
+   * untouched. */
+  recurringCostToSelect: number | null
+  /** Inline entity creation (ADR-0013): opens the Recurring Income create
+   * modal hosted by the screen, stacked on top of this one — an Income's
+   * Recurring Income field sentinel. */
+  onAddRecurringIncome: () => void
+  /** The freshly created Recurring Income the screen reports back, mirror
+   * of the cost contract: the field selects it, paying the new
+   * definition's oldest Unpaid Occurrence. */
+  recurringIncomeToSelect: number | null
 }
 
 /** The create/edit/delete form for a Transaction (Expense, Income, or
@@ -91,6 +108,10 @@ export function TransactionForm({
   categoryToSelect,
   onAddWallet,
   walletToSelect,
+  onAddRecurringCost,
+  recurringCostToSelect,
+  onAddRecurringIncome,
+  recurringIncomeToSelect,
 }: TransactionFormProps) {
   const [type, setType] = useState<TransactionFormType>(
     editing?.type === 'transfer'
@@ -151,12 +172,31 @@ export function TransactionForm({
   const [recurringCostId, setRecurringCostId] = useState<number | null>(
     editing?.recurring_cost_id ?? null,
   )
+  // Inline entity creation (ADR-0013): when the screen's inner Recurring
+  // Cost modal saves, it reports the new definition's id here so this field
+  // selects it — which per the linking contract immediately pays the new
+  // cost's oldest Unpaid Occurrence (due today for a fresh definition with
+  // no start date), the helper naming it. The only field that changes, the
+  // rest of the draft stays.
+  useEffect(() => {
+    if (recurringCostToSelect !== null) {
+      setRecurringCostId(recurringCostToSelect)
+    }
+  }, [recurringCostToSelect])
   // The optional Recurring Income link (issue #61), mirroring the cost
   // link: an Income pins one Recurring Income, paying its oldest Unpaid
   // Occurrence. Same seed-from-editing contract.
   const [recurringIncomeId, setRecurringIncomeId] = useState<number | null>(
     editing?.recurring_income_id ?? null,
   )
+  // The Recurring Income field's inline creation, the mirror of the cost
+  // one above: the new definition's id arrives from the screen and takes
+  // the field, paying its oldest Unpaid Occurrence.
+  useEffect(() => {
+    if (recurringIncomeToSelect !== null) {
+      setRecurringIncomeId(recurringIncomeToSelect)
+    }
+  }, [recurringIncomeToSelect])
   const [description, setDescription] = useState(editing?.description ?? '')
   const descriptionField = useRef<HTMLTextAreaElement | null>(null)
   // Auto-grow (issue #53): rows follow the explicit line count so the field
@@ -534,6 +574,7 @@ export function TransactionForm({
           value={recurringCostId}
           occurrenceDate={payingOccurrenceDate}
           onChange={setRecurringCostId}
+          onAdd={onAddRecurringCost}
         />
       )}
 
@@ -543,6 +584,7 @@ export function TransactionForm({
           value={recurringIncomeId}
           occurrenceDate={payingIncomeOccurrenceDate}
           onChange={setRecurringIncomeId}
+          onAdd={onAddRecurringIncome}
         />
       )}
 

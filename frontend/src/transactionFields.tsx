@@ -191,38 +191,36 @@ export function CategoryField({
  * the helper names the Occurrence the link will pay: `occurrenceDate` is the
  * oldest Unpaid Occurrence's own date for a new link, or the stored pin when
  * the form is editing the very link already on the Transaction (which must
- * never be reassigned by a mere date edit). The None option unlinks. */
+ * never be reassigned by a mere date edit). The None option unlinks. The
+ * select carries the inline "＋ Add recurring cost…" sentinel (ADR-0013),
+ * like the Category and Wallet fields: picking it opens the Recurring Cost
+ * create modal hosted by the screen, which reports the new definition back
+ * for auto-selection. */
 export function RecurringCostField({
   costs,
   value,
   occurrenceDate,
   onChange,
+  onAdd,
 }: {
   costs: RecurringCost[]
   value: number | null
   occurrenceDate: string | null
   onChange: (costId: number | null) => void
+  /** Opens the Recurring Cost create modal, hosted by the screen. */
+  onAdd: () => void
 }) {
   return (
     <div>
-      <label htmlFor="tx-recurring-cost" className="block text-sm font-medium text-slate-700">
-        Recurring Cost
-      </label>
-      <select
+      <EntitySelect
         id="tx-recurring-cost"
+        label="Recurring Cost"
         value={value ?? ''}
-        onChange={(event) =>
-          onChange(event.target.value === '' ? null : Number(event.target.value))
-        }
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-      >
-        <option value="">None</option>
-        {costs.map((cost) => (
-          <option key={cost.id} value={cost.id}>
-            {cost.name}
-          </option>
-        ))}
-      </select>
+        onChange={(costId) => onChange(costId === '' ? null : costId)}
+        options={costs.map((cost) => ({ id: cost.id, label: cost.name }))}
+        entity="recurring cost"
+        onAdd={onAdd}
+      />
       {value !== null && occurrenceDate !== null && (
         <p className="mt-1 text-xs text-slate-500">
           Pays the occurrence of {occurrenceDate}.
@@ -238,38 +236,34 @@ export function RecurringCostField({
  * Occurrence the link will pay: `occurrenceDate` is the oldest Unpaid
  * Occurrence's own date for a new link, or the stored pin when the form is
  * editing the very link already on the Transaction (which must never be
- * reassigned by a mere date edit). The None option unlinks. */
+ * reassigned by a mere date edit). The None option unlinks. The select
+ * carries the inline "＋ Add recurring income…" sentinel (ADR-0013), the
+ * mirror of the cost field's. */
 export function RecurringIncomeField({
   incomes,
   value,
   occurrenceDate,
   onChange,
+  onAdd,
 }: {
   incomes: RecurringIncome[]
   value: number | null
   occurrenceDate: string | null
   onChange: (incomeId: number | null) => void
+  /** Opens the Recurring Income create modal, hosted by the screen. */
+  onAdd: () => void
 }) {
   return (
     <div>
-      <label htmlFor="tx-recurring-income" className="block text-sm font-medium text-slate-700">
-        Recurring Income
-      </label>
-      <select
+      <EntitySelect
         id="tx-recurring-income"
+        label="Recurring Income"
         value={value ?? ''}
-        onChange={(event) =>
-          onChange(event.target.value === '' ? null : Number(event.target.value))
-        }
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-      >
-        <option value="">None</option>
-        {incomes.map((income) => (
-          <option key={income.id} value={income.id}>
-            {income.name}
-          </option>
-        ))}
-      </select>
+        onChange={(incomeId) => onChange(incomeId === '' ? null : incomeId)}
+        options={incomes.map((income) => ({ id: income.id, label: income.name }))}
+        entity="recurring income"
+        onAdd={onAdd}
+      />
       {value !== null && occurrenceDate !== null && (
         <p className="mt-1 text-xs text-slate-500">
           Pays the occurrence of {occurrenceDate}.

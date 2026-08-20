@@ -30,6 +30,18 @@ type TransactionModalProps = {
   /** The freshly created Wallet the screen reports back, with the field
    * whose sentinel was picked. */
   walletToSelect: { id: number; target: WalletTarget } | null
+  /** Inline entity creation (ADR-0013): opens the Recurring Cost create
+   * modal hosted by the screen, stacked on top of this one. */
+  onAddRecurringCost: () => void
+  /** The freshly created Recurring Cost's id, reported back so the form's
+   * Recurring Cost field selects it. */
+  recurringCostToSelect: number | null
+  /** Inline entity creation (ADR-0013): opens the Recurring Income create
+   * modal hosted by the screen, stacked on top of this one. */
+  onAddRecurringIncome: () => void
+  /** The freshly created Recurring Income's id, reported back so the
+   * form's Recurring Income field selects it. */
+  recurringIncomeToSelect: number | null
 }
 
 /** The create/edit/delete Transaction form inside the shared modal shell
@@ -49,6 +61,10 @@ export function TransactionModal({
   categoryToSelect,
   onAddWallet,
   walletToSelect,
+  onAddRecurringCost,
+  recurringCostToSelect,
+  onAddRecurringIncome,
+  recurringIncomeToSelect,
 }: TransactionModalProps) {
   return (
     <ModalShell
@@ -69,6 +85,10 @@ export function TransactionModal({
         categoryToSelect={categoryToSelect}
         onAddWallet={onAddWallet}
         walletToSelect={walletToSelect}
+        onAddRecurringCost={onAddRecurringCost}
+        recurringCostToSelect={recurringCostToSelect}
+        onAddRecurringIncome={onAddRecurringIncome}
+        recurringIncomeToSelect={recurringIncomeToSelect}
       />
     </ModalShell>
   )
