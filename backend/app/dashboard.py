@@ -5,7 +5,13 @@ from app.auth import get_current_account
 from app.dates import Month
 from app.deps import get_session
 from app.models import Account
-from app.schemas import CategoryExpense, DashboardSummary, ExpenseTrend, MonthBucket
+from app.schemas import (
+    BudgetView,
+    CategoryExpense,
+    DashboardSummary,
+    ExpenseTrend,
+    MonthBucket,
+)
 from app.services import dashboard as dashboard_service
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -65,3 +71,19 @@ def expense_trend(
         to_month=end_month.iso,
         months=[MonthBucket(**bucket) for bucket in buckets],
     )
+
+
+@router.get("/budget", response_model=BudgetView)
+def dashboard_budget(
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> BudgetView:
+    """The Budget card (issue #65): the current Europe/Rome month's Monthly
+    Spendable, Daily Allowance, and Spendable Today — deliberately no month
+    parameter: the Budget is current-month-only by product decision (the
+    summary endpoint stays month-parameterized and untouched). Everything is
+    derived, nothing stored (ADR-0001): editing a Recurring definition, a
+    Transaction, or a link recomputes the month retroactively from the 1st.
+    `spendable_today` is sent raw and possibly negative — rendering is the
+    frontend's job."""
+    return BudgetView(**dashboard_service.monthly_budget(session, account.id))

@@ -1,19 +1,34 @@
-"""Dashboard reporting rules (T10, T11, T12). Called by the HTTP layer; never from tests.
+"""Dashboard reporting rules (T10, T11, T12) and the Budget card (issue
+#65). Called by the HTTP layer; never from tests.
 
 The Dashboard shows Net Worth — the algebraic sum of every Wallet balance —
 and the current month's Income vs Expenses. All bucketing happens in
 Europe/Rome, the app's single fixed timezone (CONTEXT.md). Opening Balance
 Transactions never count toward the statistics; Transfers are neither Income
-nor Expense, so they never appear either.
+nor Expense, so they never appear either. The Budget card (issue #65) is
+fully derived, never stored: the service sums the month's Recurring Income
+and Recurring Cost Occurrences into a Monthly Spendable (the pure walker in
+app.recurrence owns the math, the pure arithmetic in app.budget the
+allowances) and the Discretionary Expenses into the spent figure.
 """
 
+import calendar
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.dates import Month, rome_month_bounds, to_rome_month
-from app.models import Category, Transaction, TransactionType
+from app import budget
+from app.dates import Month, from_rome_day, rome_month_bounds, to_rome_month
+from app.models import (
+    Category,
+    RecurringCost,
+    RecurringIncome,
+    Transaction,
+    TransactionType,
+)
+from app.recurrence import occurrences_in_window, rome_day_of, rome_today
 
 from app.services.wallets import wallet_balances
 
@@ -133,3 +148,99 @@ def _month_range(from_month: Month, to_month: Month) -> list[Month]:
         months.append(month)
         month = month.next()
     return months
+
+
+def monthly_budget(session: Session, account_id: int) -> dict:
+    """The Budget card (issue #65): the current Europe/Rome month's Monthly
+    Spendable, Daily Allowance, and Spendable Today — deliberately no month
+    parameter, the Budget is current-month-only by product decision.
+
+    Everything derived, nothing stored (ADR-0001). Monthly Spendable sums
+    the Recurring Income Occurrences due in the month minus the Recurring
+    Cost Occurrences due in it, counted by due date whether paid or not — a
+    late-paid Occurrence counts in its due month, not the payment month —
+    with all intervals and overrides and the 29–31 clamping, per the pure
+    walker. Spendable Today is the allowance accrued from the 1st through
+    today minus the Discretionary Expenses dated in that span: only Expense
+    Transactions with no Recurring Cost link drain, and only once their date
+    has arrived; one-off Incomes never fill, Transfers and Opening Balances
+    never touch it.
+    """
+    month = Month.current()
+    today = rome_today()
+    first_day = date(month.year, month.month, 1)
+    last_day = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
+    income, costs = _occurrence_totals(session, account_id, first_day, last_day)
+    monthly_spendable = income - costs
+    spent = _discretionary_spent(session, account_id, first_day, today)
+    return {
+        "month": month.iso,
+        "monthly_spendable": monthly_spendable,
+        "daily_allowance": budget.daily_allowance(monthly_spendable, month),
+        "spendable_today": budget.spendable_today(
+            monthly_spendable, month, today, spent
+        ),
+    }
+
+
+def _occurrence_totals(
+    session: Session, account_id: int, first_day: date, last_day: date
+) -> tuple[Decimal, Decimal]:
+    """The `(income, costs)` totals of the Occurrences due inside the
+    month's window, summed per definition over the pure walker: every due
+    date in `[first_day, last_day]` (both edges included), the amount once
+    per due date, paid or not (issue #65)."""
+    income_total = Decimal("0.00")
+    cost_total = Decimal("0.00")
+    for income in session.scalars(
+        select(RecurringIncome).where(RecurringIncome.account_id == account_id)
+    ).all():
+        income_total += _due_amount(income, first_day, last_day)
+    for cost in session.scalars(
+        select(RecurringCost).where(RecurringCost.account_id == account_id)
+    ).all():
+        cost_total += _due_amount(cost, first_day, last_day)
+    return income_total, cost_total
+
+
+def _due_amount(
+    definition: RecurringCost | RecurringIncome, first_day: date, last_day: date
+) -> Decimal:
+    """One definition's contribution to the Monthly Spendable: its amount
+    per Occurrence due inside the window (an unset start date defaults to
+    the creation date, ADR-0010)."""
+    start = (
+        definition.start_date
+        if definition.start_date is not None
+        else rome_day_of(definition.created_at)
+    )
+    due_dates = occurrences_in_window(
+        start,
+        definition.interval_value,
+        definition.interval_unit,
+        definition.due_day,
+        definition.due_month,
+        first_day,
+        last_day,
+    )
+    return definition.amount * Decimal(len(due_dates))
+
+
+def _discretionary_spent(
+    session: Session, account_id: int, first_day: date, today: date
+) -> Decimal:
+    """The Discretionary Expenses dated from the 1st through today: Expense
+    Transactions with no Recurring Cost link (CONTEXT.md) — the only thing
+    that drains Spendable Today, and only once its date has arrived (an
+    Expense dated later in the month doesn't drain until then)."""
+    end_exclusive = from_rome_day((today + timedelta(days=1)).isoformat())
+    total = session.scalar(
+        select(func.sum(Transaction.amount)).where(
+            Transaction.account_id == account_id,
+            Transaction.type == TransactionType.EXPENSE.value,
+            Transaction.recurring_cost_id.is_(None),
+            Transaction.date >= from_rome_day(first_day.isoformat()),
+            Transaction.date < end_exclusive,
+        )
+    )
+    return total if total is not None else Decimal("0.00")
