@@ -56,6 +56,15 @@ const wallet: Wallet = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+const frozenWallet: Wallet = {
+  id: 2,
+  name: 'Old Card',
+  type: 'checking',
+  balance: '0.00',
+  frozen: true,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 const categories: Category[] = []
 
 const recurringCosts: RecurringCost[] = [
@@ -170,10 +179,11 @@ function renderForm(
   editing: Transaction | null,
   costs: RecurringCost[] = recurringCosts,
   incomes: RecurringIncome[] = recurringIncomes,
+  wallets: Wallet[] = [wallet],
 ) {
   return render(
     <TransactionForm
-      wallets={[wallet]}
+      wallets={wallets}
       categories={categories}
       recurringCosts={costs}
       recurringIncomes={incomes}
@@ -585,6 +595,44 @@ describe('TransactionForm recurring-income link (issue #61)', () => {
       7,
       expect.objectContaining({ recurringIncomeId: 2 }),
     )
+  })
+})
+
+describe('TransactionForm frozen wallets (ADR-0002)', () => {
+  it('does not offer Frozen Wallets in the Wallet select for an Expense or Income', () => {
+    renderForm(null, undefined, undefined, [frozenWallet, wallet])
+
+    const select = screen.getByLabelText('Wallet')
+    const options = Array.from(select.querySelectorAll('option')).map(
+      (option) => option.textContent,
+    )
+    expect(options).toEqual(['Cash (€100.00)'])
+  })
+
+  it('does not offer Frozen Wallets in the From/To selects for a Transfer', () => {
+    renderForm(null, undefined, undefined, [frozenWallet, wallet])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+
+    for (const label of ['From', 'To']) {
+      const select = screen.getByLabelText(label)
+      expect(
+        Array.from(select.querySelectorAll('option')).map((option) => option.textContent),
+      ).toEqual(['Cash (€100.00)'])
+    }
+  })
+
+  it('defaults to the first active Wallet when a Frozen one is first in the list', () => {
+    renderForm(null, undefined, undefined, [frozenWallet, wallet])
+
+    // Expense is the default type: the initial selection skips the Frozen
+    // Wallet and lands on the first active one.
+    expect(screen.getByLabelText('Wallet')).toHaveValue('1')
+
+    // Transfer mode seeds both legs from the active Wallets too.
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    expect(screen.getByLabelText('From')).toHaveValue('1')
+    expect(screen.getByLabelText('To')).toHaveValue('1')
   })
 })
 

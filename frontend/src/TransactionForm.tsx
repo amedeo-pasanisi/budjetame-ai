@@ -78,19 +78,24 @@ export function TransactionForm({
   )
   const [amount, setAmount] = useState(editing?.amount ?? '')
   const [date, setDate] = useState(editing?.date ?? todayInRome())
+  // Frozen Wallets are read-only (ADR-0002): they can never receive a new
+  // Transaction, so the form only offers active Wallets in its pickers and
+  // seeds its defaults from them. The screen passes the full list
+  // (include_frozen) because the ledger filter needs it.
+  const assignableWallets = wallets.filter((wallet) => !wallet.frozen)
   const [walletId, setWalletId] = useState<number | undefined>(
     editing?.type === 'transfer'
       ? undefined
       : (editing?.wallet_id ??
-        wallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type))[0]?.id),
+        assignableWallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type))[0]?.id),
   )
   const [sourceWalletId, setSourceWalletId] = useState<number | undefined>(
-    editing?.type === 'transfer' ? (editing.source_wallet_id ?? undefined) : wallets[0]?.id,
+    editing?.type === 'transfer' ? (editing.source_wallet_id ?? undefined) : assignableWallets[0]?.id,
   )
   const [destinationWalletId, setDestinationWalletId] = useState<number | undefined>(
     editing?.type === 'transfer'
       ? (editing.destination_wallet_id ?? undefined)
-      : (wallets[1]?.id ?? wallets[0]?.id),
+      : (assignableWallets[1]?.id ?? assignableWallets[0]?.id),
   )
   const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
   // The optional Recurring Cost link (issue #57): an Expense pins one cost,
@@ -426,7 +431,7 @@ export function TransactionForm({
 
       {isTransfer ? (
         <TransferWalletFields
-          wallets={wallets}
+          wallets={assignableWallets}
           sourceWalletId={sourceWalletId}
           destinationWalletId={destinationWalletId}
           disabled={isEditing}
@@ -434,7 +439,7 @@ export function TransactionForm({
           onDestinationChange={setDestinationWalletId}
         />
       ) : (
-        <WalletField wallets={wallets} value={walletId} disabled={isEditing} onChange={setWalletId} />
+        <WalletField wallets={assignableWallets} value={walletId} disabled={isEditing} onChange={setWalletId} />
       )}
 
       {isTransfer ? (
