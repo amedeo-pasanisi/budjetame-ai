@@ -5,7 +5,7 @@
  * (toggle, Frozen Wallet dropdown, refetch-on-filter) works. The API client
  * and the map picker are mocked; the real form is driven like a user would
  * (click, type, submit) for the reset-on-write path. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { TransactionsScreen } from './TransactionsScreen'
@@ -66,6 +66,30 @@ class FakeIntersectionObserver {
       this as unknown as IntersectionObserver,
     )
   }
+}
+
+// The sentinel's observer is created in a passive effect that React can
+// flush after the test's afterEach has run (its scheduler defers effect
+// flushes to a macrotask). Stubbing and un-stubbing per test left a gap
+// where a late flush ran with the global restored to undefined — the flaky
+// "IntersectionObserver is not defined" from a passing test's teardown.
+// jsdom has no real IntersectionObserver and nothing in this file needs
+// the global to be absent, so the fake is installed for the whole file and
+// never uninstalled; each test still starts with an empty instance list.
+beforeAll(() => {
+  vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
+})
+
+/** The sentinel's observer is created in a passive effect that React can
+ * flush after the visible commit (its scheduler defers effect flushes to a
+ * macrotask), so it may not exist right after the rows render. Wait for the
+ * fake to record the current mount's observer, then simulate the sentinel
+ * entering the viewport. */
+async function enterSentinel(): Promise<void> {
+  await waitFor(() => {
+    expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0)
+  })
+  act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
 }
 
 /** The Import Draft lives in the app shell (issue #43); the screen takes its
@@ -141,7 +165,6 @@ const deleteTransactionMock = vi.mocked(deleteTransaction)
 
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
-  vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
   fetchWalletsMock.mockResolvedValue([wallet])
   fetchCategoriesMock.mockResolvedValue([])
   fetchRecurringCostsMock.mockResolvedValue([])
@@ -155,7 +178,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
-  vi.unstubAllGlobals()
 })
 
 describe('TransactionsScreen row title (description-led)', () => {
@@ -191,7 +213,7 @@ describe('TransactionsScreen infinite scroll', () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
 
-    act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
+    await enterSentinel()
 
     expect(await screen.findByText(/Rent/)).toBeInTheDocument()
     expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}, 50, 'c1')
@@ -205,7 +227,7 @@ describe('TransactionsScreen infinite scroll', () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
 
-    act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
+    await enterSentinel()
     await screen.findByText(/Rent/)
 
     const callsAfterLastPage = fetchTransactionsMock.mock.calls.length
@@ -219,7 +241,7 @@ describe('TransactionsScreen infinite scroll', () => {
   it('resets to the first page after saving a transaction', async () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
-    act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
+    await enterSentinel()
     await screen.findByText(/Rent/)
 
     // Save a new transaction through the real modal.
@@ -430,7 +452,7 @@ describe('TransactionsScreen search (issue #54)', () => {
       expect(fetchTransactionsMock).toHaveBeenCalledWith('', { q: 'coffee' }),
     )
 
-    act(() => FakeIntersectionObserver.instances.at(-1)!.enter())
+    await enterSentinel()
 
     expect(await screen.findByText(/Coffee two/)).toBeInTheDocument()
     // The next page is fetched with the search applied alongside the cursor.
