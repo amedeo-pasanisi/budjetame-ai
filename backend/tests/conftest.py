@@ -1,10 +1,12 @@
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from urllib.parse import urlparse
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from testcontainers.community.postgres import PostgresContainer
 
@@ -26,14 +28,44 @@ def run_migrations(database_url: str) -> None:
     command.upgrade(cfg, "head")
 
 
+def _database_name(database_url: str) -> str:
+    """The database name in a SQLAlchemy URL — its last path segment."""
+    return urlparse(database_url).path.rstrip("/").rsplit("/", 1)[-1]
+
+
+def reset_database(database_url: str) -> None:
+    """Drop and recreate the schema, so a reused test database starts each
+    session from a fresh seed (the tests assume a fresh seed and never
+    clean up after themselves).
+
+    Only a database whose name contains "test" is reset: the reset wipes
+    all data in the database, so it must never point at a development or
+    production database."""
+    name = _database_name(database_url)
+    if "test" not in name.lower():
+        raise RuntimeError(
+            f"refusing to reset {name!r}: TEST_DATABASE_URL must name a test "
+            "database (the name must contain 'test')"
+        )
+    engine = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("DROP SCHEMA public CASCADE"))
+            conn.execute(text("CREATE SCHEMA public"))
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture(scope="session")
 def database_url() -> Iterator[str]:
     """A real Postgres instance with migrations applied. By default a
     testcontainers Postgres in Docker; TEST_DATABASE_URL overrides it with an
-    existing server (e.g. on machines without Docker), migrated fresh here.
-    Either way the database is disposable: tests assume a fresh seed."""
+    existing server (e.g. on machines without Docker), reset and migrated
+    fresh here. Either way the database is disposable: tests assume a fresh
+    seed."""
     if os.environ.get("TEST_DATABASE_URL"):
         url = os.environ["TEST_DATABASE_URL"]
+        reset_database(url)
         run_migrations(url)
         yield url
         return
@@ -44,7 +76,7 @@ def database_url() -> Iterator[str]:
 
 
 @pytest.fixture
-async def client(database_url: str) -> Iterator[AsyncClient]:
+async def client(database_url: str) -> AsyncIterator[AsyncClient]:
     """The app driven through its HTTP seam against the real database."""
     app = create_app(
         database_url,
