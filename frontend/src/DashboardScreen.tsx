@@ -4,23 +4,24 @@ import {
   TOKEN_KEY,
   fetchBudget,
   fetchDashboardSummary,
-  fetchExpenseTrend,
   fetchRecurringCosts,
   fetchRecurringIncomes,
+  fetchTrend,
   formatEuros,
   type BudgetView,
   type CategoryExpense,
   type DashboardSummary,
-  type ExpenseTrend,
   type MonthBucket,
+  type Trend,
+  type TrendKind,
 } from './api'
 import { todayInRome } from './transactions'
 
 /** The Dashboard: Net Worth, the Budget card for the current month, the
- * reference month's Income vs Expenses and expense pie, and a monthly
- * expense trend over a user-picked range (T10, T11, T12). All numbers come
- * from the API — the frontend only renders (spec decision #14): the bar
- * chart's geometry and the month labels.
+ * reference month's category pies and its monthly trend over a user-picked
+ * range (T10, T11, T12) — the pie and the trend each toggle between Expenses
+ * and Incomes. All numbers come from the API — the frontend only renders
+ * (spec decision #14): the charts' geometry and the month labels.
  *
  * The reference-month selector drives the month-scoped cards; the Budget
  * card always shows the current month (issue #66) and the trend card has
@@ -38,7 +39,11 @@ export function DashboardScreen() {
   const [hasDefinitions, setHasDefinitions] = useState<boolean | null>(null)
   const [trendFrom, setTrendFrom] = useState(() => monthsAgo(currentMonth, 5))
   const [trendTo, setTrendTo] = useState(currentMonth)
-  const [trend, setTrend] = useState<ExpenseTrend | null>(null)
+  // The trend card's side toggle: Expenses by default, Incomes on demand.
+  const [trendKind, setTrendKind] = useState<TrendKind>('expense')
+  // The loaded trend together with the kind it was fetched for — a stale
+  // trend must never be titled with the toggle's current side.
+  const [trend, setTrend] = useState<{ kind: TrendKind; data: Trend } | null>(null)
   const [trendError, setTrendError] = useState<string | null>(null)
 
   // Keep the trend range valid: picking From after To (or To before From)
@@ -113,17 +118,17 @@ export function DashboardScreen() {
   useEffect(() => {
     let cancelled = false
     setTrendError(null)
-    fetchExpenseTrend(token, trendFrom, trendTo)
+    fetchTrend(token, trendKind, trendFrom, trendTo)
       .then((data) => {
-        if (!cancelled) setTrend(data)
+        if (!cancelled) setTrend({ kind: trendKind, data })
       })
       .catch(() => {
-        if (!cancelled) setTrendError('Could not load the expense trend.')
+        if (!cancelled) setTrendError('Could not load the trend.')
       })
     return () => {
       cancelled = true
     }
-  }, [token, trendFrom, trendTo])
+  }, [token, trendKind, trendFrom, trendTo])
 
   if (loadError !== null) {
     return (
@@ -174,16 +179,15 @@ export function DashboardScreen() {
       {/* While the new month's summary is in flight, the loaded data is still
        * the previous month's — never title it with the new month (US27). */}
       {summary.month === month ? (
-        <>
-          <MonthCard summary={summary} month={month} />
-          <PieCard summary={summary} month={month} />
-        </>
+        <PieCard summary={summary} month={month} />
       ) : (
         <p className="mt-4 text-sm text-slate-500">Loading…</p>
       )}
 
       <TrendCard
         trend={trend}
+        kind={trendKind}
+        onKindChange={setTrendKind}
         fromMonth={trendFrom}
         toMonth={trendTo}
         onFromChange={handleTrendFrom}
@@ -246,90 +250,31 @@ function BudgetCard({
   )
 }
 
-function MonthCard({ summary, month }: { summary: DashboardSummary; month: string }) {
-  const income = Number.parseFloat(summary.income)
-  const expenses = Number.parseFloat(summary.expenses)
-  // Spending exceeds (or has no) income to compare against → the deficit bar.
-  const overspent = expenses > 0 && (income === 0 || expenses > income)
-  const barWidth =
-    expenses === 0
-      ? '0%'
-      : income <= 0
-        ? '100%'
-        : `${Math.min((expenses / income) * 100, 100)}%`
-
-  const comparisonText = (() => {
-    if (income === 0 && expenses === 0) {
-      return 'No income or expenses recorded this month yet.'
-    }
-    if (income === 0) {
-      return `You spent ${formatEuros(summary.expenses)} with no income recorded this month.`
-    }
-    const percent = Math.round((expenses / income) * 100)
-    if (expenses > income) {
-      return `You spent ${percent}% of what you earned — ${formatEuros(
-        summary.expenses,
-      )} out of ${formatEuros(summary.income)}.`
-    }
-    const kept = (income - expenses).toFixed(2)
-    return `You kept ${formatEuros(kept)} of the ${formatEuros(
-      summary.income,
-    )} you earned this month.`
-  })()
-
-  return (
-    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-        {monthLabel(month)} · Income vs Expenses
-      </p>
-
-      <div className="mt-3 space-y-1.5">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-600">Income</span>
-          <span className="font-semibold text-emerald-700">
-            {formatEuros(summary.income)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-600">Expenses</span>
-          <span className="font-semibold text-red-600">
-            {formatEuros(summary.expenses)}
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-200">
-        <div
-          className={`h-full rounded-full ${overspent ? 'bg-red-500' : 'bg-indigo-600'}`}
-          style={{ width: barWidth }}
-        />
-      </div>
-
-      <p className="mt-3 text-sm text-slate-600">{comparisonText}</p>
-    </section>
-  )
-}
-
 function PieCard({ summary, month }: { summary: DashboardSummary; month: string }) {
-  const slices = summary.expenses_by_category
+  const [kind, setKind] = useState<TrendKind>('expense')
+  const slices = kind === 'expense' ? summary.expenses_by_category : summary.incomes_by_category
   const total = slices.reduce(
     (sum, slice) => sum + Number.parseFloat(slice.amount),
     0,
   )
+  const totalLabel = kind === 'expense' ? summary.expenses : summary.income
 
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-        {monthLabel(month)} · Expenses by Category
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+          {monthLabel(month)} · {kind === 'expense' ? 'Expenses' : 'Incomes'} by Category
+        </p>
+        <KindToggle kind={kind} onKindChange={setKind} label="Pie side" />
+      </div>
 
       {slices.length === 0 ? (
         <p className="mt-3 text-sm text-slate-500">
-          No expenses recorded in {monthLabel(month)}.
+          No {kind === 'expense' ? 'expenses' : 'incomes'} recorded in {monthLabel(month)}.
         </p>
       ) : (
         <div className="mt-4 flex flex-col items-center gap-5 sm:flex-row sm:items-center sm:justify-around">
-          <DonutChart slices={slices} total={total} centerLabel={formatEuros(summary.expenses)} />
+          <DonutChart slices={slices} total={total} centerLabel={formatEuros(totalLabel)} kind={kind} />
           <PieLegend slices={slices} total={total} />
         </div>
       )}
@@ -351,10 +296,12 @@ function DonutChart({
   slices,
   total,
   centerLabel,
+  kind,
 }: {
   slices: CategoryExpense[]
   total: number
   centerLabel: string
+  kind: TrendKind
 }) {
   const radius = 40
   const circumference = 2 * Math.PI * radius
@@ -364,7 +311,7 @@ function DonutChart({
       viewBox="0 0 100 100"
       className="h-44 w-44"
       role="img"
-      aria-label="Expenses by category"
+      aria-label={`${kind === 'expense' ? 'Expenses' : 'Incomes'} by category`}
     >
       <circle
         cx="50"
@@ -407,6 +354,41 @@ function DonutChart({
   )
 }
 
+/** The Expenses | Incomes side toggle shared by the pie and the trend
+ * cards: a segmented control with the active side highlighted — the same
+ * pattern as the Recurring tab's Costs | Incomes toggle. */
+function KindToggle({
+  kind,
+  onKindChange,
+  label,
+}: {
+  kind: TrendKind
+  onKindChange: (kind: TrendKind) => void
+  label: string
+}) {
+  return (
+    <div
+      className="inline-flex gap-1 rounded-lg bg-slate-100 p-1"
+      role="group"
+      aria-label={label}
+    >
+      {(['expense', 'income'] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onKindChange(option)}
+          aria-pressed={kind === option}
+          className={`rounded-md px-3 py-1 text-xs font-medium ${
+            kind === option ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+          }`}
+        >
+          {option === 'expense' ? 'Expenses' : 'Incomes'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function PieLegend({ slices, total }: { slices: CategoryExpense[]; total: number }) {
   return (
     <ul className="w-full space-y-2">
@@ -433,35 +415,50 @@ function PieLegend({ slices, total }: { slices: CategoryExpense[]; total: number
   )
 }
 
-/** The monthly expense trend over a user-picked month range (T12, US28): a
- * From/To range picker and a bar chart — X-axis months, Y-axis total expenses,
- * bucketed server-side in Europe/Rome. While a new range's data is in flight,
- * the loaded trend is still the old range's — never title it with the new one. */
+/** The monthly trend over a user-picked month range (T12, US28), toggled
+ * between Expenses and Incomes: a From/To range picker and a bar chart —
+ * X-axis months, Y-axis totals, bucketed server-side in Europe/Rome. While
+ * a new range's data is in flight, the loaded trend is still the old
+ * range's — never title it with the new one. */
 function TrendCard({
   trend,
+  kind,
+  onKindChange,
   fromMonth,
   toMonth,
   onFromChange,
   onToChange,
   error,
 }: {
-  trend: ExpenseTrend | null
+  trend: { kind: TrendKind; data: Trend } | null
+  kind: TrendKind
+  onKindChange: (kind: TrendKind) => void
   fromMonth: string
   toMonth: string
   onFromChange: (month: string) => void
   onToChange: (month: string) => void
   error: string | null
 }) {
-  const loaded = trend !== null && trend.from_month === fromMonth && trend.to_month === toMonth
+  // The loaded trend's own kind guards the title: after a toggle, the stale
+  // data of the other side must never render under the new side's title.
+  const loaded =
+    trend !== null &&
+    trend.kind === kind &&
+    trend.data.from_month === fromMonth &&
+    trend.data.to_month === toMonth
   const empty =
     loaded &&
-    trend.months.every((bucket) => Number.parseFloat(bucket.expenses) === 0)
+    trend.data.months.every((bucket) => Number.parseFloat(bucket.amount) === 0)
+  const side = kind === 'expense' ? 'Expenses' : 'Incomes'
 
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-        Expenses Trend · {monthLabel(fromMonth)} – {monthLabel(toMonth)}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+          {side} Trend · {monthLabel(fromMonth)} – {monthLabel(toMonth)}
+        </p>
+        <KindToggle kind={kind} onKindChange={onKindChange} label="Trend side" />
+      </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3">
         <div>
@@ -495,11 +492,12 @@ function TrendCard({
         <p className="mt-4 text-sm text-slate-500">Loading…</p>
       ) : empty ? (
         <p className="mt-4 text-sm text-slate-500">
-          No expenses recorded between {monthLabel(fromMonth)} and {monthLabel(toMonth)}.
+          No {kind === 'expense' ? 'expenses' : 'incomes'} recorded between{' '}
+          {monthLabel(fromMonth)} and {monthLabel(toMonth)}.
         </p>
       ) : (
         <div className="mt-4 overflow-x-auto">
-          <TrendChart months={trend.months} />
+          <TrendChart months={trend.data.months} kind={kind} />
         </div>      )}
     </section>
   )
@@ -507,10 +505,10 @@ function TrendCard({
 
 /** A dependency-free SVG bar chart: one bar per month, scaled to the tallest,
  * with the amount above each bar and a Y-axis (gridlines + € labels) so the
- * euro magnitude is readable at a glance (T12 AC: X months, Y total expenses).
+ * euro magnitude is readable at a glance (T12 AC: X months, Y totals).
  * Wide ranges scroll horizontally so every month stays readable. */
-function TrendChart({ months }: { months: MonthBucket[] }) {
-  const values = months.map((bucket) => Number.parseFloat(bucket.expenses))
+function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }) {
+  const values = months.map((bucket) => Number.parseFloat(bucket.amount))
   const max = Math.max(...values, 1)
   const barWidth = 22
   const gap = 12
@@ -528,7 +526,7 @@ function TrendChart({ months }: { months: MonthBucket[] }) {
       style={{ minWidth: `${leftPad + months.length * 40}px` }}
       className="block"
       role="img"
-      aria-label="Monthly expenses trend"
+      aria-label={`Monthly ${kind === 'expense' ? 'expenses' : 'incomes'} trend`}
     >
       {gridlines.map((frac) => {
         const y = topPad + plotHeight * (1 - frac)
@@ -554,7 +552,7 @@ function TrendChart({ months }: { months: MonthBucket[] }) {
         )
       })}
       {months.map((bucket, index) => {
-        const value = Number.parseFloat(bucket.expenses)
+        const value = Number.parseFloat(bucket.amount)
         const barHeight = (value / max) * plotHeight
         const x = leftPad + gap + index * (barWidth + gap)
         const y = topPad + plotHeight - barHeight
@@ -567,7 +565,7 @@ function TrendChart({ months }: { months: MonthBucket[] }) {
                 textAnchor="middle"
                 className="fill-slate-600 text-[9px]"
               >
-                {formatEuros(bucket.expenses)}
+                {formatEuros(bucket.amount)}
               </text>
             )}
             <rect

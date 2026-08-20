@@ -1,8 +1,8 @@
 """T10 — Dashboard summary.
 
 The Dashboard shows Net Worth — the algebraic sum of all Wallet balances,
-Contact and frozen (always €0) Wallets included — and the current month's
-Income vs Expenses. Month bucketing happens in Europe/Rome, the app's single
+Contact and frozen (always €0) Wallets included — and the reference month's
+Expense and Income category pies. Month bucketing happens in Europe/Rome, the app's single
 fixed timezone; Opening Balance Transactions never count toward the
 statistics and Transfers are neither Income nor Expense by construction.
 All assertions go through the API seam (spec testing decision #1).
@@ -344,6 +344,7 @@ async def test_dashboard_empty_state_for_a_fresh_account(
         for key in sorted(DECIMAL):
             assert summary[key] == "0.00", key
         assert summary["expenses_by_category"] == []
+        assert summary["incomes_by_category"] == []
     finally:
         delete_account(database_url, account_id)
 
@@ -513,6 +514,98 @@ async def test_pie_groups_a_deleted_category_into_uncategorized(
         delete_account(database_url, account_id)
 
 
+async def test_income_pie_groups_incomes_by_category(
+    client: AsyncClient, database_url: str
+) -> None:
+    """The summary also carries the income pie: Incomes grouped by Category
+    for the reference month, largest first — the mirror of the expense pie,
+    so the frontend's pie toggle has both sides. Expenses, Opening Balances
+    and Transfers never appear in it."""
+    account_id = insert_foreign_account(database_url, "pie-income@budjetame.dev")
+    try:
+        token = await _login(client, email="pie-income@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Inc Pie Wallet", "checking", "0.00")
+        salary = await _create_category(client, token, "Inc Salary", "income")
+        bonus = await _create_category(client, token, "Inc Bonus", "income")
+        food = await _create_category(client, token, "Inc Food", "expense")
+        day = _mid_previous_month()
+        await client.post(
+            "/transactions",
+            json={
+                "type": "income",
+                "amount": "30.00",
+                "date": day,
+                "wallet_id": wallet,
+                "category_id": salary,
+            },
+            headers=_auth(token),
+        )
+        await client.post(
+            "/transactions",
+            json={
+                "type": "income",
+                "amount": "50.00",
+                "date": day,
+                "wallet_id": wallet,
+                "category_id": bonus,
+            },
+            headers=_auth(token),
+        )
+        await client.post(
+            "/transactions",
+            json={
+                "type": "income",
+                "amount": "10.00",
+                "date": day,
+                "wallet_id": wallet,
+            },
+            headers=_auth(token),
+        )
+        # Expense, Transfer and Opening Balance never become income slices.
+        await _create_expense(client, token, wallet, "7.00", day, food)
+        savings = await _create_wallet(client, token, "Inc Pie Savings", "checking", "0.00")
+        await client.post(
+            "/transactions",
+            json={
+                "type": "transfer",
+                "amount": "30.00",
+                "date": day,
+                "source_wallet_id": wallet,
+                "destination_wallet_id": savings,
+            },
+            headers=_auth(token),
+        )
+        await _create_wallet(client, token, "Inc Pie OB Wallet", "checking", "50.00")
+
+        summary = await _summary(client, token, month=_previous_month())
+
+        slices = {s["name"]: s for s in summary["incomes_by_category"]}
+        # Largest first: Bonus before Salary, Uncategorized last.
+        assert [s["name"] for s in summary["incomes_by_category"]] == [
+            "Inc Bonus",
+            "Inc Salary",
+            "Uncategorized",
+        ]
+        assert slices["Inc Bonus"]["category_id"] == bonus
+        assert slices["Inc Bonus"]["amount"] == "50.00"
+        assert slices["Inc Salary"]["amount"] == "30.00"
+        assert slices["Uncategorized"]["category_id"] is None
+        assert slices["Uncategorized"]["amount"] == "10.00"
+        # The income pie always sums to the month's total income.
+        total = sum(
+            (Decimal(s["amount"]) for s in summary["incomes_by_category"]),
+            Decimal("0.00"),
+        )
+        assert total == Decimal(summary["income"]) == Decimal("90.00")
+        # The expense pie is untouched by the incomes.
+        assert sum(
+            (Decimal(s["amount"]) for s in summary["expenses_by_category"]),
+            Decimal("0.00"),
+        ) == Decimal("7.00")
+    finally:
+        delete_account(database_url, account_id)
+
+
 # --- T12: expense trend chart ---
 
 
@@ -595,9 +688,80 @@ async def test_expense_trend_buckets_by_month_and_zero_fills(
         assert trend["from_month"] == m3
         assert trend["to_month"] == m1
         assert [b["month"] for b in trend["months"]] == [m3, m2, m1]
-        assert [b["expenses"] for b in trend["months"]] == ["10.00", "0.00", "20.00"]
+        assert [b["amount"] for b in trend["months"]] == ["10.00", "0.00", "20.00"]
     finally:
         delete_account(database_url, account_id)
+
+
+async def test_income_trend_buckets_income_by_month_and_zero_fills(
+    client: AsyncClient, database_url: str
+) -> None:
+    """The income trend mirrors the expense trend: monthly Incomes bucketed
+    one bucket per month across the inclusive range — a month with no income
+    is still a €0.00 bucket — and only Income Transactions count: expenses,
+    Transfers and Opening Balances never appear, nor do incomes outside the
+    range."""
+    account_id = insert_foreign_account(database_url, "income-trend@budjetame.dev")
+    try:
+        token = await _login(client, email="income-trend@budjetame.dev", password="whatever")
+        wallet = await _create_wallet(client, token, "Inc Trend Wallet", "checking", "0.00")
+        m4, m3, m2, m1 = _months_ago(4), _months_ago(3), _months_ago(2), _months_ago(1)
+        for amount, day in (("10.00", _day_in(m3)), ("20.00", _day_in(m1))):
+            response = await client.post(
+                "/transactions",
+                json={"type": "income", "amount": amount, "date": day, "wallet_id": wallet},
+                headers=_auth(token),
+            )
+            assert response.status_code == 201
+        await client.post(
+            "/transactions",
+            json={"type": "income", "amount": "7.00", "date": _day_in(m4), "wallet_id": wallet},
+            headers=_auth(token),
+        )  # outside the range
+        # Non-income money movements in the range must not count.
+        await _create_expense(client, token, wallet, "99.00", _day_in(m2))
+        savings = await _create_wallet(client, token, "Inc Trend Savings", "checking", "0.00")
+        await client.post(
+            "/transactions",
+            json={
+                "type": "transfer",
+                "amount": "50.00",
+                "date": _day_in(m2),
+                "source_wallet_id": wallet,
+                "destination_wallet_id": savings,
+            },
+            headers=_auth(token),
+        )
+
+        response = await client.get(
+            f"/dashboard/income-trend?from_month={m3}&to_month={m1}",
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        trend = response.json()
+        assert trend["from_month"] == m3
+        assert trend["to_month"] == m1
+        assert [b["month"] for b in trend["months"]] == [m3, m2, m1]
+        assert [b["amount"] for b in trend["months"]] == ["10.00", "0.00", "20.00"]
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_income_trend_rejects_bad_ranges(client: AsyncClient) -> None:
+    token = await _login(client)
+    m = _months_ago(1)
+
+    bad_urls = [
+        f"/dashboard/income-trend?from_month=banana&to_month={m}",
+        f"/dashboard/income-trend?from_month=2026-13&to_month={m}",
+        f"/dashboard/income-trend?from_month={_months_ago(2)}&to_month={_months_ago(3)}",
+        "/dashboard/income-trend?from_month=2026-01",  # missing to_month
+        "/dashboard/income-trend?to_month=2026-01",  # missing from_month
+    ]
+    for url in bad_urls:
+        response = await client.get(url, headers=_auth(token))
+        assert response.status_code == 422, url
 
 
 async def test_expense_trend_buckets_europe_rome_month_boundaries(
@@ -616,7 +780,7 @@ async def test_expense_trend_buckets_europe_rome_month_boundaries(
 
         trend = await _trend(client, token, m2, m1)
 
-        assert [b["expenses"] for b in trend["months"]] == ["10.00", "5.00"]
+        assert [b["amount"] for b in trend["months"]] == ["10.00", "5.00"]
     finally:
         delete_account(database_url, account_id)
 

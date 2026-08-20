@@ -1,4 +1,4 @@
-/** Dashboard resource: summary and expense trend (issue #17). */
+/** Dashboard resource: summary and trends (issue #17). */
 
 import { request } from './transport'
 
@@ -8,6 +8,9 @@ export type DashboardSummary = {
   income: string
   expenses: string
   expenses_by_category: CategoryExpense[]
+  /** The income pie for the same month — the mirror of the expense pie; the
+   * pie card toggles between the two. */
+  incomes_by_category: CategoryExpense[]
 }
 
 export type CategoryExpense = {
@@ -21,10 +24,14 @@ export type CategoryExpense = {
 
 export type MonthBucket = {
   month: string
-  expenses: string
+  /** The bucket's total — Expenses for `kind: 'expense'`, Incomes for
+   * `kind: 'income'`. */
+  amount: string
 }
 
-export type ExpenseTrend = {
+export type TrendKind = 'expense' | 'income'
+
+export type Trend = {
   from_month: string
   to_month: string
   months: MonthBucket[]
@@ -61,17 +68,18 @@ export async function fetchDashboardSummary(
   return (await response.json()) as DashboardSummary
 }
 
-export async function fetchExpenseTrend(
+/** The trend over an inclusive month range (T12, US28): the frontend picks
+ * the kind with the trend card's toggle — `expense` hits `/expense-trend`,
+ * `income` hits `/income-trend`. */
+export async function fetchTrend(
   token: string,
+  kind: TrendKind,
   fromMonth: string,
   toMonth: string,
-): Promise<ExpenseTrend> {
-  const response = await request(
-    `/dashboard/expense-trend?from_month=${fromMonth}&to_month=${toMonth}`,
-    {
-      token,
-      errorMessage: 'Could not load the expense trend',
-    },
-  )
-  return (await response.json()) as ExpenseTrend
+): Promise<Trend> {
+  const response = await request(`/dashboard/${kind}-trend?from_month=${fromMonth}&to_month=${toMonth}`, {
+    token,
+    errorMessage: 'Could not load the trend',
+  })
+  return (await response.json()) as Trend
 }

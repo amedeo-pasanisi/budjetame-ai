@@ -4,13 +4,13 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_account
 from app.dates import Month
 from app.deps import get_session
-from app.models import Account
+from app.models import Account, TransactionType
 from app.schemas import (
     BudgetView,
     CategoryExpense,
     DashboardSummary,
-    ExpenseTrend,
     MonthBucket,
+    Trend,
 )
 from app.services import dashboard as dashboard_service
 
@@ -32,7 +32,8 @@ def dashboard_summary(
     session: Session = Depends(get_session),
 ) -> DashboardSummary:
     """The Dashboard overview: Net Worth plus the reference month's Income and
-    Expense totals and its expense pie. The month defaults to the current one,
+    Expense totals and its category pies — expenses and incomes, both (T11);
+    the frontend toggles between them. The month defaults to the current one,
     bucketed in Europe/Rome, the app's single fixed timezone; `?month=YYYY-MM`
     selects another one and the whole summary reflects it (US27, T11). Opening
     Balance Transactions are excluded from the statistics (CONTEXT.md)."""
@@ -40,33 +41,70 @@ def dashboard_summary(
     income, expenses = dashboard_service.month_income_expenses(
         session, account.id, ref_month
     )
-    slices = dashboard_service.expenses_by_category(session, account.id, ref_month)
+    expense_slices = dashboard_service.amounts_by_category(
+        session, account.id, ref_month, TransactionType.EXPENSE
+    )
+    income_slices = dashboard_service.amounts_by_category(
+        session, account.id, ref_month, TransactionType.INCOME
+    )
     return DashboardSummary(
         net_worth=dashboard_service.net_worth(session, account.id),
         month=ref_month.iso,
         income=income,
         expenses=expenses,
-        expenses_by_category=[CategoryExpense(**slice_) for slice_ in slices],
+        expenses_by_category=[CategoryExpense(**slice_) for slice_ in expense_slices],
+        incomes_by_category=[CategoryExpense(**slice_) for slice_ in income_slices],
     )
 
 
-@router.get("/expense-trend", response_model=ExpenseTrend)
+@router.get("/expense-trend", response_model=Trend)
 def expense_trend(
     from_month: str,
     to_month: str,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> ExpenseTrend:
+) -> Trend:
     """Monthly Expense totals over the inclusive month range (US28, T12): one
     bucket per month, zero-filled for months with no expenses, bucketed
     server-side in Europe/Rome. `from_month` must not be after `to_month`; a
     malformed month is 422."""
+    return _trend(
+        session, account, TransactionType.EXPENSE, from_month, to_month
+    )
+
+
+@router.get("/income-trend", response_model=Trend)
+def income_trend(
+    from_month: str,
+    to_month: str,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> Trend:
+    """Monthly Income totals over the inclusive month range — the mirror of
+    the expense trend, same shape and rules, so the frontend's trend toggle
+    reuses one chart."""
+    return _trend(
+        session, account, TransactionType.INCOME, from_month, to_month
+    )
+
+
+def _trend(
+    session: Session,
+    account: Account,
+    transaction_type: TransactionType,
+    from_month: str,
+    to_month: str,
+) -> Trend:
+    """The two trend endpoints' shared body: validate the range, bucket the
+    given Transaction type's totals server-side in Europe/Rome."""
     start_month = _month_or_422(from_month)
     end_month = _month_or_422(to_month)
     if start_month > end_month:
         raise HTTPException(status_code=422, detail="from_month must not be after to_month")
-    buckets = dashboard_service.expense_trend(session, account.id, start_month, end_month)
-    return ExpenseTrend(
+    buckets = dashboard_service.month_trend(
+        session, account.id, start_month, end_month, transaction_type
+    )
+    return Trend(
         from_month=start_month.iso,
         to_month=end_month.iso,
         months=[MonthBucket(**bucket) for bucket in buckets],

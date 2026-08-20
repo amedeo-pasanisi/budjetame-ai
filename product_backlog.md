@@ -152,13 +152,14 @@
 * **Story:** As a user, as soon as I open the app I want to see my Net Worth and a summary of the month's Income/Expenses, so that I have an immediate overview of my finances.
 * **Acceptance Criteria:**
   * Net Worth calculates the algebraic sum of all wallets (including frozen ones, which are always €0, and Contact Wallets).
-  * A progress bar or text is displayed comparing the month's Income vs Expenses.
+  * The month's category pies — Expenses by default, Incomes via the pie's toggle (US 6.2) — summarize the month. The Income vs Expenses progress bar is removed: the pies and the trend toggles carry that comparison.
 
 **US 6.2 - Category Pie Chart**
 * **Story:** As a user, I want to see a pie chart, so that I can immediately understand which categories are costing me the most this month.
 * **Acceptance Criteria:**
   * The chart correctly sums all expenses associated with a specific category in the current month.
   * Uncategorized expenses appear in an "Uncategorized" slice, so the pie always sums to the month's total expenses.
+  * A toggle switches the pie between Expenses by Category and Incomes by Category — both ride on the same summary response.
 
 **US 6.3 - History and Time Filters**
 * **Story:** As a user, I want to be able to change the reference month or year in the dashboard, so that I can compare my past habits.
@@ -168,6 +169,7 @@
 * **Acceptance Criteria:**
   * Bar or line chart (Bar chart / Line chart). X-axis: Months. Y-axis: Total Expenses.
   * The user selects a time range (start/end date picker) from the frontend; the chart buckets expenses by month within that range.
+  * A toggle switches the chart between the Expenses trend and the Incomes trend (the income side hits the mirroring `income-trend` endpoint).
 
 ---
 

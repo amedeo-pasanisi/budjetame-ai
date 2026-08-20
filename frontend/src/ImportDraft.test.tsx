@@ -25,7 +25,7 @@ vi.mock('./api', () => ({
   fetchRecurringIncomes: vi.fn().mockResolvedValue([]),
   fetchTransactions: vi.fn(),
   fetchDashboardSummary: vi.fn(),
-  fetchExpenseTrend: vi.fn(),
+  fetchTrend: vi.fn(),
   fetchBudget: vi.fn().mockResolvedValue({
     month: '',
     monthly_spendable: '0.00',
@@ -59,7 +59,7 @@ import {
   confirmImport,
   fetchCategories,
   fetchDashboardSummary,
-  fetchExpenseTrend,
+  fetchTrend,
   fetchTransactions,
   fetchWallets,
   previewImport,
@@ -73,7 +73,7 @@ const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
 const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchDashboardSummaryMock = vi.mocked(fetchDashboardSummary)
-const fetchExpenseTrendMock = vi.mocked(fetchExpenseTrend)
+const fetchTrendMock = vi.mocked(fetchTrend)
 
 const wallet: Wallet = {
   id: 1,
@@ -207,8 +207,9 @@ beforeEach(() => {
     income: '0.00',
     expenses: '4.50',
     expenses_by_category: [],
+    incomes_by_category: [],
   })
-  fetchExpenseTrendMock.mockResolvedValue({
+  fetchTrendMock.mockResolvedValue({
     from_month: '2026-03',
     to_month: '2026-08',
     months: [],

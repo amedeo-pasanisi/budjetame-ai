@@ -1,15 +1,16 @@
-/** Dashboard Budget card (issue #66): the big Spendable Today, the "per day ·
- * this month" line, the 0 + "you're X € over" note when the bucket is
- * negative, the hide-when-no-Recurring-definitions rule, and loading and
- * error states that never look like an empty Budget. The API client is
- * mocked; the card only renders what the endpoint returns — no computation
+/** Dashboard cards: the Budget card (issue #66) — the big Spendable Today,
+ * the "per day · this month" line, the 0 + "you're X € over" note when the
+ * bucket is negative, the hide-when-no-Recurring-definitions rule — plus the
+ * category pie and the trend, each toggling between Expenses and Incomes.
+ * Loading and error states never look like an empty card. The API client is
+ * mocked; the cards only render what the endpoints return — no computation
  * on the client. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { DashboardScreen } from './DashboardScreen'
 import { todayInRome } from './transactions'
-import type { BudgetView, RecurringCost, RecurringIncome } from './api'
+import type { BudgetView, CategoryExpense, RecurringCost, RecurringIncome } from './api'
 
 vi.mock('./api', async () => {
   const { formatEuros } = await import('./api/format')
@@ -32,7 +33,7 @@ vi.mock('./api', async () => {
         : fallback,
     formatEuros,
     fetchDashboardSummary: vi.fn(),
-    fetchExpenseTrend: vi.fn(),
+    fetchTrend: vi.fn(),
     fetchBudget: vi.fn(),
     fetchRecurringCosts: vi.fn(),
     fetchRecurringIncomes: vi.fn(),
@@ -42,13 +43,13 @@ vi.mock('./api', async () => {
 import {
   fetchBudget,
   fetchDashboardSummary,
-  fetchExpenseTrend,
   fetchRecurringCosts,
   fetchRecurringIncomes,
+  fetchTrend,
 } from './api'
 
 const fetchDashboardSummaryMock = vi.mocked(fetchDashboardSummary)
-const fetchExpenseTrendMock = vi.mocked(fetchExpenseTrend)
+const fetchTrendMock = vi.mocked(fetchTrend)
 const fetchBudgetMock = vi.mocked(fetchBudget)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
@@ -71,8 +72,6 @@ const cost: RecurringCost = {
   id: 1,
   name: 'Rent',
   amount: '850.00',
-  wallet_id: 1,
-  category_id: null,
   interval_value: 1,
   interval_unit: 'months',
   start_date: null,
@@ -89,8 +88,6 @@ const income: RecurringIncome = {
   id: 1,
   name: 'Salary',
   amount: '2100.00',
-  wallet_id: 1,
-  category_id: null,
   interval_value: 1,
   interval_unit: 'months',
   start_date: null,
@@ -103,6 +100,33 @@ const income: RecurringIncome = {
   created_at: createdAt,
 }
 
+/** The two pies: one slice each, distinct enough that no assertion can
+ * collide with the Budget card's euros. */
+const expenseSlice: CategoryExpense = {
+  category_id: 1,
+  name: 'Food',
+  icon: '🍕',
+  color: '#ef4444',
+  amount: '100.00',
+}
+
+const incomeSlice: CategoryExpense = {
+  category_id: 2,
+  name: 'Salary',
+  icon: '💰',
+  color: '#10b981',
+  amount: '200.00',
+}
+
+/** The trend card's default range: five months before the current one. */
+function monthsAgo(count: number): string {
+  const [year, month] = currentMonth.split('-').map(Number)
+  const total = year * 12 + (month - 1) - count
+  return `${String(Math.floor(total / 12)).padStart(4, '0')}-${String((total % 12) + 1).padStart(2, '0')}`
+}
+
+const trendFromMonth = monthsAgo(5)
+
 beforeEach(() => {
   // The summary and trend echo the requested months so the dashboard's
   // loaded-state guards pass; the numbers are distinct so no assertion
@@ -112,9 +136,10 @@ beforeEach(() => {
     net_worth: '1000.00',
     income: '3000.00',
     expenses: '1500.00',
-    expenses_by_category: [],
+    expenses_by_category: [expenseSlice],
+    incomes_by_category: [incomeSlice],
   }))
-  fetchExpenseTrendMock.mockImplementation(async (_token, fromMonth, toMonth) => ({
+  fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
     from_month: fromMonth,
     to_month: toMonth,
     months: [],
@@ -214,5 +239,91 @@ describe('Dashboard Budget card', () => {
     expect(screen.getByText('€49.80')).toBeInTheDocument()
     expect(screen.getByText('€16.60 per day · €500.00 this month')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Dashboard category pie', () => {
+  it('shows the expense pie by default and its center label', async () => {
+    render(<DashboardScreen />)
+
+    expect(await screen.findByText(/Expenses by Category/)).toBeInTheDocument()
+    expect(screen.getByText('🍕 Food')).toBeInTheDocument()
+    expect(screen.getByText('€100.00 · 100%')).toBeInTheDocument()
+    expect(screen.getByLabelText('Expenses by category')).toBeInTheDocument()
+    // The pie's center is the expense total, not the income total.
+    expect(screen.getByText('€1500.00')).toBeInTheDocument()
+    expect(fetchDashboardSummaryMock).toHaveBeenCalledWith('', currentMonth)
+  })
+
+  it('toggles to the income pie without refetching the summary', async () => {
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses by Category/)
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Pie side' })).getByRole('button', { name: 'Incomes' }))
+
+    expect(await screen.findByText(/Incomes by Category/)).toBeInTheDocument()
+    expect(screen.getByText('💰 Salary')).toBeInTheDocument()
+    expect(screen.getByText('€200.00 · 100%')).toBeInTheDocument()
+    expect(screen.getByLabelText('Incomes by category')).toBeInTheDocument()
+    expect(screen.getByText('€3000.00')).toBeInTheDocument()
+    expect(screen.queryByText('🍕 Food')).not.toBeInTheDocument()
+    // Both pies ride on the same summary — one fetch.
+    expect(fetchDashboardSummaryMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the empty state per side', async () => {
+    fetchDashboardSummaryMock.mockImplementation(async (_token, month) => ({
+      month: month ?? '',
+      net_worth: '1000.00',
+      income: '3000.00',
+      expenses: '1500.00',
+      expenses_by_category: [expenseSlice],
+      incomes_by_category: [],
+    }))
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses by Category/)
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Pie side' })).getByRole('button', { name: 'Incomes' }))
+
+    expect(await screen.findByText(/No incomes recorded in/)).toBeInTheDocument()
+  })
+})
+
+describe('Dashboard trend', () => {
+  it('fetches the expense trend and renders its bars', async () => {
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [{ month: '2026-03', amount: '42.00' }],
+    }))
+    render(<DashboardScreen />)
+
+    expect(await screen.findByText(/Expenses Trend ·/)).toBeInTheDocument()
+    expect(screen.getByText('€42.00')).toBeInTheDocument()
+    expect(fetchTrendMock).toHaveBeenCalledWith('', 'expense', trendFromMonth, currentMonth)
+  })
+
+  it('toggles to the income trend and refetches with the new kind', async () => {
+    fetchTrendMock.mockImplementation(async (_token, kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [{ month: '2026-03', amount: kind === 'income' ? '77.00' : '42.00' }],
+    }))
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses Trend ·/)
+    expect(fetchTrendMock).toHaveBeenCalledWith('', 'expense', trendFromMonth, currentMonth)
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Trend side' })).getByRole('button', { name: 'Incomes' }))
+
+    expect(await screen.findByText(/Incomes Trend ·/)).toBeInTheDocument()
+    expect(screen.getByText('€77.00')).toBeInTheDocument()
+    expect(fetchTrendMock).toHaveBeenCalledWith('', 'income', trendFromMonth, currentMonth)
+  })
+
+  it('shows an error state on a failed trend load', async () => {
+    fetchTrendMock.mockRejectedValue(new Error('network down'))
+    render(<DashboardScreen />)
+
+    expect(await screen.findByText('Could not load the trend.')).toBeInTheDocument()
   })
 })

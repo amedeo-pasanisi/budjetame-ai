@@ -45,11 +45,12 @@ export {
   type BudgetView,
   type CategoryExpense,
   type DashboardSummary,
-  type ExpenseTrend,
   type MonthBucket,
+  type Trend,
+  type TrendKind,
   fetchBudget,
   fetchDashboardSummary,
-  fetchExpenseTrend,
+  fetchTrend,
 } from './dashboard'
 
 export {

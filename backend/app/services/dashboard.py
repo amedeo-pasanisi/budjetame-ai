@@ -2,10 +2,11 @@
 #65). Called by the HTTP layer; never from tests.
 
 The Dashboard shows Net Worth — the algebraic sum of every Wallet balance —
-and the current month's Income vs Expenses. All bucketing happens in
-Europe/Rome, the app's single fixed timezone (CONTEXT.md). Opening Balance
-Transactions never count toward the statistics; Transfers are neither Income
-nor Expense, so they never appear either. The Budget card (issue #65) is
+and the reference month's category pies and trends, toggled between Expenses
+and Incomes on the frontend. All bucketing happens in Europe/Rome, the
+app's single fixed timezone (CONTEXT.md). Opening Balance Transactions never
+count toward the statistics; Transfers are neither Income nor Expense, so
+they never appear either. The Budget card (issue #65) is
 fully derived, never stored: the service sums the month's Recurring Income
 and Recurring Cost Occurrences into a Monthly Spendable (the pure walker in
 app.recurrence owns the math, the pure arithmetic in app.budget the
@@ -69,15 +70,19 @@ def month_income_expenses(
     return income, expenses
 
 
-def expenses_by_category(
-    session: Session, account_id: int, month: Month
+def amounts_by_category(
+    session: Session,
+    account_id: int,
+    month: Month,
+    transaction_type: TransactionType,
 ) -> list[dict]:
-    """The expense pie (T11): one slice per Category for the given Europe/Rome
-    month, largest first. Expenses whose Category was deleted group into an
+    """One category pie (T11): one slice per Category for the given
+    Europe/Rome month, largest first, of the month's Expenses (Expense) or
+    Incomes (Income). Transactions whose Category was deleted group into an
     "Uncategorized" slice (category_id null — no stored color, the frontend
-    renders a neutral one), so the slices always sum to the month's total
-    expenses (US26). Income, Opening Balances and Transfers never appear —
-    only Expense Transactions are grouped."""
+    renders a neutral one), so the slices always sum to the month's total for
+    the pie's side (US26). Opening Balances and Transfers never appear — only
+    the given type's Transactions are grouped."""
     start, next_start = rome_month_bounds(month)
     rows = session.execute(
         select(
@@ -91,7 +96,7 @@ def expenses_by_category(
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(
             Transaction.account_id == account_id,
-            Transaction.type == TransactionType.EXPENSE.value,
+            Transaction.type == transaction_type.value,
             Transaction.date >= start,
             Transaction.date < next_start,
         )
@@ -112,20 +117,24 @@ def expenses_by_category(
     ]
 
 
-def expense_trend(
-    session: Session, account_id: int, from_month: Month, to_month: Month
+def month_trend(
+    session: Session,
+    account_id: int,
+    from_month: Month,
+    to_month: Month,
+    transaction_type: TransactionType,
 ) -> list[dict]:
-    """Monthly Expense totals over the inclusive month range, oldest first,
-    with a €0.00 bucket for every month in between so the chart is a true trend
-    (US28, T12). Bucketing happens in Europe/Rome via `to_rome_month` — the app's
-    single conversion boundary (CONTEXT.md); income, Opening Balances and
-    Transfers never count."""
+    """Monthly totals of the given Transaction type over the inclusive month
+    range, oldest first, with a €0.00 bucket for every month in between so the
+    chart is a true trend (US28, T12). Bucketing happens in Europe/Rome via
+    `to_rome_month` — the app's single conversion boundary (CONTEXT.md); the
+    other type, Opening Balances and Transfers never count."""
     start, _ = rome_month_bounds(from_month)
     _, end_exclusive = rome_month_bounds(to_month)
     rows = session.execute(
         select(Transaction.date, Transaction.amount).where(
             Transaction.account_id == account_id,
-            Transaction.type == TransactionType.EXPENSE.value,
+            Transaction.type == transaction_type.value,
             Transaction.date >= start,
             Transaction.date < end_exclusive,
         )
@@ -135,7 +144,7 @@ def expense_trend(
         bucket = to_rome_month(transaction_date)
         totals[bucket] = totals.get(bucket, Decimal("0.00")) + Decimal(amount)
     return [
-        {"month": month.iso, "expenses": totals.get(month, Decimal("0.00"))}
+        {"month": month.iso, "amount": totals.get(month, Decimal("0.00"))}
         for month in _month_range(from_month, to_month)
     ]
 

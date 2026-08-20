@@ -61,7 +61,7 @@ vi.mock('./api', async () => {
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),
     fetchDashboardSummary: vi.fn(),
-    fetchExpenseTrend: vi.fn(),
+    fetchTrend: vi.fn(),
     fetchBudget: vi.fn(),
     previewImport: vi.fn(),
     confirmImport: vi.fn(),
@@ -86,7 +86,7 @@ import {
   fetchBudget,
   fetchCategories,
   fetchDashboardSummary,
-  fetchExpenseTrend,
+  fetchTrend,
   fetchRecurringCosts,
   fetchRecurringIncomes,
   fetchTransactions,
@@ -97,7 +97,7 @@ const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
 const fetchTransactionsMock = vi.mocked(fetchTransactions)
 const fetchDashboardSummaryMock = vi.mocked(fetchDashboardSummary)
-const fetchExpenseTrendMock = vi.mocked(fetchExpenseTrend)
+const fetchTrendMock = vi.mocked(fetchTrend)
 const fetchBudgetMock = vi.mocked(fetchBudget)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
@@ -151,8 +151,9 @@ beforeEach(() => {
     income: '0.00',
     expenses: '0.00',
     expenses_by_category: [],
+    incomes_by_category: [],
   }))
-  fetchExpenseTrendMock.mockImplementation(async (_token, fromMonth, toMonth) => ({
+  fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
     from_month: fromMonth,
     to_month: toMonth,
     months: [],
