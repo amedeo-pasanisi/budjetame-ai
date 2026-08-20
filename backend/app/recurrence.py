@@ -161,6 +161,46 @@ def next_due_date(
             k += 1
 
 
+def occurrences_in_window(
+    start: date,
+    n: int,
+    unit: str,
+    due_day: int | None,
+    due_month: int | None,
+    window_start: date,
+    window_end: date,
+) -> list[date]:
+    """The due dates of every Occurrence of the definition that fall inside
+    the window `[window_start, window_end]`, both edges included, strictly
+    increasing — the missing cousin of `next_due_date` and `backlog_count`:
+    where they find one boundary, this walks the whole span, so the Budget
+    can sum one definition's amount per returned date (issue #64). Overrides
+    and the 29–31 clamping apply per Occurrence exactly as in
+    `due_date_for`.
+
+    Due dates are strictly increasing in k, so the walk starts at the
+    interval estimate and only ever advances — at most a few steps before
+    the window, then one step per due date inside it.
+    """
+    if window_end < window_start:
+        raise ValueError(
+            f"window end {window_end} is before window start {window_start}"
+        )
+    k = _elapsed_intervals(start, n, unit, window_start)
+    dues: list[date] = []
+    while True:
+        due = due_date_for(
+            occurrence_date(start, n, unit, k), unit, due_day, due_month
+        )
+        if due < window_start:
+            k += 1
+            continue
+        if due > window_end:
+            return dues
+        dues.append(due)
+        k += 1
+
+
 def backlog_count(
     start: date,
     n: int,

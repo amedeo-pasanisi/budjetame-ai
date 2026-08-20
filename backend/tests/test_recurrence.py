@@ -21,6 +21,7 @@ from app.recurrence import (
     due_date_for,
     next_due_date,
     occurrence_date,
+    occurrences_in_window,
     rome_day_of,
     rome_today,
 )
@@ -184,6 +185,116 @@ def test_next_due_before_the_start_is_the_first_occurrence() -> None:
 def test_next_due_rejects_unknown_unit() -> None:
     with pytest.raises(ValueError):
         next_due_date(date(2026, 1, 1), 1, "fortnights", None, None, date(2026, 1, 1))
+
+
+# --- occurrences_in_window: every due date inside a window ----------------
+
+def test_window_walker_days_interval_with_inclusive_edges() -> None:
+    # Every 5 days from 2026-01-01: dues are 01-01, 01-06, 01-11, 01-16,
+    # 01-21, 01-26, 01-31, 02-05, ... The window keeps the first due on its
+    # start edge and the last due on its end edge.
+    start = date(2026, 1, 1)
+    assert occurrences_in_window(
+        start, 5, "days", None, None, date(2026, 1, 6), date(2026, 1, 31)
+    ) == [
+        date(2026, 1, 6),
+        date(2026, 1, 11),
+        date(2026, 1, 16),
+        date(2026, 1, 21),
+        date(2026, 1, 26),
+        date(2026, 1, 31),
+    ]
+
+
+def test_window_walker_weeks_interval() -> None:
+    # Every 2 weeks from 2026-01-01 (a Thursday): 01-01, 01-15, 01-29,
+    # 02-12, ...
+    start = date(2026, 1, 1)
+    assert occurrences_in_window(
+        start, 2, "weeks", None, None, date(2026, 1, 15), date(2026, 2, 12)
+    ) == [date(2026, 1, 15), date(2026, 1, 29), date(2026, 2, 12)]
+
+
+def test_window_walker_months_with_clamping() -> None:
+    # Start on the 31st, due on the 31st: February's due clamps to the 28th
+    # (2026 is not a leap year), March's is back on the 31st.
+    start = date(2026, 1, 31)
+    assert occurrences_in_window(
+        start, 1, "months", 31, None, date(2026, 2, 1), date(2026, 4, 30)
+    ) == [date(2026, 2, 28), date(2026, 3, 31), date(2026, 4, 30)]
+
+
+def test_window_walker_months_with_an_override() -> None:
+    # The rent example: occurrences on the 15th, due on the 1st — the
+    # window holds each month's first day, including the first occurrence's
+    # due ahead of its own date.
+    start = date(2026, 3, 15)
+    assert occurrences_in_window(
+        start, 1, "months", 1, None, date(2026, 3, 1), date(2026, 5, 31)
+    ) == [date(2026, 3, 1), date(2026, 4, 1), date(2026, 5, 1)]
+
+
+def test_window_walker_uses_leap_february() -> None:
+    # 2028 is a leap year: February's due keeps the 29th.
+    start = date(2028, 1, 31)
+    assert occurrences_in_window(
+        start, 1, "months", None, None, date(2028, 2, 1), date(2028, 4, 30)
+    ) == [date(2028, 2, 29), date(2028, 3, 31), date(2028, 4, 30)]
+
+
+def test_window_walker_years_with_an_override() -> None:
+    # Occurrences on May 10, due December 1 of the same year: the December
+    # window holds that year's due; a window that never crosses a due is
+    # empty.
+    start = date(2026, 5, 10)
+    assert occurrences_in_window(
+        start, 1, "years", 1, 12, date(2026, 12, 1), date(2026, 12, 31)
+    ) == [date(2026, 12, 1)]
+    assert occurrences_in_window(
+        start, 1, "years", 1, 12, date(2026, 1, 1), date(2026, 11, 30)
+    ) == []
+
+
+def test_window_walker_before_the_start_is_empty() -> None:
+    assert occurrences_in_window(
+        date(2026, 3, 15), 1, "months", None, None, date(2026, 1, 1), date(2026, 2, 28)
+    ) == []
+
+
+def test_window_walker_an_early_override_pulls_the_first_due_in() -> None:
+    # A December 31 start due on the 1st: the first due precedes the start
+    # date itself, so a window over the start month still holds it.
+    start = date(2026, 12, 31)
+    assert occurrences_in_window(
+        start, 1, "months", 1, None, date(2026, 12, 1), date(2026, 12, 31)
+    ) == [date(2026, 12, 1)]
+
+
+def test_window_walker_a_gap_between_dues_is_empty() -> None:
+    # Every 5 days from 2026-01-01: no due falls between 01-02 and 01-05.
+    assert occurrences_in_window(
+        date(2026, 1, 1), 5, "days", None, None, date(2026, 1, 2), date(2026, 1, 5)
+    ) == []
+
+
+def test_window_walker_a_full_month_of_daily_dues() -> None:
+    # The Budget's own use: one daily definition inside a whole month
+    # window returns every day of the month, strictly increasing.
+    start = date(2026, 1, 1)
+    dues = occurrences_in_window(
+        start, 1, "days", None, None, date(2026, 1, 1), date(2026, 1, 31)
+    )
+    assert len(dues) == 31
+    assert dues[0] == date(2026, 1, 1)
+    assert dues[-1] == date(2026, 1, 31)
+    assert all(a < b for a, b in zip(dues, dues[1:]))
+
+
+def test_window_walker_rejects_a_reversed_window() -> None:
+    with pytest.raises(ValueError):
+        occurrences_in_window(
+            date(2026, 1, 1), 1, "days", None, None, date(2026, 2, 1), date(2026, 1, 1)
+        )
 
 
 # --- backlog_count: Unpaid Occurrences due today or earlier ---------------
