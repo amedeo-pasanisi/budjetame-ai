@@ -7,6 +7,7 @@ import {
 } from './api'
 import { ModalShell } from './ModalShell'
 import { TransactionForm } from './TransactionForm'
+import type { WalletTarget } from './transactionFields'
 
 type TransactionModalProps = {
   wallets: Wallet[]
@@ -23,6 +24,12 @@ type TransactionModalProps = {
   /** The freshly created Category the screen reports back: the field selects
    * it, leaving the rest of the draft untouched. */
   categoryToSelect: number | null
+  /** Inline entity creation (ADR-0013): opens the Wallet create modal
+   * hosted by the screen, for the field whose sentinel was picked. */
+  onAddWallet: (target: WalletTarget) => void
+  /** The freshly created Wallet the screen reports back, with the field
+   * whose sentinel was picked. */
+  walletToSelect: { id: number; target: WalletTarget } | null
 }
 
 /** The create/edit/delete Transaction form inside the shared modal shell
@@ -40,6 +47,8 @@ export function TransactionModal({
   onClose,
   onAddCategory,
   categoryToSelect,
+  onAddWallet,
+  walletToSelect,
 }: TransactionModalProps) {
   return (
     <ModalShell
@@ -58,6 +67,8 @@ export function TransactionModal({
         onCancel={onClose}
         onAddCategory={onAddCategory}
         categoryToSelect={categoryToSelect}
+        onAddWallet={onAddWallet}
+        walletToSelect={walletToSelect}
       />
     </ModalShell>
   )

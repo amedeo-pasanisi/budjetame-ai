@@ -24,6 +24,7 @@ import {
   WalletBalancePreview,
   WalletField,
   type TransactionFormType,
+  type WalletTarget,
 } from './transactionFields'
 import { MapPicker } from './MapPicker'
 import { projectBalance, projectTransfer } from './balanceProjection'
@@ -61,6 +62,16 @@ type TransactionFormProps = {
   /** The freshly created Category the screen reports back: the field selects
    * it, leaving the rest of the draft untouched. */
   categoryToSelect: number | null
+  /** Inline entity creation (ADR-0013): opens the Wallet create modal
+   * hosted by the screen — restricted to Checking, Credit Card, and Cash
+   * for the Expense/Income Wallet field ('wallet'), all four types for a
+   * Transfer's From/To ('source'/'destination'), since Transfers are where
+   * Contact Wallets belong. */
+  onAddWallet: (target: WalletTarget) => void
+  /** The freshly created Wallet the screen reports back, with the field
+   * whose sentinel was picked: that exact field selects it, leaving the
+   * rest of the draft untouched. */
+  walletToSelect: { id: number; target: WalletTarget } | null
 }
 
 /** The create/edit/delete form for a Transaction (Expense, Income, or
@@ -78,6 +89,8 @@ export function TransactionForm({
   onCancel,
   onAddCategory,
   categoryToSelect,
+  onAddWallet,
+  walletToSelect,
 }: TransactionFormProps) {
   const [type, setType] = useState<TransactionFormType>(
     editing?.type === 'transfer'
@@ -117,6 +130,21 @@ export function TransactionForm({
       setCategoryId(categoryToSelect)
     }
   }, [categoryToSelect])
+  // The Wallet field's inline creation, same contract — but a Transfer has
+  // two Wallet fields, so the screen reports the target too: the new
+  // Wallet's id lands in exactly the field whose sentinel was picked
+  // ('wallet' for an Expense/Income, 'source' or 'destination' for a
+  // Transfer), and nothing else in the draft moves.
+  useEffect(() => {
+    if (walletToSelect === null) return
+    if (walletToSelect.target === 'source') {
+      setSourceWalletId(walletToSelect.id)
+    } else if (walletToSelect.target === 'destination') {
+      setDestinationWalletId(walletToSelect.id)
+    } else {
+      setWalletId(walletToSelect.id)
+    }
+  }, [walletToSelect])
   // The optional Recurring Cost link (issue #57): an Expense pins one cost,
   // paying its oldest Unpaid Occurrence. Seeded from the Transaction being
   // edited, so an untouched link is never re-sent (and never re-pinned).
@@ -456,9 +484,16 @@ export function TransactionForm({
           disabled={isEditing}
           onSourceChange={setSourceWalletId}
           onDestinationChange={setDestinationWalletId}
+          onAdd={onAddWallet}
         />
       ) : (
-        <WalletField wallets={assignableWallets} value={walletId} disabled={isEditing} onChange={setWalletId} />
+        <WalletField
+          wallets={assignableWallets}
+          value={walletId}
+          disabled={isEditing}
+          onChange={setWalletId}
+          onAdd={() => onAddWallet('wallet')}
+        />
       )}
 
       {isTransfer ? (

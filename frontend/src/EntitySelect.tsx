@@ -23,6 +23,9 @@ type EntitySelectProps = {
    * saves (via the screen's auto-select). */
   onAdd: () => void
   required?: boolean
+  /** Locks the select — e.g. the Transaction form's Wallet fields, which
+   * are frozen while editing: the sentinel stays visible but inert. */
+  disabled?: boolean
 }
 
 /** The shared entity select wrapper (ADR-0013): every entity dropdown in the
@@ -42,6 +45,7 @@ export function EntitySelect({
   entity,
   onAdd,
   required = false,
+  disabled = false,
 }: EntitySelectProps) {
   const handleChange = (event: ChangeEvent<HTMLSelectElement>) => {
     if (event.target.value === SENTINEL_VALUE) {
@@ -63,9 +67,10 @@ export function EntitySelect({
       <select
         id={id}
         required={required}
+        disabled={disabled}
         value={value === '' ? '' : String(value)}
         onChange={handleChange}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
       >
         {!required && <option value="">None</option>}
         {options.map((option) => (

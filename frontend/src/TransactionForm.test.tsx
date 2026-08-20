@@ -193,6 +193,8 @@ function renderForm(
       onCancel={() => {}}
       onAddCategory={() => {}}
       categoryToSelect={null}
+      onAddWallet={() => {}}
+      walletToSelect={null}
     />,
   )
 }
@@ -608,7 +610,9 @@ describe('TransactionForm frozen wallets (ADR-0002)', () => {
     const options = Array.from(select.querySelectorAll('option')).map(
       (option) => option.textContent,
     )
-    expect(options).toEqual(['Cash (€100.00)'])
+    // The inline-create sentinel (ADR-0013) rides alongside the active
+    // Wallets; Frozen ones stay out.
+    expect(options).toEqual(['Cash (€100.00)', '＋ Add wallet…'])
   })
 
   it('does not offer Frozen Wallets in the From/To selects for a Transfer', () => {
@@ -620,7 +624,7 @@ describe('TransactionForm frozen wallets (ADR-0002)', () => {
       const select = screen.getByLabelText(label)
       expect(
         Array.from(select.querySelectorAll('option')).map((option) => option.textContent),
-      ).toEqual(['Cash (€100.00)'])
+      ).toEqual(['Cash (€100.00)', '＋ Add wallet…'])
     }
   })
 

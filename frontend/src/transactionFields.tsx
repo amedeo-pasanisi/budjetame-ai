@@ -17,6 +17,13 @@ import { NON_CONTACT_WALLET_TYPES } from './transactions'
 
 export type TransactionFormType = 'expense' | 'income' | 'transfer'
 
+/** Which Wallet field a Transaction form's inline-create sentinel was
+ * picked from (ADR-0013): 'wallet' for an Expense/Income's single Wallet
+ * select, 'source' or 'destination' for a Transfer's From/To. The screen
+ * reports the newly created Wallet back with this target, so the form
+ * auto-selects it into the exact field — the only one that changes. */
+export type WalletTarget = 'wallet' | 'source' | 'destination'
+
 export function TypeSelector({
   active,
   disabled,
@@ -45,41 +52,47 @@ export function TypeSelector({
   )
 }
 
-/** The single-Wallet select an Expense or Income moves money through. */
+/** The single-Wallet select an Expense or Income moves money through, with
+ * the inline "＋ Add wallet…" sentinel (ADR-0013): the shared EntitySelect
+ * wrapper renders it always last and reverts the field on a sentinel pick;
+ * the screen hosts the inner New wallet modal, restricted to Checking,
+ * Credit Card, and Cash — Contact Wallets only move money via Transfers,
+ * so they never appear here. */
 export function WalletField({
   wallets,
   value,
   disabled,
   onChange,
+  onAdd,
 }: {
   wallets: Wallet[]
   value: number | undefined
   disabled: boolean
   onChange: (walletId: number) => void
+  /** Opens the Wallet create modal, hosted by the screen. */
+  onAdd: () => void
 }) {
   const spendableWallets = wallets.filter((wallet) =>
     NON_CONTACT_WALLET_TYPES.includes(wallet.type),
   )
   return (
     <div>
-      <label htmlFor="tx-wallet" className="block text-sm font-medium text-slate-700">
-        Wallet
-      </label>
-      <select
+      <EntitySelect
         id="tx-wallet"
+        label="Wallet"
         required
         disabled={disabled}
         value={value ?? ''}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
-      >
-        {spendableWallets.length === 0 && <option value="">No spendable wallets</option>}
-        {spendableWallets.map((wallet) => (
-          <option key={wallet.id} value={wallet.id}>
-            {wallet.name} ({formatEuros(wallet.balance)})
-          </option>
-        ))}
-      </select>
+        onChange={(next) => {
+          if (next !== '') onChange(next)
+        }}
+        options={spendableWallets.map((wallet) => ({
+          id: wallet.id,
+          label: `${wallet.name} (${formatEuros(wallet.balance)})`,
+        }))}
+        entity="wallet"
+        onAdd={onAdd}
+      />
       <p className="mt-1 text-xs text-slate-500">
         Contact wallets only move money through transfers.
       </p>
@@ -87,7 +100,12 @@ export function WalletField({
   )
 }
 
-/** The From/To Wallet selects a Transfer moves money between. */
+/** The From/To Wallet selects a Transfer moves money between. Each carries
+ * the inline "＋ Add wallet…" sentinel (ADR-0013); picking one opens the
+ * New wallet modal with all four types — including Contact — since
+ * Transfers are where Contact Wallets belong. The screen reports the new
+ * Wallet back with the exact field whose sentinel was picked, so only that
+ * field auto-selects it. */
 export function TransferWalletFields({
   wallets,
   sourceWalletId,
@@ -95,6 +113,7 @@ export function TransferWalletFields({
   disabled,
   onSourceChange,
   onDestinationChange,
+  onAdd,
 }: {
   wallets: Wallet[]
   sourceWalletId: number | undefined
@@ -102,6 +121,9 @@ export function TransferWalletFields({
   disabled: boolean
   onSourceChange: (walletId: number) => void
   onDestinationChange: (walletId: number) => void
+  /** Opens the Wallet create modal, hosted by the screen, with the field
+   * whose sentinel was picked. */
+  onAdd: (target: 'source' | 'destination') => void
 }) {
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -112,6 +134,7 @@ export function TransferWalletFields({
         value={sourceWalletId}
         disabled={disabled}
         onChange={onSourceChange}
+        onAdd={() => onAdd('source')}
       />
       <WalletSelect
         id="tx-destination"
@@ -120,6 +143,7 @@ export function TransferWalletFields({
         value={destinationWalletId}
         disabled={disabled}
         onChange={onDestinationChange}
+        onAdd={() => onAdd('destination')}
       />
     </div>
   )
@@ -319,6 +343,7 @@ function WalletSelect({
   value,
   disabled,
   onChange,
+  onAdd,
 }: {
   id: string
   label: string
@@ -326,27 +351,24 @@ function WalletSelect({
   value: number | undefined
   disabled: boolean
   onChange: (walletId: number) => void
+  onAdd: () => void
 }) {
   return (
-    <div>
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-        {label}
-      </label>
-      <select
-        id={id}
-        required
-        disabled={disabled}
-        value={value ?? ''}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
-      >
-        {wallets.length === 0 && <option value="">No wallets yet</option>}
-        {wallets.map((wallet) => (
-          <option key={wallet.id} value={wallet.id}>
-            {wallet.name} ({formatEuros(wallet.balance)})
-          </option>
-        ))}
-      </select>
-    </div>
+    <EntitySelect
+      id={id}
+      label={label}
+      required
+      disabled={disabled}
+      value={value ?? ''}
+      onChange={(next) => {
+        if (next !== '') onChange(next)
+      }}
+      options={wallets.map((wallet) => ({
+        id: wallet.id,
+        label: `${wallet.name} (${formatEuros(wallet.balance)})`,
+      }))}
+      entity="wallet"
+      onAdd={onAdd}
+    />
   )
 }

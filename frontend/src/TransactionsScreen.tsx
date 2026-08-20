@@ -20,6 +20,8 @@ import { CategoryModal } from './CategoryModal'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
 import { TransactionModal } from './TransactionModal'
+import type { WalletTarget } from './transactionFields'
+import { WalletModal } from './WalletModal'
 import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
 const ALL_CATEGORIES = -1
@@ -69,6 +71,20 @@ export function TransactionsScreen({
     'expense',
   )
   const [categoryToSelect, setCategoryToSelect] = useState<number | null>(null)
+  // The inner Wallet create modal (ADR-0013), stacked on top of the
+  // transaction form's modal, and the new Wallet it created — reported back
+  // to the open form with the exact field whose sentinel was picked, so
+  // that field selects it. The target doubles as the open flag (null =
+  // closed) and drives the eligibility lock: 'wallet' (an Expense/Income's
+  // single Wallet field) restricts the modal to Checking, Credit Card, and
+  // Cash — Contact Wallets move money only via Transfers — while a
+  // Transfer's From/To ('source'/'destination') allow all four types,
+  // since Transfers are where Contact Wallets belong.
+  const [walletModalTarget, setWalletModalTarget] = useState<WalletTarget | null>(null)
+  const [walletToSelect, setWalletToSelect] = useState<{
+    id: number
+    target: WalletTarget
+  } | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
   // then the search bar hides — there is nothing to search.
@@ -263,11 +279,26 @@ export function TransactionsScreen({
     setCategoryModalOpen(false)
   }
 
-  // Closing the transaction form also clears the pending auto-select: a
+  // The inner Wallet modal's save (ADR-0013): add the Wallet to the list
+  // state (so the dropdown offers it again without a reload), close only
+  // the inner modal, and report the new id — with the field whose sentinel
+  // was picked — to the open form so that exact field selects it (From or
+  // To for a Transfer, the single Wallet field otherwise). The form's
+  // draft is untouched.
+  const handleWalletCreated = (wallet: Wallet) => {
+    setWallets((current) => (current === null ? [wallet] : [...current, wallet]))
+    if (walletModalTarget !== null) {
+      setWalletToSelect({ id: wallet.id, target: walletModalTarget })
+    }
+    setWalletModalTarget(null)
+  }
+
+  // Closing the transaction form also clears the pending auto-selects: a
   // stale id must not be re-applied when the form opens again later.
   const closeForm = () => {
     setForm(null)
     setCategoryToSelect(null)
+    setWalletToSelect(null)
   }
 
   const handleSaved = (transaction: Transaction) => {
@@ -513,6 +544,8 @@ export function TransactionsScreen({
             setCategoryModalOpen(true)
           }}
           categoryToSelect={categoryToSelect}
+          onAddWallet={setWalletModalTarget}
+          walletToSelect={walletToSelect}
         />
       )}
 
@@ -521,6 +554,18 @@ export function TransactionsScreen({
           lockedType={categoryModalType}
           onSaved={handleCategoryCreated}
           onClose={() => setCategoryModalOpen(false)}
+        />
+      )}
+
+      {walletModalTarget !== null && (
+        <WalletModal
+          allowedTypes={
+            walletModalTarget === 'wallet'
+              ? ['checking', 'credit_card', 'cash']
+              : undefined
+          }
+          onSaved={handleWalletCreated}
+          onClose={() => setWalletModalTarget(null)}
         />
       )}
     </>

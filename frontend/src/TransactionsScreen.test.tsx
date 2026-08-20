@@ -41,6 +41,7 @@ vi.mock('./api', () => {
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),
     createCategory: vi.fn(),
+    createWallet: vi.fn(),
   }
 })
 
@@ -53,6 +54,7 @@ import {
   ApiError,
   createCategory,
   createTransaction,
+  createWallet,
   deleteTransaction,
   fetchCategories,
   fetchRecurringCosts,
@@ -138,6 +140,19 @@ const frozenWallet: Wallet = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+// A Contact Wallet (CONTEXT.md): only Transfers move money through it, so
+// the Expense/Income Wallet select never lists it — but the Transfer's
+// From/To selects do, and inline creation from a Transfer must allow the
+// Contact type.
+const marcoWallet: Wallet = {
+  id: 4,
+  name: 'Marco',
+  type: 'contact',
+  balance: '0.00',
+  frozen: false,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 const foodCategory: Category = {
   id: 1,
   name: 'Food',
@@ -214,6 +229,7 @@ const createTransactionMock = vi.mocked(createTransaction)
 const updateTransactionMock = vi.mocked(updateTransaction)
 const deleteTransactionMock = vi.mocked(deleteTransaction)
 const createCategoryMock = vi.mocked(createCategory)
+const createWalletMock = vi.mocked(createWallet)
 
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
@@ -227,6 +243,14 @@ beforeEach(() => {
   createTransactionMock.mockResolvedValue(newCoffee)
   updateTransactionMock.mockResolvedValue(newCoffee)
   createCategoryMock.mockResolvedValue(groceryCategory)
+  createWalletMock.mockResolvedValue({
+    id: 7,
+    name: 'Revolut',
+    type: 'checking',
+    balance: '0.00',
+    frozen: false,
+    created_at: '2026-01-01T00:00:00Z',
+  })
   deleteTransactionMock.mockResolvedValue({ warning: false })
 })
 
@@ -981,5 +1005,344 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
         expect.objectContaining({ categoryId: 5 }),
       ),
     )
+  })
+})
+
+describe('TransactionsScreen inline wallet creation (issue #72)', () => {
+  const openCreateForm = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'New transaction' }))
+    return await screen.findByRole('dialog', { name: 'New transaction' })
+  }
+
+  /** The single Wallet select's options, in order. */
+  const walletOptions = (dialog: HTMLElement) =>
+    Array.from(
+      within(dialog).getByLabelText('Wallet').querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  /** A Transfer's From/To select options, in order. */
+  const transferOptions = (dialog: HTMLElement, label: string) =>
+    Array.from(
+      within(dialog).getByLabelText(label).querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  it('shows the sentinel as the last option in the Expense/Income Wallet select, in create and edit modes', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    // Create mode: the sentinel sits after the spendable Wallet.
+    const dialog = await openCreateForm()
+    expect(walletOptions(dialog)).toEqual(['Cash (€100.00)', '＋ Add wallet…'])
+    // Contact Wallets are not spendable: never in this select, sentinel or not.
+    expect(screen.queryByText(/Marco/)).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Edit mode carries the same sentinel.
+    fireEvent.click(screen.getByText('Coffee'))
+    const editDialog = await screen.findByRole('dialog', { name: 'Edit transaction' })
+    expect(walletOptions(editDialog)).toEqual(['Cash (€100.00)', '＋ Add wallet…'])
+  })
+
+  it('shows the sentinel as the only row when no spendable wallets exist', async () => {
+    // Only ineligible wallets: a Frozen one and a Contact one. The sentinel
+    // is the only row, so a wallet can still be created inline.
+    fetchWalletsMock.mockResolvedValue([frozenWallet, marcoWallet])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    expect(walletOptions(dialog)).toEqual(['＋ Add wallet…'])
+  })
+
+  it('picking the Expense/Income sentinel opens the New wallet modal without Contact and reverts the dropdown', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    expect(walletSelect).toHaveValue('1')
+
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // The Type options are restricted to non-Contact wallets: Contact
+    // Wallets move money only via Transfers.
+    const typeSelect = within(walletDialog).getByLabelText('Type')
+    expect(
+      Array.from(typeSelect.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['Checking', 'Credit Card', 'Cash'])
+    // The dropdown reverted to its previous value; the outer draft is intact.
+    expect(walletSelect).toHaveValue('1')
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+  })
+
+  it('a Transfer From/To sentinel opens the modal with all four types and reverts only the picked field', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer' }))
+
+    // Contact Wallets are offered for Transfers, plus the sentinel, in both
+    // selects.
+    expect(transferOptions(dialog, 'From')).toEqual([
+      'Cash (€100.00)',
+      'Marco (€0.00)',
+      '＋ Add wallet…',
+    ])
+    expect(transferOptions(dialog, 'To')).toEqual([
+      'Cash (€100.00)',
+      'Marco (€0.00)',
+      '＋ Add wallet…',
+    ])
+
+    const fromSelect = within(dialog).getByLabelText('From')
+    const toSelect = within(dialog).getByLabelText('To')
+    // Swap both so the revert is observable on the picked field.
+    fireEvent.change(fromSelect, { target: { value: '4' } })
+    fireEvent.change(toSelect, { target: { value: '1' } })
+
+    fireEvent.change(fromSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // Transfers are where Contact Wallets belong: all four types offered.
+    const typeSelect = within(walletDialog).getByLabelText('Type')
+    expect(
+      Array.from(typeSelect.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['Checking', 'Credit Card', 'Cash', 'Contact'])
+    // Only the From select reverted; To is untouched.
+    expect(fromSelect).toHaveValue('4')
+    expect(toSelect).toHaveValue('1')
+
+    // The same from the To side: only To reverts.
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    fireEvent.change(toSelect, { target: { value: SENTINEL_VALUE } })
+    await screen.findByRole('dialog', { name: 'New wallet' })
+    expect(fromSelect).toHaveValue('4')
+    expect(toSelect).toHaveValue('1')
+  })
+
+  it('the full flow for an Expense — sentinel, create, auto-select, submit — carries the new wallet id as wallet_id', async () => {
+    createWalletMock.mockResolvedValue({
+      id: 7,
+      name: 'Revolut',
+      type: 'checking',
+      balance: '0.00',
+      frozen: false,
+      created_at: '2026-01-01T00:00:00Z',
+    })
+    createTransactionMock.mockResolvedValue({ ...newCoffee, wallet_id: 7 })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '12.50' },
+    })
+
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    // The wallet is created with the default non-Contact type.
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '',
+      }),
+    )
+    // Only the inner modal closes; the form and its draft survive.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12.5)
+    // The new wallet is selected and offered in the dropdown.
+    await waitFor(() => expect(walletSelect).toHaveValue('7'))
+    expect(walletOptions(dialog)).toEqual([
+      'Cash (€100.00)',
+      'Revolut (€0.00)',
+      '＋ Add wallet…',
+    ])
+    expect(createTransactionMock).not.toHaveBeenCalled()
+
+    // Submitting the outer form sends the new wallet's id as wallet_id.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() =>
+      expect(createTransactionMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({ walletId: 7 }),
+      ),
+    )
+  })
+
+  it('the full flow for a Transfer — sentinel on From, create, auto-select — carries the new wallet id as source_wallet_id only', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
+    createWalletMock.mockResolvedValue({
+      id: 7,
+      name: 'Revolut',
+      type: 'checking',
+      balance: '0.00',
+      frozen: false,
+      created_at: '2026-01-01T00:00:00Z',
+    })
+    createTransactionMock.mockResolvedValue({
+      ...newCoffee,
+      type: 'transfer',
+      source_wallet_id: 7,
+      destination_wallet_id: 4,
+    })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer' }))
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '30.00' },
+    })
+
+    // From defaults to Cash (1), To to the Contact wallet (4).
+    const fromSelect = within(dialog).getByLabelText('From')
+    const toSelect = within(dialog).getByLabelText('To')
+    expect(fromSelect).toHaveValue('1')
+    expect(toSelect).toHaveValue('4')
+
+    fireEvent.change(fromSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    await waitFor(() => expect(createWalletMock).toHaveBeenCalled())
+    // The new wallet lands in the exact field whose sentinel was picked
+    // (From); To keeps its draft value.
+    await waitFor(() => expect(fromSelect).toHaveValue('7'))
+    expect(toSelect).toHaveValue('4')
+    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(30)
+    // The new wallet is offered in both Transfer selects.
+    expect(transferOptions(dialog, 'From')).toEqual([
+      'Cash (€100.00)',
+      'Marco (€0.00)',
+      'Revolut (€0.00)',
+      '＋ Add wallet…',
+    ])
+
+    // Submitting carries the new wallet's id as the source leg.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() =>
+      expect(createTransactionMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({
+          type: 'transfer',
+          sourceWalletId: 7,
+          destinationWalletId: 4,
+        }),
+      ),
+    )
+  })
+
+  it('Cancel, backdrop tap, and Escape close only the wallet modal and leave the form draft intact', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '9.99' },
+    })
+
+    // Opens the stacked Wallet modal on top of the open form.
+    const openWalletModal = async () => {
+      fireEvent.change(within(dialog).getByLabelText('Wallet'), {
+        target: { value: SENTINEL_VALUE },
+      })
+      return await screen.findByRole('dialog', { name: 'New wallet' })
+    }
+    const formSurvives = () => {
+      expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(9.99)
+    }
+
+    // Cancel closes only the inner modal.
+    let walletDialog = await openWalletModal()
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // Backdrop tap closes only the inner modal.
+    walletDialog = await openWalletModal()
+    fireEvent.click(walletDialog.previousElementSibling as Element)
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // One Escape closes only the topmost modal; a second closes the form.
+    walletDialog = await openWalletModal()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(createWalletMock).not.toHaveBeenCalled()
+    expect(createTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it('a duplicate wallet name shows the validation error inside the modal and selects nothing', async () => {
+    createWalletMock.mockRejectedValue(new ApiError('Conflict', 409))
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Cash' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    expect(
+      await within(walletDialog).findByText('A wallet with this name already exists.'),
+    ).toBeInTheDocument()
+    // The modal stays open and nothing is selected; the outer draft is intact.
+    expect(screen.getByRole('dialog', { name: 'New wallet' })).toBeInTheDocument()
+    expect(walletSelect).toHaveValue('1')
+
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+    expect(createTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it('edit mode locks the Wallet select, so the sentinel is inert there', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByText('Coffee'))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit transaction' })
+
+    // Wallets are locked while editing (issue #24): the sentinel is visible
+    // but the select cannot be touched, so no wallet modal can open.
+    expect(within(dialog).getByLabelText('Wallet')).toBeDisabled()
+    expect(walletOptions(dialog)).toEqual(['Cash (€100.00)', '＋ Add wallet…'])
+    expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument()
   })
 })
