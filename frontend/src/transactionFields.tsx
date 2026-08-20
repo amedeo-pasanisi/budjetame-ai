@@ -12,6 +12,7 @@
 import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
 import { formatEuros } from './api'
 import type { TransferProjection } from './balanceProjection'
+import { EntitySelect } from './EntitySelect'
 import { NON_CONTACT_WALLET_TYPES } from './transactions'
 
 export type TransactionFormType = 'expense' | 'income' | 'transfer'
@@ -124,41 +125,40 @@ export function TransferWalletFields({
   )
 }
 
-/** The Category select an Expense or Income carries (Transfers never do). */
+/** The Category select an Expense or Income carries (Transfers never do),
+ * with the inline "＋ Add category…" sentinel (ADR-0013): the shared
+ * EntitySelect wrapper renders it always last, after None, and reverts the
+ * field on a sentinel pick; the screen hosts the inner New category modal,
+ * locked to this field's type (Expense for an Expense, Income for an
+ * Income). */
 export function CategoryField({
   categories,
   type,
   value,
   onChange,
+  onAdd,
 }: {
   categories: Category[]
   type: 'expense' | 'income'
   value: number | null
   onChange: (categoryId: number | null) => void
+  /** Opens the Category create modal, hosted by the screen. */
+  onAdd: () => void
 }) {
   const matchingCategories = categories.filter((category) => category.type === type)
   return (
-    <div>
-      <label htmlFor="tx-category" className="block text-sm font-medium text-slate-700">
-        Category
-      </label>
-      <select
-        id="tx-category"
-        value={value ?? ''}
-        onChange={(event) =>
-          onChange(event.target.value === '' ? null : Number(event.target.value))
-        }
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-      >
-        <option value="">None</option>
-        {matchingCategories.map((category) => (
-          <option key={category.id} value={category.id}>
-            {category.icon !== null ? `${category.icon} ` : ''}
-            {category.name}
-          </option>
-        ))}
-      </select>
-    </div>
+    <EntitySelect
+      id="tx-category"
+      label="Category"
+      value={value ?? ''}
+      onChange={(categoryId) => onChange(categoryId === '' ? null : categoryId)}
+      options={matchingCategories.map((category) => ({
+        id: category.id,
+        label: category.icon !== null ? `${category.icon} ${category.name}` : category.name,
+      }))}
+      entity="category"
+      onAdd={onAdd}
+    />
   )
 }
 

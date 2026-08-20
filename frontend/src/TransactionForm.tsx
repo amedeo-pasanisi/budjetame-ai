@@ -53,6 +53,14 @@ type TransactionFormProps = {
   onSaved: (transaction: Transaction) => void
   onDeleted: (warning: boolean) => void
   onCancel: () => void
+  /** Inline entity creation (ADR-0013): opens the Category create modal
+   * hosted by the screen, locked to the transaction's current type —
+   * Expense for an Expense, Income for an Income. The Transfer form has no
+   * Category field, so it never calls this. */
+  onAddCategory: (type: 'expense' | 'income') => void
+  /** The freshly created Category the screen reports back: the field selects
+   * it, leaving the rest of the draft untouched. */
+  categoryToSelect: number | null
 }
 
 /** The create/edit/delete form for a Transaction (Expense, Income, or
@@ -68,6 +76,8 @@ export function TransactionForm({
   onSaved,
   onDeleted,
   onCancel,
+  onAddCategory,
+  categoryToSelect,
 }: TransactionFormProps) {
   const [type, setType] = useState<TransactionFormType>(
     editing?.type === 'transfer'
@@ -98,6 +108,15 @@ export function TransactionForm({
       : (assignableWallets[1]?.id ?? assignableWallets[0]?.id),
   )
   const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
+
+  // Inline entity creation (ADR-0013): when the screen's inner Category
+  // modal saves, it reports the new Category's id here so this field
+  // selects it — the only field that changes, the rest of the draft stays.
+  useEffect(() => {
+    if (categoryToSelect !== null) {
+      setCategoryId(categoryToSelect)
+    }
+  }, [categoryToSelect])
   // The optional Recurring Cost link (issue #57): an Expense pins one cost,
   // paying its oldest Unpaid Occurrence. Seeded from the Transaction being
   // edited, so an untouched link is never re-sent (and never re-pinned).
@@ -470,6 +489,7 @@ export function TransactionForm({
           type={type}
           value={categoryId}
           onChange={setCategoryId}
+          onAdd={() => onAddCategory(type)}
         />
       )}
 

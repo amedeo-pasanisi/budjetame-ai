@@ -191,6 +191,8 @@ function renderForm(
       onSaved={() => {}}
       onDeleted={() => {}}
       onCancel={() => {}}
+      onAddCategory={() => {}}
+      categoryToSelect={null}
     />,
   )
 }

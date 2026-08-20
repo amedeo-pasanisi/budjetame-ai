@@ -16,6 +16,7 @@ import {
   type TransactionFilters,
   type Wallet,
 } from './api'
+import { CategoryModal } from './CategoryModal'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
 import { TransactionModal } from './TransactionModal'
@@ -56,6 +57,18 @@ export function TransactionsScreen({
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState<FormDraft | null>(null)
+  // Inline entity creation (ADR-0013): the inner Category create modal,
+  // stacked on top of the transaction form's modal, and the new Category it
+  // created — reported back to the open form so its field selects it. The
+  // locked type is the form's current type at open time — Expense for an
+  // Expense, Income for an Income — so the created Category is always valid
+  // for the transaction being recorded. The Transfer form has no Category
+  // field, so it never opens this.
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [categoryModalType, setCategoryModalType] = useState<'expense' | 'income'>(
+    'expense',
+  )
+  const [categoryToSelect, setCategoryToSelect] = useState<number | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
   // then the search bar hides — there is nothing to search.
@@ -240,8 +253,25 @@ export function TransactionsScreen({
     return wallet === undefined || wallet.frozen
   }
 
-  const handleSaved = (transaction: Transaction) => {
+  // The inner Category modal's save (ADR-0013): add the Category to the
+  // list state (so the dropdown offers it again without a reload), close
+  // only the inner modal, and report the new id to the open form so the
+  // originating field selects it. The form's draft is untouched.
+  const handleCategoryCreated = (category: Category) => {
+    setCategories((current) => (current === null ? [category] : [...current, category]))
+    setCategoryToSelect(category.id)
+    setCategoryModalOpen(false)
+  }
+
+  // Closing the transaction form also clears the pending auto-select: a
+  // stale id must not be re-applied when the form opens again later.
+  const closeForm = () => {
     setForm(null)
+    setCategoryToSelect(null)
+  }
+
+  const handleSaved = (transaction: Transaction) => {
+    closeForm()
     reload()
     // Set after reload(): reload clears the banner, and the last write in the
     // batch wins — so the warning renders above the reloaded list.
@@ -251,7 +281,7 @@ export function TransactionsScreen({
   }
 
   const handleDeleted = (warning: boolean) => {
-    setForm(null)
+    closeForm()
     reload()
     if (warning) {
       setSavedWarning('Deleted — this made a Cash wallet negative.')
@@ -477,7 +507,20 @@ export function TransactionsScreen({
           editing={form.kind === 'edit' ? form.transaction : null}
           onSaved={handleSaved}
           onDeleted={handleDeleted}
-          onClose={() => setForm(null)}
+          onClose={closeForm}
+          onAddCategory={(type) => {
+            setCategoryModalType(type)
+            setCategoryModalOpen(true)
+          }}
+          categoryToSelect={categoryToSelect}
+        />
+      )}
+
+      {categoryModalOpen && (
+        <CategoryModal
+          lockedType={categoryModalType}
+          onSaved={handleCategoryCreated}
+          onClose={() => setCategoryModalOpen(false)}
         />
       )}
     </>

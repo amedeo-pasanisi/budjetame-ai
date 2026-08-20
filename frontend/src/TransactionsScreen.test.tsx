@@ -6,27 +6,43 @@
  * and the map picker are mocked; the real form is driven like a user would
  * (click, type, submit) for the reset-on-write path. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { TransactionsScreen } from './TransactionsScreen'
 import { useImportDraft } from './importDraft'
 import type { Category, Transaction, TransactionPage, Wallet } from './api'
 
-vi.mock('./api', () => ({
-  ApiError: class ApiError extends Error {},
-  TOKEN_KEY: 'budjetame.token',
-  PAGE_LIMIT: 50,
-  apiErrorMessage: () => 'Could not save the transaction.',
-  formatEuros: (value: string) => `€${value}`,
-  fetchWallets: vi.fn(),
-  fetchCategories: vi.fn(),
-  fetchRecurringCosts: vi.fn(),
-  fetchRecurringIncomes: vi.fn(),
-  fetchTransactions: vi.fn(),
-  createTransaction: vi.fn(),
-  updateTransaction: vi.fn(),
-  deleteTransaction: vi.fn(),
-}))
+vi.mock('./api', () => {
+  class ApiError extends Error {
+    status: number
+
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  }
+  return {
+    ApiError,
+    TOKEN_KEY: 'budjetame.token',
+    PAGE_LIMIT: 50,
+    apiErrorMessage: (error: unknown, conflict: string, fallback: string) =>
+      error instanceof ApiError
+        ? error.status === 409
+          ? conflict
+          : fallback
+        : fallback,
+    formatEuros: (value: string) => `€${value}`,
+    fetchWallets: vi.fn(),
+    fetchCategories: vi.fn(),
+    fetchRecurringCosts: vi.fn(),
+    fetchRecurringIncomes: vi.fn(),
+    fetchTransactions: vi.fn(),
+    createTransaction: vi.fn(),
+    updateTransaction: vi.fn(),
+    deleteTransaction: vi.fn(),
+    createCategory: vi.fn(),
+  }
+})
 
 // The map picker is a separate seam (issue #27); this test is about paging.
 vi.mock('./MapPicker', () => ({
@@ -34,6 +50,8 @@ vi.mock('./MapPicker', () => ({
 }))
 
 import {
+  ApiError,
+  createCategory,
   createTransaction,
   deleteTransaction,
   fetchCategories,
@@ -41,7 +59,9 @@ import {
   fetchRecurringIncomes,
   fetchTransactions,
   fetchWallets,
+  updateTransaction,
 } from './api'
+import { SENTINEL_VALUE } from './EntitySelect'
 
 /** jsdom has no IntersectionObserver; a fake records instances so a test can
  * simulate the sentinel entering the viewport. */
@@ -127,6 +147,33 @@ const foodCategory: Category = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+const salaryCategory: Category = {
+  id: 2,
+  name: 'Salary',
+  type: 'income',
+  icon: null,
+  color: '#000000',
+  created_at: '2026-01-01T00:00:00Z',
+}
+
+const groceryCategory: Category = {
+  id: 5,
+  name: 'Groceries',
+  type: 'expense',
+  icon: null,
+  color: '#ef4444',
+  created_at: '2026-01-01T00:00:00Z',
+}
+
+const freelanceCategory: Category = {
+  id: 6,
+  name: 'Freelance',
+  type: 'income',
+  icon: null,
+  color: '#ef4444',
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 const baseTransaction: Transaction = {
   id: 1,
   type: 'expense',
@@ -151,6 +198,9 @@ const baseTransaction: Transaction = {
 const coffee = { ...baseTransaction, id: 1, description: 'Coffee' }
 const rent = { ...baseTransaction, id: 2, description: 'Rent', amount: '600.00' }
 const newCoffee = { ...coffee, id: 3, description: 'New coffee', amount: '5.00' }
+// An Income Transaction for the edit-mode sentinel coverage: the Category
+// sentinel must ride the Income form too, with Income locked (ADR-0013).
+const salary = { ...baseTransaction, id: 7, type: 'income', description: 'Salary' } as Transaction
 
 const page1: TransactionPage = { items: [coffee], next_cursor: 'c1' }
 const page2: TransactionPage = { items: [rent], next_cursor: null }
@@ -161,7 +211,9 @@ const fetchCategoriesMock = vi.mocked(fetchCategories)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 const createTransactionMock = vi.mocked(createTransaction)
+const updateTransactionMock = vi.mocked(updateTransaction)
 const deleteTransactionMock = vi.mocked(deleteTransaction)
+const createCategoryMock = vi.mocked(createCategory)
 
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
@@ -173,6 +225,8 @@ beforeEach(() => {
     cursor === 'c1' ? page2 : page1,
   )
   createTransactionMock.mockResolvedValue(newCoffee)
+  updateTransactionMock.mockResolvedValue(newCoffee)
+  createCategoryMock.mockResolvedValue(groceryCategory)
   deleteTransactionMock.mockResolvedValue({ warning: false })
 })
 
@@ -615,6 +669,317 @@ describe('TransactionsScreen search (issue #54)', () => {
 
     await waitFor(() =>
       expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { q: 'coffee' }),
+    )
+  })
+})
+
+describe('TransactionsScreen inline category creation (ADR-0013)', () => {
+  const openCreateForm = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'New transaction' }))
+    return await screen.findByRole('dialog', { name: 'New transaction' })
+  }
+
+  /** The Category select's options, in order. */
+  const categoryOptions = (dialog: HTMLElement) =>
+    Array.from(
+      within(dialog)
+        .getByLabelText('Category')
+        .querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  it('shows the sentinel as the last option, after None, in create and edit modes, for Expense and Income', async () => {
+    fetchCategoriesMock.mockResolvedValue([foodCategory, salaryCategory])
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [coffee, salary],
+      next_cursor: null,
+    }))
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    // Create mode, Expense (the default type): the sentinel sits last.
+    const dialog = await openCreateForm()
+    expect(categoryOptions(dialog)).toEqual(['None', 'Food', '＋ Add category…'])
+
+    // Switching to Income filters to income Categories; the sentinel stays last.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
+    expect(categoryOptions(dialog)).toEqual(['None', 'Salary', '＋ Add category…'])
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Edit mode carries the same sentinel, for both kinds of Transaction.
+    fireEvent.click(screen.getByText('Coffee'))
+    let editDialog = await screen.findByRole('dialog', { name: 'Edit transaction' })
+    expect(categoryOptions(editDialog)).toEqual(['None', 'Food', '＋ Add category…'])
+    fireEvent.click(within(editDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('Salary'))
+    editDialog = await screen.findByRole('dialog', { name: 'Edit transaction' })
+    expect(categoryOptions(editDialog)).toEqual(['None', 'Salary', '＋ Add category…'])
+  })
+
+  it('picking the sentinel opens the New category modal locked to the current type and reverts the dropdown', async () => {
+    fetchCategoriesMock.mockResolvedValue([foodCategory, salaryCategory])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    const categorySelect = within(dialog).getByLabelText('Category')
+    // A real selection first, so the revert is observable.
+    fireEvent.change(categorySelect, { target: { value: '1' } })
+    expect(categorySelect).toHaveValue('1')
+
+    // Expense (the default): the Type selector is hidden and the type fixed.
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    let categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    expect(within(categoryDialog).queryByLabelText('Type')).not.toBeInTheDocument()
+    expect(
+      within(categoryDialog).getByText('Expense · fixed for this form'),
+    ).toBeInTheDocument()
+    // The dropdown reverted to its previous value; the outer draft is intact.
+    expect(categorySelect).toHaveValue('1')
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+
+    // The lock follows the type: switch to Income and re-pick.
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    expect(
+      within(categoryDialog).getByText('Income · fixed for this form'),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+  })
+
+  it('the full flow — sentinel, create, auto-select, submit — carries the new category id', async () => {
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    createCategoryMock.mockResolvedValue(groceryCategory)
+    createTransactionMock.mockResolvedValue({ ...newCoffee, category_id: 5 })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '12.50' },
+    })
+
+    const categorySelect = within(dialog).getByLabelText('Category')
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Groceries' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    // The Category is created with the locked Expense type.
+    await waitFor(() =>
+      expect(createCategoryMock).toHaveBeenCalledWith('', {
+        name: 'Groceries',
+        type: 'expense',
+        icon: '',
+        color: '#ef4444',
+      }),
+    )
+    // Only the inner modal closes; the form and its draft survive.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12.5)
+    // The new Category is selected and offered in the dropdown.
+    await waitFor(() => expect(categorySelect).toHaveValue('5'))
+    expect(categoryOptions(dialog)).toEqual([
+      'None',
+      'Food',
+      'Groceries',
+      '＋ Add category…',
+    ])
+    expect(createTransactionMock).not.toHaveBeenCalled()
+
+    // Submitting the outer form sends the new Category's id.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() =>
+      expect(createTransactionMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({ categoryId: 5 }),
+      ),
+    )
+  })
+
+  it('an Income transaction creates an Income category inline and carries its id', async () => {
+    createCategoryMock.mockResolvedValue(freelanceCategory)
+    createTransactionMock.mockResolvedValue({
+      ...newCoffee,
+      type: 'income',
+      category_id: 6,
+    })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '200.00' },
+    })
+
+    const categorySelect = within(dialog).getByLabelText('Category')
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Freelance' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    // Created with the locked Income type.
+    await waitFor(() =>
+      expect(createCategoryMock).toHaveBeenCalledWith('', {
+        name: 'Freelance',
+        type: 'income',
+        icon: '',
+        color: '#ef4444',
+      }),
+    )
+    // Auto-selected in the form; the Income draft survives.
+    await waitFor(() => expect(categorySelect).toHaveValue('6'))
+    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(200)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() =>
+      expect(createTransactionMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({ type: 'income', categoryId: 6 }),
+      ),
+    )
+  })
+
+  it('Cancel, backdrop tap, and Escape close only the category modal and leave the form draft intact', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '9.99' },
+    })
+
+    // Opens the stacked Category modal on top of the open form.
+    const openCategoryModal = async () => {
+      fireEvent.change(within(dialog).getByLabelText('Category'), {
+        target: { value: SENTINEL_VALUE },
+      })
+      return await screen.findByRole('dialog', { name: 'New category' })
+    }
+    const formSurvives = () => {
+      expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(9.99)
+    }
+
+    // Cancel closes only the inner modal.
+    let categoryDialog = await openCategoryModal()
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // Backdrop tap closes only the inner modal.
+    categoryDialog = await openCategoryModal()
+    fireEvent.click(categoryDialog.previousElementSibling as Element)
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+
+    // One Escape closes only the topmost modal; a second closes the form.
+    categoryDialog = await openCategoryModal()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    formSurvives()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(createCategoryMock).not.toHaveBeenCalled()
+    expect(createTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it('a duplicate category name shows the validation error inside the modal and selects nothing', async () => {
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    createCategoryMock.mockRejectedValue(new ApiError('Conflict', 409))
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    const categorySelect = within(dialog).getByLabelText('Category')
+    fireEvent.change(categorySelect, { target: { value: '1' } })
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Food' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    expect(
+      await within(categoryDialog).findByText('A category with this name already exists.'),
+    ).toBeInTheDocument()
+    // The modal stays open and nothing is selected; the outer draft is intact.
+    expect(screen.getByRole('dialog', { name: 'New category' })).toBeInTheDocument()
+    expect(categorySelect).toHaveValue('1')
+
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
+    expect(createTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it('the Transfer form shows no Category field and no sentinel', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const dialog = await openCreateForm()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer' }))
+    expect(within(dialog).queryByLabelText('Category')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('＋ Add category…')).not.toBeInTheDocument()
+  })
+
+  it('works in edit mode: the inline Category is auto-selected and the edit carries its id', async () => {
+    createCategoryMock.mockResolvedValue(groceryCategory)
+    updateTransactionMock.mockResolvedValue({ ...baseTransaction, category_id: 5 })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByText('Coffee'))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit transaction' })
+    const categorySelect = within(dialog).getByLabelText('Category')
+    expect(categorySelect).toHaveValue('')
+
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    expect(
+      within(categoryDialog).getByText('Expense · fixed for this form'),
+    ).toBeInTheDocument()
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Groceries' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    // Auto-selected in the open edit form, nothing else touched.
+    await waitFor(() => expect(categorySelect).toHaveValue('5'))
+    expect(screen.getByRole('dialog', { name: 'Edit transaction' })).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(updateTransactionMock).toHaveBeenCalledWith(
+        '',
+        1,
+        expect.objectContaining({ categoryId: 5 }),
+      ),
     )
   })
 })

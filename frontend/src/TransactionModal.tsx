@@ -17,6 +17,12 @@ type TransactionModalProps = {
   onSaved: (transaction: Transaction) => void
   onDeleted: (warning: boolean) => void
   onClose: () => void
+  /** Inline entity creation (ADR-0013): opens the Category create modal
+   * hosted by the screen, locked to the transaction's current type. */
+  onAddCategory: (type: 'expense' | 'income') => void
+  /** The freshly created Category the screen reports back: the field selects
+   * it, leaving the rest of the draft untouched. */
+  categoryToSelect: number | null
 }
 
 /** The create/edit/delete Transaction form inside the shared modal shell
@@ -32,6 +38,8 @@ export function TransactionModal({
   onSaved,
   onDeleted,
   onClose,
+  onAddCategory,
+  categoryToSelect,
 }: TransactionModalProps) {
   return (
     <ModalShell
@@ -48,6 +56,8 @@ export function TransactionModal({
         onSaved={onSaved}
         onDeleted={onDeleted}
         onCancel={onClose}
+        onAddCategory={onAddCategory}
+        categoryToSelect={categoryToSelect}
       />
     </ModalShell>
   )
