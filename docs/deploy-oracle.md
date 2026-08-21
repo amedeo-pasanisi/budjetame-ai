@@ -32,16 +32,34 @@ does, for review and for when you want to do it manually.
 
 ## One-time setup (manual record)
 
+The wizard (`scripts/oracle-provision.sh`) automates all of this except the
+signup and one key upload; this is the record of what it does.
+
 1. **Oracle account** — register at <https://signup.cloud.oracle.com> and
    verify your card. Use your home region (capacity for the free Ampere shape
    lives there). "Out of capacity" on the shape is common — retry later or
    pick another region.
-2. **SSH keypair** (on your machine): `ssh-keygen -t ed25519 -f ~/.ssh/budjetame_oracle`
-3. **VM** — Compute → Instances → Create: image **Canonical Ubuntu 24.04**
-   (aarch64), shape **VM.Standard.A1.Flex**, **4 OCPU / 24 GB RAM** (all free),
-   paste the public key. Note the public IP.
-4. **Open port 80** — VCN → Security List → add ingress rule: TCP 80 from
-   0.0.0.0/0 (SSH/22 is open by default).
+2. **API key** — the wizard generates `~/.oci/budjetame_api_key.pem`, and you
+   upload its public key in the console (Identity & Security → Users → your
+   user → API Keys → Add API Key), then paste the Tenancy OCID, User OCID and
+   home region. The wizard writes `~/.oci/config` (standard oci-cli format:
+   `user`, `tenancy`, `fingerprint`, `key_file`, `region`) and smoke-tests the
+   connection.
+
+   **Why not the official oci-cli?** Its dependencies (`crc32c`, `cryptography`)
+   have no Android wheels and don't compile with Termux's clang. Instead the
+   wizard uses `scripts/oci_api.py` — a minimal REST client that ports the
+   official oci-python-sdk signer (UPL 1.0 / Apache 2.0) onto the pure-Python
+   `rsa` package (installed via `uv`). It reads the standard `~/.oci/config`,
+   so the credentials work unchanged on a real machine with the official CLI.
+   `selftest` verifies the crypto chain offline; `--dry-run` prints the signed
+   request without sending.
+3. **Network** — the wizard creates, via the REST API: VCN `10.0.0.0/16`,
+   internet gateway, route table (`0.0.0.0/0` → gateway), security list
+   (ingress TCP 22 and 80, egress all), subnet `10.0.0.0/24`.
+4. **Instance** — the wizard launches `VM.Standard.A1.Flex` (4 OCPU / 24 GB,
+   Always Free eligible) with the newest Canonical Ubuntu 24.04 aarch64 image
+   and your SSH public key, waits for RUNNING, and captures the public IP.
 5. **Docker** on the VM:
    ```bash
    ssh -i ~/.ssh/budjetame_oracle ubuntu@<IP>
@@ -89,6 +107,11 @@ git remote add origin https://github.com/amedeo-pasanisi/budjetame-ai.git
 - **`{"detail":"Not Found"}` on `/api/...`** → you hit the backend directly or
   the nginx proxy rule is missing; requests must go through the frontend's
   port 80.
+- **OCI API calls return 401** → wrong fingerprint (the console's fingerprint
+  must match the one in `~/.oci/config`), or the key file doesn't match the
+  uploaded public key. Re-run the wizard to redo the API-key stage.
+- **OCI API calls return 404** → wrong Tenancy OCID (the availability-domain
+  call hits it directly).
 - **Login fails right after first boot** → you changed the seed env vars after
   the first start; the Account was seeded with the original values. Wipe the
   `db_data` volume (`docker compose -f compose.prod.yaml down -v`) and start

@@ -190,22 +190,42 @@ finish() {
 # Replace the example below. Set the two totals to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=7
-TOTAL_MINUTES=30
+TOTAL_STAGES=8
+TOTAL_MINUTES=38
 
 banner "Oracle Cloud Always Free — deploy Budjetame"
 
 # ── Deploy-specific helpers (authoring section) ───────────────────────────
 KEY_PATH="${BUDJETAME_SSH_KEY:-$HOME/.ssh/budjetame_oracle}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_DIR="$HOME/.venvs/oci"
+OCI_PY="$VENV_DIR/bin/python $REPO/scripts/oci_api.py"
 
 # gen_secret — a random hex string; openssl first, /dev/urandom fallback.
 gen_secret() {
   openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 64
 }
 
-if ! command -v ssh-keygen >/dev/null 2>&1; then
-  warn "ssh-keygen not found — install OpenSSH first (Termux: pkg install openssh)"
-  exit 1
+# run_oci — run an oci_api.py command; on failure show the API error and stop.
+run_oci() {
+  local out
+  if ! out=$("$@" 2>&1); then
+    warn "OCI call failed:"; say "$out"; exit 1
+  fi
+  printf '%s' "$out"
+}
+
+for need in ssh-keygen openssl uv; do
+  if ! command -v "$need" >/dev/null 2>&1; then
+    warn "$need not found — install it first (Termux: pkg install openssh openssl-tool; uv: curl -LsSf https://astral.sh/uv/install.sh | sh)"
+    exit 1
+  fi
+done
+
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+  say "Setting up the pure-Python OCI client (uv + rsa)…"
+  uv venv --python 3 "$VENV_DIR" >/dev/null
+  uv pip install --python "$VENV_DIR" rsa >/dev/null
 fi
 
 # ── Stage 1: SSH keypair ───────────────────────────────────────────────────
@@ -233,28 +253,79 @@ step "Keep the Oracle account email + password handy — you need them next."
 note "Card declined or account not approved is common; retry or use a different card."
 pause "Done signing up? Press Enter."
 
-# ── Stage 3: create the VM ──────────────────────────────────────────────────
-stage "Create the VM" 6
-say "We'll create the Always Free ARM instance and paste in your public key."
-open_url "https://cloud.oracle.com/compute/instances"
-step "Sign in, then Compute → Instances → Create instance."
-step "Name it budjetame. Image: Canonical Ubuntu 24.04 (aarch64/ARM)."
-step "Shape: VM.Standard.A1.Flex → 4 OCPU / 24 GB RAM (Always Free eligible)."
-step "SSH keys: paste the public key from stage 1."
-step "Create, then wait for the instance to show 'Running'."
-note "If the shape reports out of capacity: retry later, or check you are in your home region."
-ask VM_IP "Paste the instance's public IP address:"
-write_env VM_IP "$VM_IP"
+# ── Stage 3: OCI API key + connection test ─────────────────────────────────
+stage "OCI API key + connection test" 8
+say "The wizard drives Oracle through its REST API with a pure-Python client"
+say "(the official oci-cli cannot install on Termux). You upload one API key."
+mkdir -p "$HOME/.oci"
+KEY_FILE="$HOME/.oci/budjetame_api_key.pem"
+CONF_FILE="$HOME/.oci/config"
+if [[ ! -f "$KEY_FILE" ]]; then
+  openssl genrsa -out "$KEY_FILE" 2048 >/dev/null 2>&1
+  chmod 600 "$KEY_FILE"
+fi
+FP=$(openssl rsa -in "$KEY_FILE" -pubout -outform DER 2>/dev/null | openssl md5 -c | sed 's/.*= //')
+if [[ -f "$CONF_FILE" ]] && grep -q "^fingerprint=$FP" "$CONF_FILE"; then
+  say "API config already set up — reusing it."
+else
+  say "Upload this PUBLIC key to your Oracle user, then paste two OCIDs:"
+  open_url "https://cloud.oracle.com"
+  step "Sign in, then: top-right profile → Tenancy → copy the Tenancy OCID."
+  step "Identity & Security → Users → your username → copy the User OCID."
+  step "Same page → API Keys → Add API Key → paste the public key below:"
+  openssl rsa -in "$KEY_FILE" -pubout 2>/dev/null
+  say "The console shows a fingerprint after uploading — it must match: $FP"
+  ask TENANCY_OCID "Paste the Tenancy OCID:"
+  ask USER_OCID "Paste the User OCID:"
+  ask REGION "Your home region (shown on the Tenancy page, e.g. eu-frankfurt-1):"
+  cat > "$CONF_FILE" <<EOF
+[DEFAULT]
+user=$USER_OCID
+tenancy=$TENANCY_OCID
+fingerprint=$FP
+key_file=$KEY_FILE
+region=$REGION
+EOF
+  say "API config written to ~/.oci/config."
+fi
+say "Testing the connection…"
+if OUT=$($OCI_PY ad-list 2>&1); then
+  say "Connected — availability domain: $OUT"
+else
+  warn "Connection failed:"; say "$OUT"
+  warn "Check the OCIDs and fingerprint, then re-run the wizard."
+  exit 1
+fi
 
-# ── Stage 4: open port 80 ───────────────────────────────────────────────────
-stage "Open port 80" 2
-say "The VM's firewall blocks everything except SSH by default — open HTTP."
-open_url "https://cloud.oracle.com/networking/vcns"
-step "Networking → Virtual cloud networks → your VCN → Security Lists."
-step "Default Security List → Add Ingress Rules."
-step "Source: 0.0.0.0/0 · IP protocol: TCP · Destination port: 80."
-step "Add the rule. (Port 22 for SSH is already open.)"
-pause "Rule added? Press Enter."
+# ── Stage 4: network (automatic) ────────────────────────────────────────────
+stage "Network (automatic)" 2
+say "Creating the VCN, internet gateway, route table, security list and subnet via the OCI API…"
+VCN=$(run_oci $OCI_PY vcn-create)
+say "VCN created."
+IGW=$(run_oci $OCI_PY igw-create "$VCN")
+say "Internet gateway created."
+RT=$(run_oci $OCI_PY rt-create "$VCN" "$IGW")
+say "Route table (0.0.0.0/0 → gateway) created."
+SL=$(run_oci $OCI_PY sl-create "$VCN")
+say "Security list (SSH + HTTP ingress) created."
+SUBNET=$(run_oci $OCI_PY subnet-create "$VCN" "$RT" "$SL")
+say "Subnet created."
+
+# ── Stage 5: launch the VM (automatic) ──────────────────────────────────────
+stage "Launch the VM (automatic)" 5
+say "Finding the Ubuntu 24.04 ARM image and launching the free Ampere A1 instance (4 OCPU / 24 GB)…"
+IMAGE=$(run_oci $OCI_PY image-list)
+AD=$(run_oci $OCI_PY ad-list)
+INSTANCE=$(run_oci $OCI_PY instance-launch "$SUBNET" "$AD" "$IMAGE" "$KEY_PATH.pub")
+say "Instance launched — waiting for it to boot (a few minutes, progress below)."
+note "Out of capacity? The API error will say so — retry later or check you are in your home region."
+if ! $OCI_PY instance-wait "$INSTANCE"; then
+  warn "Instance never reached RUNNING — check the console for errors, then re-run."
+  exit 1
+fi
+VM_IP=$(run_oci $OCI_PY instance-public-ip "$INSTANCE")
+write_env VM_IP "$VM_IP"
+say "Instance is RUNNING at $VM_IP"
 
 # ── Stage 5: first boot + Docker ────────────────────────────────────────────
 stage "First boot + Docker install" 8
