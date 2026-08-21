@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -6,6 +7,12 @@ from sqlalchemy import engine_from_config, pool
 from app.models import Base
 
 config = context.config
+
+# Production (docker compose) points migrations at the real database via the
+# BUDJETAME_DATABASE_URL env var; alembic.ini only carries the local-dev
+# default. Tests pass their URL explicitly and are unaffected.
+if os.environ.get("BUDJETAME_DATABASE_URL"):
+    config.set_main_option("sqlalchemy.url", os.environ["BUDJETAME_DATABASE_URL"])
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

@@ -73,6 +73,14 @@ uv run alembic revision --autogenerate -m "describe the change"
 uv run alembic upgrade head
 ```
 
+## Deployment
+
+Free, always-on hosting on **Oracle Cloud Always Free** (a single ARM VM running
+the whole stack in Docker): run `scripts/oracle-provision.sh` — it walks you
+through the Oracle signup, creates the VM, and deploys. See
+[`docs/deploy-oracle.md`](docs/deploy-oracle.md) for what it does and the
+manual record.
+
 ## Project conventions
 
 - All data is scoped to the single Account; foreign data gets a 403.

@@ -1,0 +1,42 @@
+# Production deployment — db + backend + nginx (see docs/deploy-oracle.md).
+# Secrets come from .env (copy .env.example); the provisioning wizard
+# (scripts/oracle-provision.sh) fills that in for you.
+# Run: docker compose -f compose.prod.yaml up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: budjetame
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: budjetame
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budjetame -d budjetame"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      BUDJETAME_DATABASE_URL: postgresql+psycopg://budjetame:${POSTGRES_PASSWORD:?}@db:5432/budjetame
+      BUDJETAME_JWT_SECRET: ${BUDJETAME_JWT_SECRET:?set in .env}
+      BUDJETAME_SEED_ACCOUNT_EMAIL: ${BUDJETAME_SEED_ACCOUNT_EMAIL:?set in .env}
+      BUDJETAME_SEED_ACCOUNT_PASSWORD: ${BUDJETAME_SEED_ACCOUNT_PASSWORD:?set in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
