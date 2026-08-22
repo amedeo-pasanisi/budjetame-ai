@@ -1,0 +1,94 @@
+name: CD
+
+on:
+  push:
+    branches: [dev, stage, main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/amedeo-pasanisi/budjetame-ai
+  # Which environment this branch deploys to.
+  ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/stage' && 'stage' || 'dev' }}
+
+concurrency:
+  group: cd-${{ env.ENV }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build images (${{ env.ENV }})
+    runs-on: ubuntu-latest
+    environment: ${{ env.ENV }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          # prod is ARM64 (A1.Flex); stage/dev are AMD64 (E2.1.Micro)
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
+          push: true
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
+          push: true
+
+  deploy:
+    name: Deploy ${{ env.ENV }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ env.ENV }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Write .env from environment secrets
+        run: |
+          cat > .env <<'EOF'
+          ENV=${{ env.ENV }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          BUDJETAME_JWT_SECRET=${{ secrets.BUDJETAME_JWT_SECRET }}
+          BUDJETAME_SEED_ACCOUNT_EMAIL=${{ secrets.BUDJETAME_SEED_ACCOUNT_EMAIL }}
+          BUDJETAME_SEED_ACCOUNT_PASSWORD=${{ secrets.BUDJETAME_SEED_ACCOUNT_PASSWORD }}
+          EOF
+          scp -i ~/.ssh/deploy_key .env compose.deploy.yaml ubuntu@${{ secrets.VM_HOST }}:~/
+      - name: Install Docker if missing
+        run: >
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.VM_HOST }}
+          'command -v docker >/dev/null || curl -fsSL https://get.docker.com | sudo sh'
+      - name: Pull and start
+        run: >
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.VM_HOST }}
+          'mkdir -p budjetame && mv -f ~/.env ~/compose.deploy.yaml budjetame/ &&
+           cd budjetame && sudo docker compose -f compose.deploy.yaml -p budjetame-ai up -d'
+      - name: Health check
+        run: |
+          for i in $(seq 1 24); do
+            if curl -fsS --max-time 10 "http://${{ secrets.VM_HOST }}/api/health" | grep -q '"ok"'; then
+              echo "healthy: ${{ env.ENV }} at http://${{ secrets.VM_HOST }}"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "not healthy: ${{ env.ENV }} — check: ssh ubuntu@${{ secrets.VM_HOST }} 'cd budjetame && sudo docker compose -f compose.deploy.yaml logs -f'"
+          exit 1

@@ -23,6 +23,8 @@ Usage:
     scripts/oci_api.py sl-create <vcn>                # security list OCID (ingress 22, 80)
     scripts/oci_api.py subnet-create <vcn> <rt> <sl>  # subnet OCID (10.0.0.0/24)
     scripts/oci_api.py instance-launch <subnet> <ad> <image> <ssh-pubkey-file>
+    scripts/oci_api.py image-list-x86                  # Ubuntu 24.04 x86_64 image OCID (E2.1.Micro)
+    scripts/oci_api.py micro-launch <subnet> <ad> <image> <ssh-pubkey-file> <name>  # E2.1.Micro
     scripts/oci_api.py instance-wait <instance>       # poll until RUNNING
     scripts/oci_api.py instance-public-ip <instance>  # public IP
     scripts/oci_api.py --dry-run <command> ...        # print the signed request, don't send
@@ -213,13 +215,14 @@ def first_ad(cfg: dict, private_key, dry_run: bool = False) -> str:
     print(data[0]["name"])
 
 
-def best_image(cfg: dict, private_key, dry_run: bool = False) -> str:
+def best_image(cfg: dict, private_key, dry_run: bool = False, architecture: str = "ARM64",
+               shape: str = SHAPE) -> str:
     params = {
         "compartmentId": cfg["tenancy"],
-        "architecture": "ARM64",
+        "architecture": architecture,
         "operatingSystem": "Canonical Ubuntu",
         "operatingSystemVersion": "24.04",
-        "shape": SHAPE,
+        "shape": shape,
         "lifecycleState": "AVAILABLE",
     }
     data = call(cfg, private_key, "GET", "/20160918/images", params=params, dry_run=dry_run)
@@ -227,9 +230,33 @@ def best_image(cfg: dict, private_key, dry_run: bool = False) -> str:
         return ""
     images = [i for i in data if "24.04" in i.get("displayName", "")]
     if not images:
-        sys.exit(f"error: no Ubuntu 24.04 aarch64 image found (got {len(data)} images)")
+        sys.exit(f"error: no Ubuntu 24.04 {architecture} image found (got {len(data)} images)")
     images.sort(key=lambda i: i.get("timeCreated", ""), reverse=True)
     print(images[0]["id"])
+
+
+MICRO_SHAPE = "VM.Standard.E2.1.Micro"
+
+
+def micro_launch(cfg: dict, private_key, subnet: str, ad: str, image: str,
+                 ssh_key_file: str, display_name: str, dry_run: bool = False) -> str:
+    """Launch a fixed-shape E2.1.Micro (the free AMD micro — no shapeConfig;
+    flexible-shape fields are rejected for it)."""
+    with open(ssh_key_file) as f:
+        pubkey = f.read().strip()
+    body = {
+        "availabilityDomain": ad,
+        "compartmentId": cfg["tenancy"],
+        "shape": MICRO_SHAPE,
+        "displayName": display_name,
+        "sourceDetails": {"sourceType": "image", "imageId": image},
+        "subnetId": subnet,
+        "metadata": {"ssh_authorized_keys": pubkey},
+    }
+    data = call(cfg, private_key, "POST", "/20160918/instances", body=body, dry_run=dry_run)
+    if dry_run:
+        return ""
+    print(data["id"])
 
 
 def create(cfg: dict, private_key, path: str, body: dict, dry_run: bool = False) -> str:
@@ -319,6 +346,11 @@ def main() -> None:
         first_ad(cfg, private_key, args.dry_run)
     elif args.command == "image-list":
         best_image(cfg, private_key, args.dry_run)
+    elif args.command == "image-list-x86":
+        best_image(cfg, private_key, args.dry_run, architecture="X86", shape=MICRO_SHAPE)
+    elif args.command == "micro-launch":
+        micro_launch(cfg, private_key, args.args[0], args.args[1], args.args[2],
+                     args.args[3], args.args[4], args.dry_run)
     elif args.command == "vcn-create":
         create(cfg, private_key, "/20160918/vcns",
                {"compartmentId": cfg["tenancy"], "cidrBlock": VCN_CIDR,

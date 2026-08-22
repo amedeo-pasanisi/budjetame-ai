@@ -1,0 +1,44 @@
+# CI/CD deployment compose — images come from GHCR, built by the CD pipeline
+# (.github/workflows/cd.yml). The workflow writes .env from GitHub environment
+# secrets, then runs:
+#   docker compose -f compose.deploy.yaml -p budjetame-ai pull && up -d
+# The project name matches the original prod stack so upgrades swap in place
+# and the db_data volume (all your data) carries over.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: budjetame
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: budjetame
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budjetame -d budjetame"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: ghcr.io/amedeo-pasanisi/budjetame-ai/backend:${ENV:?set in .env}
+    restart: unless-stopped
+    environment:
+      BUDJETAME_DATABASE_URL: postgresql+psycopg://budjetame:${POSTGRES_PASSWORD:?}@db:5432/budjetame
+      BUDJETAME_JWT_SECRET: ${BUDJETAME_JWT_SECRET:?set in .env}
+      BUDJETAME_SEED_ACCOUNT_EMAIL: ${BUDJETAME_SEED_ACCOUNT_EMAIL:?set in .env}
+      BUDJETAME_SEED_ACCOUNT_PASSWORD: ${BUDJETAME_SEED_ACCOUNT_PASSWORD:?set in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    image: ghcr.io/amedeo-pasanisi/budjetame-ai/frontend:${ENV:?set in .env}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
