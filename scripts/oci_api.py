@@ -195,9 +195,12 @@ def call(cfg: dict, private_key, method: str, path: str, *, params: dict | None 
             message = parsed.get("message", detail)
         except ValueError:
             code, message = e.code, detail[:300]
-        sys.exit(f"error: OCI {e.code} ({code}) — {message}\n"
-                 f"  hint: 401 = key/fingerprint/OCID mismatch, 404 = wrong tenancy OCID, "
-                 f"400 = request rejected")
+        hints = {
+            "NotAuthorizedOrNotFound": "the API key is not uploaded for this user, or the user/tenancy OCIDs don't match — check the console (Identity & Security → Users → your user → API Keys) that a key with the config fingerprint is listed",
+            "AuthFailed": "signature rejected — check the fingerprint in ~/.oci/config matches the uploaded key's fingerprint",
+        }
+        hint = hints.get(code, "401 = key/fingerprint/OCID mismatch, 404 = wrong tenancy OCID, 400 = request rejected")
+        sys.exit(f"error: OCI {e.code} ({code}) — {message}\n  hint: {hint}")
 
 
 def first_ad(cfg: dict, private_key, dry_run: bool = False) -> str:
