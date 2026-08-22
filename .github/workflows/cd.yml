@@ -11,12 +11,12 @@ env:
   ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/stage' && 'stage' || 'dev' }}
 
 concurrency:
-  group: cd-${{ env.ENV }}
+  group: cd-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build images (${{ env.ENV }})
+    name: Build images
     runs-on: ubuntu-latest
     environment: ${{ env.ENV }}
     permissions:
@@ -48,7 +48,7 @@ jobs:
           push: true
 
   deploy:
-    name: Deploy ${{ env.ENV }}
+    name: Deploy
     needs: build
     runs-on: ubuntu-latest
     environment: ${{ env.ENV }}
