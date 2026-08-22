@@ -1,5 +1,32 @@
 # Deploying Budjetame on Oracle Cloud Always Free
 
+## Environments & pipeline
+
+Three Always-Free environments, driven by GitHub Actions:
+
+| Branch | Environment | VM | URL |
+|---|---|---|---|
+| `main` | **prod** | A1.Flex 4 OCPU/24 GB (ARM) | http://89.168.30.119 |
+| `stage` | **stage** | E2.1.Micro 1 GB (AMD) | http://130.110.1.224 |
+| `dev` | **dev** | E2.1.Micro 1 GB (AMD) | http://92.4.163.113 |
+
+- **CI** (`.github/workflows/ci.yml`): on every push/PR — frontend lint +
+  build + vitest; backend mypy + pytest (testcontainers).
+- **CD** (`.github/workflows/cd.yml`): on push to `dev`/`stage`/`main` —
+  builds backend + frontend images (linux/amd64 **and** linux/arm64, since
+  prod is ARM and dev/stage are AMD), pushes them to GHCR tagged
+  `backend:dev|stage|prod`, then SSHes to the environment's VM and runs
+  `docker compose -f compose.deploy.yaml -p budjetame-ai up -d`
+  (`compose.deploy.yaml` pulls the GHCR images; the project name matches the
+  original prod stack so the `db_data` volume — all data — carries over).
+- Secrets live in GitHub **environments** (`dev`/`stage`/`prod`): VM host,
+  deploy SSH key, Postgres password, JWT secret, seed login. The deploy SSH
+  public key is in `~/.ssh/authorized_keys` on each VM; the private key is
+  only in GitHub.
+- VMs are provisioned by `scripts/oracle-provision.sh` + `scripts/oci_api.py`
+  (pure-Python OCI client; the official oci-cli cannot install on Termux).
+
+
 A single ARM VM running the whole app in Docker — free forever (4 OCPU / 24 GB
 RAM on the Ampere A1 shape), always on, no cold starts. The only thing Oracle
 asks for is a credit card to verify your identity; nothing is ever charged.
