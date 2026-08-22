@@ -7,8 +7,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/amedeo-pasanisi/budjetame-ai
-  # Which environment this branch deploys to.
-  ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/stage' && 'stage' || 'dev' }}
 
 concurrency:
   group: cd-${{ github.ref_name }}
@@ -18,7 +16,18 @@ jobs:
   build:
     name: Build images
     runs-on: ubuntu-latest
-    environment: ${{ env.ENV }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: prod
+            branch: main
+          - env: stage
+            branch: stage
+          - env: dev
+            branch: dev
+    if: github.ref == format('refs/heads/{0}', matrix.branch)
+    environment: ${{ matrix.env }}
     permissions:
       contents: read
       packages: write
@@ -37,21 +46,32 @@ jobs:
           context: ./backend
           # prod is ARM64 (A1.Flex); stage/dev are AMD64 (E2.1.Micro)
           platforms: linux/amd64,linux/arm64
-          tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
+          tags: ${{ env.IMAGE_BASE }}/backend:${{ matrix.env }}
           push: true
       - name: Build and push frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
           platforms: linux/amd64,linux/arm64
-          tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
+          tags: ${{ env.IMAGE_BASE }}/frontend:${{ matrix.env }}
           push: true
 
   deploy:
     name: Deploy
     needs: build
     runs-on: ubuntu-latest
-    environment: ${{ env.ENV }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: prod
+            branch: main
+          - env: stage
+            branch: stage
+          - env: dev
+            branch: dev
+    if: github.ref == format('refs/heads/{0}', matrix.branch)
+    environment: ${{ matrix.env }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up SSH
@@ -65,7 +85,7 @@ jobs:
       - name: Write .env from environment secrets
         run: |
           cat > .env <<'EOF'
-          ENV=${{ env.ENV }}
+          ENV=${{ matrix.env }}
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           BUDJETAME_JWT_SECRET=${{ secrets.BUDJETAME_JWT_SECRET }}
           BUDJETAME_SEED_ACCOUNT_EMAIL=${{ secrets.BUDJETAME_SEED_ACCOUNT_EMAIL }}
@@ -85,10 +105,10 @@ jobs:
         run: |
           for i in $(seq 1 24); do
             if curl -fsS --max-time 10 "http://${{ secrets.VM_HOST }}/api/health" | grep -q '"ok"'; then
-              echo "healthy: ${{ env.ENV }} at http://${{ secrets.VM_HOST }}"
+              echo "healthy: ${{ matrix.env }} at http://${{ secrets.VM_HOST }}"
               exit 0
             fi
             sleep 5
           done
-          echo "not healthy: ${{ env.ENV }} — check: ssh ubuntu@${{ secrets.VM_HOST }} 'cd budjetame && sudo docker compose -f compose.deploy.yaml logs -f'"
+          echo "not healthy: ${{ matrix.env }} — check: ssh ubuntu@${{ secrets.VM_HOST }} 'cd budjetame && sudo docker compose -f compose.deploy.yaml logs -f'"
           exit 1
