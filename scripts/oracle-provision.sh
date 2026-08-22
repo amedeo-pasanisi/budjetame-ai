@@ -289,8 +289,8 @@ EOF
   say "API config written to ~/.oci/config."
 fi
 say "Testing the connection…"
-if OUT=$($OCI_PY ad-list 2>&1); then
-  say "Connected — availability domain: $OUT"
+if OUT=$($OCI_PY image-list 2>&1); then
+  say "Connected — Ubuntu 24.04 image: ${OUT:0:24}…"
 else
   warn "Connection failed:"; say "$OUT"
   warn "Check the OCIDs and fingerprint, then re-run the wizard."
@@ -315,10 +315,21 @@ say "Subnet created."
 stage "Launch the VM (automatic)" 5
 say "Finding the Ubuntu 24.04 ARM image and launching the free Ampere A1 instance (4 OCPU / 24 GB)…"
 IMAGE=$(run_oci $OCI_PY image-list)
-AD=$(run_oci $OCI_PY ad-list)
-INSTANCE=$(run_oci $OCI_PY instance-launch "$SUBNET" "$AD" "$IMAGE" "$KEY_PATH.pub")
+ADU=$(grep '^region=' "$HOME/.oci/config" | cut -d= -f2 | tr '[:lower:]' '[:upper:]')
+INSTANCE=""
+for AD in "MEUq:$ADU-AD-1" "$ADU-AD-1" "$ADU-AD-2" "$ADU-AD-3" "MEUq:$ADU-AD-2" "MEUq:$ADU-AD-3"; do
+  say "  trying availability domain: $AD"
+  if OUT=$($OCI_PY instance-launch "$SUBNET" "$AD" "$IMAGE" "$KEY_PATH.pub" 2>&1); then
+    INSTANCE=$OUT
+    break
+  fi
+  note "$(echo "$OUT" | head -1 | cut -c1-90)"
+done
+if [[ -z "$INSTANCE" ]]; then
+  warn "Could not launch the instance — out of capacity? Check the errors above, then re-run."
+  exit 1
+fi
 say "Instance launched — waiting for it to boot (a few minutes, progress below)."
-note "Out of capacity? The API error will say so — retry later or check you are in your home region."
 if ! $OCI_PY instance-wait "$INSTANCE"; then
   warn "Instance never reached RUNNING — check the console for errors, then re-run."
   exit 1
