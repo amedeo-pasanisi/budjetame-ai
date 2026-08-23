@@ -10,6 +10,12 @@ env:
   # Branch → environment: main=prod, stage=stage, dev=dev.
   # Computed from github context so job-level keys can use it too.
   ENV: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
+  # Each environment runs exactly one architecture: prod is ARM64
+  # (A1.Flex), stage/dev are AMD64 (E2.1.Micro). Only that platform is
+  # built — a multi-arch build would put the other half under QEMU
+  # emulation, where the frontend's npm/tsc/vite toolchain grinds for
+  # hours (and the emulated image could never run on that VM anyway).
+  PLATFORMS: ${{ github.ref_name == 'main' && 'linux/arm64' || 'linux/amd64' }}
 
 concurrency:
   group: cd-${{ github.ref_name }}
@@ -18,14 +24,15 @@ concurrency:
 jobs:
   build:
     name: Build images
-    runs-on: ubuntu-latest
+    # Native runner per environment: ubuntu-latest (AMD64) for dev/stage,
+    # GitHub's free ARM64 runner for prod (public repos) — no QEMU anywhere.
+    runs-on: ${{ github.ref_name == 'main' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -36,15 +43,14 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./backend
-          # prod is ARM64 (A1.Flex); stage/dev are AMD64 (E2.1.Micro)
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.PLATFORMS }}
           tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
           push: true
       - name: Build and push frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.PLATFORMS }}
           tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
           push: true
 

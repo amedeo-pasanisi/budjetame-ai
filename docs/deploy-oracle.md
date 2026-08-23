@@ -13,10 +13,12 @@ Three Always-Free environments, driven by GitHub Actions:
 - **CI** (`.github/workflows/ci.yml`): on every push/PR — frontend lint +
   build + vitest; backend mypy + pytest (testcontainers).
 - **CD** (`.github/workflows/cd.yml`): on push to `dev`/`stage`/`main` —
-  builds backend + frontend images (linux/amd64 **and** linux/arm64, since
-  prod is ARM and dev/stage are AMD), pushes them to GHCR tagged
-  `backend:dev|stage|prod`, then SSHes to the environment's VM and runs
-  `docker compose -f compose.deploy.yaml -p budjetame-ai up -d`
+  builds backend + frontend images for exactly the environment's
+  architecture (linux/amd64 for dev/stage on the AMD64 runner,
+  linux/arm64 for prod on GitHub's free ARM64 runner — no QEMU emulation,
+  which makes JS toolchain builds grind for hours), pushes them to GHCR
+  tagged `backend:dev|stage|prod`, then SSHes to the environment's VM and
+  runs `docker compose -f compose.deploy.yaml -p budjetame-ai up -d`
   (`compose.deploy.yaml` pulls the GHCR images; the project name matches the
   original prod stack so the `db_data` volume — all data — carries over).
 - Secrets live in GitHub **environments** (`dev`/`stage`/`prod`): VM host,
