@@ -57,6 +57,19 @@ export type ImportDraftController = {
    * untouched; a failed call surfaces as the draft's error, leaving the
    * rows as they were. */
   recheckProblems: () => Promise<void>
+  /** Revalidation trigger 1 — an entity created during the Preview (issue
+   * #78): re-validate the problem rows that reference the freshly created
+   * Wallet or Category in one batch call. For a Wallet, a row references it
+   * when its wallet-kind field (wallet, source wallet, destination wallet)
+   * case-insensitively equals the created name; for a Category, when its
+   * category field does. The flips apply exactly like the on-resume
+   * re-check: Ready rows are auto-selected, Duplicates unselectable,
+   * remaining Problems narrowed. Ready, Duplicate, hand-verified, and
+   * unrelated problem rows are untouched; a failed call surfaces as the
+   * draft's error, leaving the rows as they were. The row being edited
+   * flips too — its stored values still reference the name — even when the
+   * editor is then cancelled without saving. */
+  revalidateMatching: (kind: 'wallet' | 'category', name: string) => Promise<void>
   confirm: () => Promise<void>
   pickAgain: () => void
   cancel: () => void
@@ -218,19 +231,23 @@ export function useImportDraft(): ImportDraftController {
     })
   }
 
-  const recheckProblems = async () => {
+  /** One batch Revalidation call and the flips that apply its verdicts
+   * (issue #76): every sendable draft row travels as the in-file Duplicate
+   * context, the problem rows `match` selects are the targets, and each
+   * verdict flips its row in place — Ready auto-selected, anything else
+   * deselected. Rows without a sendable identity (parse errors) cannot be
+   * re-validated and keep their message. No matching problem row means no
+   * call at all; a failed call surfaces as the draft's error, leaving the
+   * rows as they were. */
+  const revalidateBatch = async (match: (row: ImportRow) => boolean) => {
     if (draft === null || draft.preview === null || draft.busy) return
-    // One batch call (issue #76): every sendable draft row travels as the
-    // in-file Duplicate context, and the problem rows are the targets.
-    // Rows without a sendable identity (parse errors) cannot be
-    // re-validated and keep their message.
     const rows: ImportRowInput[] = []
     const targets: number[] = []
     for (const row of draft.preview.rows) {
       const input = rowInput(row)
       if (input === null) continue
       rows.push(input)
-      if (row.status === 'error') targets.push(row.row)
+      if (row.status === 'error' && match(row)) targets.push(row.row)
     }
     if (targets.length === 0) return
     try {
@@ -278,6 +295,24 @@ export function useImportDraft(): ImportDraftController {
             },
       )
     }
+  }
+
+  const recheckProblems = async () => {
+    // The on-resume trigger (issue #76) selects every problem row.
+    await revalidateBatch(() => true)
+  }
+
+  const revalidateMatching = async (kind: 'wallet' | 'category', name: string) => {
+    const needle = name.trim().toLowerCase()
+    const matches = (value: string | null) =>
+      value !== null && value.trim().toLowerCase() === needle
+    await revalidateBatch((row) =>
+      kind === 'category'
+        ? matches(row.category)
+        : matches(row.wallet) ||
+          matches(row.source_wallet) ||
+          matches(row.destination_wallet),
+    )
   }
 
   const confirm = async () => {
@@ -348,6 +383,7 @@ export function useImportDraft(): ImportDraftController {
     toggle,
     saveRowEdit,
     recheckProblems,
+    revalidateMatching,
     confirm,
     pickAgain,
     cancel,

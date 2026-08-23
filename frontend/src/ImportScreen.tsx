@@ -101,22 +101,27 @@ export function ImportScreen({
   // Transactions screen adds the Wallet to its list state (the entity is
   // real at once, ADR-0014), close only the inner modal, and report the new
   // name to the open row editor so the originating field selects it — the
-  // editor's other fields stay untouched.
+  // editor's other fields stay untouched. The creation also kicks off
+  // Revalidation (issue #78): every problem row referencing the new name
+  // flips through the batch endpoint, the row being edited included.
   const handleWalletCreated = (wallet: Wallet) => {
     onWalletCreated(wallet)
     if (walletModal !== null) {
       setWalletToSelect({ name: wallet.name, target: walletModal.target })
     }
     setWalletModal(null)
+    void controller.revalidateMatching('wallet', wallet.name)
   }
 
   // The inner Category modal's save, the mirror of the Wallet contract: the
-  // created Category is real at once and auto-selected in the row editor's
-  // Category field.
+  // created Category is real at once, auto-selected in the row editor's
+  // Category field, and the problem rows referencing its name re-validate
+  // (issue #78).
   const handleCategoryCreated = (category: Category) => {
     onCategoryCreated(category)
     setCategoryToSelect(category.name)
     setCategoryModal(null)
+    void controller.revalidateMatching('category', category.name)
   }
 
   // Closing the row editor also clears the pending auto-selects: a stale

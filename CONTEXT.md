@@ -113,8 +113,12 @@ The unconfirmed state of an import: the parsed rows, verification edits, and row
 _Avoid_: pending import
 
 **Preview**:
-The review step of an import before anything is written: every row is classified ready, duplicate, or problem, and can be verified. Nothing reaches the database until the import is confirmed.
+The review step of an import before any Transaction is written: every row is classified ready, duplicate, or problem, and can be verified. Wallets and Categories created from the row editor during the Preview are real immediately — only Transactions wait for the import's confirmation.
 _Avoid_: verification phase
+
+**Revalidation**:
+Re-running a Preview row through the import's resolution and rules: as one edited row is saved, as every problem row is re-checked when the Preview resumes, and as the problem rows referencing a Wallet or Category created from the row editor are re-validated in one batch. A row that re-validates flips to Ready, Duplicate, or a Problem with its message narrowed to what remains.
+_Avoid_: re-check, refresh, re-scan
 
 **Verification**:
 The act of editing a Preview row — date, amount, type, wallet(s), category, description, location — so it becomes acceptable for import. A verified row is re-validated against the database as it is saved.

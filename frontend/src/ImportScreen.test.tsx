@@ -17,6 +17,13 @@
  * entity for real, closes only the modal, and auto-selects it in the
  * originating field.
  *
+ * Import inline-creation Revalidation (issue #78): creating a Wallet or
+ * Category from the row editor re-validates, in one batch call, every
+ * problem row whose wallet-kind field (Wallet, From, To) or Category field
+ * case-insensitively references the created name — flips to Ready
+ * (auto-selected), Duplicate (unselectable), or a narrowed Problem — and
+ * leaves hand-verified and unrelated rows untouched.
+ *
  * The API client is mocked; the screen is driven like a user would (pick a
  * file, read, toggle, edit a row, confirm). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -232,6 +239,430 @@ const billsCategory: Category = {
   id: 5,
   name: 'Bills',
   type: 'income',
+  icon: null,
+  color: '#ef4444',
+  created_at: '2026-08-05T00:00:00Z',
+}
+
+/** The Wallet Revalidation fixture (issue #78): problem rows referencing a
+ * missing Wallet under different spellings, through a Transfer's From and
+ * To, and alongside a second problem (a missing Category); a problem row
+ * about something else entirely; plus ready and duplicate rows that must
+ * stay untouched. Rows 2 and 3 are the same Transaction except for the
+ * Wallet's case — the in-file Duplicate pair (AC: the first flips Ready,
+ * the second Duplicate). */
+const revalidationPreview: ImportPreview = {
+  rows: [
+    {
+      row: 1,
+      status: 'ok',
+      type: 'expense',
+      date: '2026-08-01',
+      amount: '4.50',
+      wallet: 'Cash',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Food',
+      description: 'Coffee',
+      latitude: null,
+      longitude: null,
+      error: null,
+    },
+    {
+      row: 2,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-04',
+      amount: '20.00',
+      wallet: 'Unknown',
+      source_wallet: null,
+      destination_wallet: null,
+      category: null,
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet 'Unknown'",
+    },
+    {
+      row: 3,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-04',
+      amount: '20.00',
+      wallet: 'unknown',
+      source_wallet: null,
+      destination_wallet: null,
+      category: null,
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet 'unknown'",
+    },
+    {
+      row: 4,
+      status: 'error',
+      type: 'transfer',
+      date: '2026-08-05',
+      amount: '30.00',
+      wallet: null,
+      source_wallet: 'Unknown',
+      destination_wallet: 'Cash',
+      category: null,
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet 'Unknown'",
+    },
+    {
+      row: 5,
+      status: 'error',
+      type: 'transfer',
+      date: '2026-08-06',
+      amount: '30.00',
+      wallet: null,
+      source_wallet: 'Cash',
+      destination_wallet: 'unknown',
+      category: null,
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet 'unknown'",
+    },
+    {
+      row: 6,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-07',
+      amount: '9.00',
+      wallet: 'Unknown',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Nope',
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet 'Unknown'",
+    },
+    {
+      row: 7,
+      status: 'error',
+      type: 'income',
+      date: '2026-08-08',
+      amount: '50.00',
+      wallet: 'Bank',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Food',
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Category 'Food' is an expense category, not income",
+    },
+    {
+      row: 8,
+      status: 'duplicate',
+      type: 'expense',
+      date: '2026-08-01',
+      amount: '4.50',
+      wallet: 'Cash',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Food',
+      description: 'Coffee',
+      latitude: null,
+      longitude: null,
+      error: null,
+    },
+  ],
+  ok_count: 1,
+  error_count: 6,
+  duplicate_count: 1,
+}
+
+/** The revalidation fixture's rows 1-8 as the wire's ImportRowInput
+ * literals — the batch call must carry every draft row as the in-file
+ * Duplicate context, written independently of the code under test. */
+const revalidationWireRows: ImportRowInput[] = [
+  {
+    row: 1,
+    type: 'expense',
+    date: '2026-08-01',
+    amount: '4.50',
+    wallet: 'Cash',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Food',
+    description: 'Coffee',
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 2,
+    type: 'expense',
+    date: '2026-08-04',
+    amount: '20.00',
+    wallet: 'Unknown',
+    source_wallet: null,
+    destination_wallet: null,
+    category: null,
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 3,
+    type: 'expense',
+    date: '2026-08-04',
+    amount: '20.00',
+    wallet: 'unknown',
+    source_wallet: null,
+    destination_wallet: null,
+    category: null,
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 4,
+    type: 'transfer',
+    date: '2026-08-05',
+    amount: '30.00',
+    wallet: null,
+    source_wallet: 'Unknown',
+    destination_wallet: 'Cash',
+    category: null,
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 5,
+    type: 'transfer',
+    date: '2026-08-06',
+    amount: '30.00',
+    wallet: null,
+    source_wallet: 'Cash',
+    destination_wallet: 'unknown',
+    category: null,
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 6,
+    type: 'expense',
+    date: '2026-08-07',
+    amount: '9.00',
+    wallet: 'Unknown',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Nope',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 7,
+    type: 'income',
+    date: '2026-08-08',
+    amount: '50.00',
+    wallet: 'Bank',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Food',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 8,
+    type: 'expense',
+    date: '2026-08-01',
+    amount: '4.50',
+    wallet: 'Cash',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Food',
+    description: 'Coffee',
+    latitude: null,
+    longitude: null,
+  },
+]
+
+/** The Category Revalidation fixture: problem rows referencing a missing
+ * Category under two spellings (rows 2 and 3 are the in-file Duplicate
+ * pair), a problem row about a missing Wallet instead, plus ready and
+ * duplicate rows that must stay untouched. */
+const categoryRevalidationPreview: ImportPreview = {
+  rows: [
+    {
+      row: 1,
+      status: 'ok',
+      type: 'income',
+      date: '2026-08-02',
+      amount: '100.00',
+      wallet: 'Bank',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Salary',
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: null,
+    },
+    {
+      row: 2,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-04',
+      amount: '20.00',
+      wallet: 'Cash',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Bills',
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown expense category 'Bills'",
+    },
+    {
+      row: 3,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-04',
+      amount: '20.00',
+      wallet: 'Cash',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'bills',
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown expense category 'bills'",
+    },
+    {
+      row: 4,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-05',
+      amount: '12.00',
+      wallet: 'Unknown',
+      source_wallet: null,
+      destination_wallet: null,
+      category: null,
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet 'Unknown'",
+    },
+    {
+      row: 5,
+      status: 'duplicate',
+      type: 'income',
+      date: '2026-08-02',
+      amount: '100.00',
+      wallet: 'Bank',
+      source_wallet: null,
+      destination_wallet: null,
+      category: 'Salary',
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: null,
+    },
+  ],
+  ok_count: 1,
+  error_count: 3,
+  duplicate_count: 1,
+}
+
+/** The category revalidation fixture's rows as the wire's ImportRowInput
+ * literals — the batch call must carry every draft row, independently
+ * written. */
+const categoryRevalidationWireRows: ImportRowInput[] = [
+  {
+    row: 1,
+    type: 'income',
+    date: '2026-08-02',
+    amount: '100.00',
+    wallet: 'Bank',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Salary',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 2,
+    type: 'expense',
+    date: '2026-08-04',
+    amount: '20.00',
+    wallet: 'Cash',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Bills',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 3,
+    type: 'expense',
+    date: '2026-08-04',
+    amount: '20.00',
+    wallet: 'Cash',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'bills',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 4,
+    type: 'expense',
+    date: '2026-08-05',
+    amount: '12.00',
+    wallet: 'Unknown',
+    source_wallet: null,
+    destination_wallet: null,
+    category: null,
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+  {
+    row: 5,
+    type: 'income',
+    date: '2026-08-02',
+    amount: '100.00',
+    wallet: 'Bank',
+    source_wallet: null,
+    destination_wallet: null,
+    category: 'Salary',
+    description: null,
+    latitude: null,
+    longitude: null,
+  },
+]
+
+/** The Wallet created inline in the Revalidation tests: the name every
+ * matching problem row was waiting for. */
+const unknownWallet: Wallet = {
+  id: 8,
+  name: 'Unknown',
+  type: 'checking',
+  balance: '0.00',
+  frozen: false,
+  created_at: '2026-08-05T00:00:00Z',
+}
+
+/** The expense Category created inline in the Category Revalidation test. */
+const billsExpenseCategory: Category = {
+  id: 6,
+  name: 'Bills',
+  type: 'expense',
   icon: null,
   color: '#ef4444',
   created_at: '2026-08-05T00:00:00Z',
@@ -1067,5 +1498,231 @@ describe('ImportScreen row editor entity selects and inline creation (issue #77)
     const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
     expect(walletOptions(dialog)).toEqual(["Unknown (doesn't exist yet)", '＋ Add wallet…'])
     expect(categoryOptions(dialog)).toEqual(['None', '＋ Add category…'])
+  })
+})
+
+describe('ImportScreen inline-creation Revalidation (issue #78)', () => {
+  /** Opens the editor on a row and picks its Wallet sentinel: the New
+   * wallet modal opens on top, prefilled with the field's missing name. */
+  const openWalletCreate = async (rowNumber: number) => {
+    fireEvent.click(screen.getByRole('button', { name: `Edit row ${rowNumber}` }))
+    const editor = await screen.findByRole('dialog', { name: `Edit row ${rowNumber}` })
+    fireEvent.change(within(editor).getByLabelText('Wallet'), {
+      target: { value: SENTINEL_VALUE },
+    })
+    const create = await screen.findByRole('dialog', { name: 'New wallet' })
+    return { editor, create }
+  }
+
+  it('creating a Wallet flips every problem row referencing its name — Ready auto-selected, Duplicate unselectable, remaining Problems narrowed, unrelated rows untouched — and refreshes the sticky bar', async () => {
+    createWalletMock.mockResolvedValue(unknownWallet)
+    revalidateImportRowsMock.mockResolvedValue([
+      { row: 2, status: 'ok', error: null },
+      { row: 3, status: 'duplicate', error: null },
+      { row: 4, status: 'ok', error: null },
+      { row: 5, status: 'ok', error: null },
+      { row: 6, status: 'error', error: "Unknown expense category 'Nope'" },
+    ])
+    await openPreview(revalidationPreview)
+    await screen.findByRole('button', { name: 'Import 1 row' })
+
+    const { create } = await openWalletCreate(2)
+    // The missing name is prefilled; submitting it unchanged creates the
+    // Wallet the rows were waiting for.
+    expect(within(create).getByLabelText('Name')).toHaveValue('Unknown')
+    fireEvent.click(within(create).getByRole('button', { name: 'Create wallet' }))
+
+    // One batch call: every draft row travels as the in-file Duplicate
+    // context, and only the problem rows referencing 'Unknown' — through
+    // Wallet, From, or To, case-insensitively — are the targets. Row 7's
+    // problem is unrelated and stays out.
+    await waitFor(() =>
+      expect(revalidateImportRowsMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        revalidationWireRows,
+        [2, 3, 4, 5, 6],
+      ),
+    )
+
+    // The flips: the Ready rows auto-select, the file's case-variant twin
+    // becomes an unselectable Duplicate, the row with a remaining Category
+    // problem narrows its message, and the unrelated row keeps its own
+    // exactly. The untouched ready row stays selected and the untouched
+    // duplicate stays unselectable.
+    await screen.findByText('4 ready')
+    expect(screen.getByRole('checkbox', { name: 'Select row 2' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select row 4' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select row 5' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select row 3' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Edit row 3' })).toHaveTextContent(
+      'Duplicate',
+    )
+    expect(
+      within(screen.getByRole('button', { name: 'Edit row 3' })).getByText(
+        /Already in the database or repeated in this file/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit row 6' })).toHaveTextContent(
+      'Problem',
+    )
+    expect(screen.getByText("Unknown expense category 'Nope'")).toBeInTheDocument()
+    expect(screen.queryByText("Unknown wallet 'Unknown'")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unknown wallet 'unknown'")).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Category 'Food' is an expense category, not income"),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Select row 1' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select row 8' })).toBeDisabled()
+    // The sticky bar's counts refreshed with the flips.
+    expect(screen.getByText('2 duplicates')).toBeInTheDocument()
+    expect(screen.getByText('2 problems')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Import 4 rows' })).toBeInTheDocument()
+  })
+
+  it('flips the row being edited too, even when the editor is then cancelled without saving', async () => {
+    createWalletMock.mockResolvedValue(unknownWallet)
+    revalidateImportRowsMock.mockResolvedValue([{ row: 2, status: 'ok', error: null }])
+    await openPreview(revalidationPreview)
+    await screen.findByRole('button', { name: 'Import 1 row' })
+
+    const { editor, create } = await openWalletCreate(2)
+    fireEvent.click(within(create).getByRole('button', { name: 'Create wallet' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+
+    // The editor's field selected the new Wallet, but the draft row behind
+    // still stores the missing name: the batch targets the stored values.
+    await waitFor(() =>
+      expect(within(editor).getByLabelText('Wallet')).toHaveValue('Unknown'),
+    )
+    // Cancel without saving.
+    fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // The row behind has flipped to Ready and is auto-selected.
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'Select row 2' })).toBeChecked(),
+    )
+    expect(screen.getByRole('button', { name: 'Edit row 2' })).toHaveTextContent('Ready')
+    expect(screen.getByText('2 ready')).toBeInTheDocument()
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+  })
+
+  it('creating a Category does the same for every problem row whose Category field references it', async () => {
+    createCategoryMock.mockResolvedValue(billsExpenseCategory)
+    revalidateImportRowsMock.mockResolvedValue([
+      { row: 2, status: 'ok', error: null },
+      { row: 3, status: 'duplicate', error: null },
+    ])
+    await openPreview(categoryRevalidationPreview)
+    await screen.findByRole('button', { name: 'Import 1 row' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 2' }))
+    const editor = await screen.findByRole('dialog', { name: 'Edit row 2' })
+    fireEvent.change(within(editor).getByLabelText('Category'), {
+      target: { value: SENTINEL_VALUE },
+    })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    // Prefilled with the missing name, locked to the row's type.
+    expect(within(categoryDialog).getByLabelText('Name')).toHaveValue('Bills')
+    expect(
+      within(categoryDialog).getByText('Expense · fixed for this form'),
+    ).toBeInTheDocument()
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    await waitFor(() =>
+      expect(revalidateImportRowsMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        categoryRevalidationWireRows,
+        [2, 3],
+      ),
+    )
+    // The first row flips Ready and auto-selects; its case-variant twin
+    // becomes an unselectable Duplicate; the Wallet problem row keeps its
+    // exact message. The editor auto-selected the new Category.
+    await screen.findByText('2 ready')
+    expect(screen.getByRole('checkbox', { name: 'Select row 2' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select row 3' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Edit row 3' })).toHaveTextContent(
+      'Duplicate',
+    )
+    expect(screen.getByText("Unknown wallet 'Unknown'")).toBeInTheDocument()
+    expect(screen.getByText('2 duplicates')).toBeInTheDocument()
+    expect(screen.getByText('1 problem')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(within(editor).getByLabelText('Category')).toHaveValue('Bills'),
+    )
+  })
+
+  it('leaves hand-verified rows alone: their edits, statuses, and selections survive the flips', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    createWalletMock.mockResolvedValue(unknownWallet)
+    revalidateImportRowsMock.mockResolvedValue([
+      { row: 2, status: 'ok', error: null },
+      { row: 3, status: 'duplicate', error: null },
+      { row: 4, status: 'ok', error: null },
+      { row: 5, status: 'ok', error: null },
+    ])
+    await openPreview(revalidationPreview)
+    await screen.findByRole('button', { name: 'Import 1 row' })
+
+    // Hand-verify row 6: fix both problems and save.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 6' }))
+    const editor = await screen.findByRole('dialog', { name: 'Edit row 6' })
+    fireEvent.change(within(editor).getByLabelText('Wallet'), {
+      target: { value: 'Cash' },
+    })
+    fireEvent.change(within(editor).getByLabelText('Category'), {
+      target: { value: 'Food' },
+    })
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: 'Select row 6' })).toBeChecked()
+
+    // Create the Wallet from row 2's editor: the hand-verified row 6 is no
+    // longer a problem and no longer references the name, so it is neither
+    // targeted nor touched — its edited values travel only as context.
+    const { create } = await openWalletCreate(2)
+    fireEvent.click(within(create).getByRole('button', { name: 'Create wallet' }))
+
+    await waitFor(() =>
+      expect(revalidateImportRowsMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        revalidationWireRows.map((row) =>
+          row.row === 6 ? { ...row, wallet: 'Cash', category: 'Food' } : row,
+        ),
+        [2, 3, 4, 5],
+      ),
+    )
+    await screen.findByText('5 ready')
+    expect(screen.getByRole('checkbox', { name: 'Select row 6' })).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Edit row 6' })).toHaveTextContent('Ready')
+  })
+
+  it('makes no batch call when no problem row references the created name', async () => {
+    createWalletMock.mockResolvedValue(revolutWallet)
+    await openPreview(revalidationPreview)
+    await screen.findByRole('button', { name: 'Import 1 row' })
+
+    const { editor, create } = await openWalletCreate(2)
+    // The user types a name no row references.
+    fireEvent.change(within(create).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(create).getByRole('button', { name: 'Create wallet' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    await waitFor(() =>
+      expect(within(editor).getByLabelText('Wallet')).toHaveValue('Revolut'),
+    )
+    expect(revalidateImportRowsMock).not.toHaveBeenCalled()
+    // The preview's board is unchanged.
+    expect(screen.getByText('1 ready')).toBeInTheDocument()
+    expect(screen.getByText('1 duplicate')).toBeInTheDocument()
+    expect(screen.getByText('6 problems')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Import 1 row' })).toBeInTheDocument()
   })
 })
