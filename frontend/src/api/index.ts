@@ -57,10 +57,12 @@ export {
   type ImportPreview,
   type ImportRow,
   type ImportRowInput,
+  type ImportRowRevalidation,
   type ImportRowStatus,
   type ImportRowValidation,
   confirmImport,
   previewImport,
+  revalidateImportRows,
   validateImportRow,
 } from './imports'
 

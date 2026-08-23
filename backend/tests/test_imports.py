@@ -736,6 +736,12 @@ async def test_import_endpoints_require_authentication(client: AsyncClient) -> N
             json={"row": _expense("10.00", "Wallet"), "earlier_rows": []},
         )
     ).status_code == 401
+    assert (
+        await client.post(
+            "/import/revalidate-rows",
+            json={"rows": [], "targets": []},
+        )
+    ).status_code == 401
 
 
 async def _wallet_balance(client: AsyncClient, token: str, wallet_id: int) -> str:
@@ -1383,5 +1389,218 @@ async def test_validate_row_is_scoped_to_the_account(
         )
         assert verdict["status"] == "error"
         assert "Unknown wallet 'Verify Foreign'" in verdict["error"]
+    finally:
+        delete_account(database_url, account_id)
+
+
+# --- Batch Revalidation (issue #76) ------------------------------------------
+
+
+async def _revalidate_rows(
+    client: AsyncClient, token: str, rows: list[dict], targets: list[int]
+) -> list[dict]:
+    """POST /import/revalidate-rows: the draft's rows plus the target row
+    numbers, every target's fresh verdict out — one call."""
+    response = await client.post(
+        "/import/revalidate-rows",
+        json={"rows": rows, "targets": targets},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _draft_rows(preview: dict) -> list[dict]:
+    """The draft's rows as the wire echoes them back: the preview's extracted
+    fields plus each row's file line number, which the targets name."""
+    return [{"row": row["row"], **_to_input(row)} for row in preview["rows"]]
+
+
+async def test_revalidate_rows_revalidates_problem_rows_in_one_call(
+    client: AsyncClient,
+) -> None:
+    """The batch Revalidation endpoint (issue #76): the draft's rows plus the
+    target row numbers in, every target's fresh verdict out — one call. A
+    row whose missing Wallet was created while the draft was open flips to
+    ready ("ok"); a row with a remaining violation stays an error with its
+    message narrowed to what is left. Nothing is written."""
+    token = await _login(client)
+    preview = await _preview(
+        client, token,
+        "2026-08-01,expense,12.50,Batch Checking,,,Batch Food,Lunch,",
+        "2026-08-02,expense,8.00,Batch Checking,,,,",
+    )
+    assert preview["error_count"] == 2
+    assert preview["rows"][0]["error"] == "Unknown wallet 'Batch Checking'"
+    rows = _draft_rows(preview)
+
+    # While the draft is open, the Wallet is created on another screen; the
+    # Category "Batch Food" is not.
+    checking = await _create_wallet(client, token, "Batch Checking", "checking", "0.00")
+
+    verdicts = await _revalidate_rows(client, token, rows, targets=[2, 3])
+    assert verdicts == [
+        {"row": 2, "status": "error", "error": "Unknown expense category 'Batch Food'"},
+        {"row": 3, "status": "ok", "error": None},
+    ]
+
+    # Revalidation only reads: nothing reached the database.
+    transactions = (
+        await client.get(f"/transactions?wallet_id={checking}", headers=_auth(token))
+    ).json()["items"]
+    assert transactions == []
+
+async def test_revalidate_rows_detects_in_file_duplicates(
+    client: AsyncClient,
+) -> None:
+    """The in-file half of the Duplicate check, inside the batch: two
+    identical rows that were Problems for the same missing Wallet flip to
+    Ready and Duplicate once the Wallet exists — the second matches the
+    first, exactly as the Preview would flag it. A non-target row holds its
+    key in the context too: re-validating only the second row still sees the
+    first as an earlier row of the file."""
+    token = await _login(client)
+    preview = await _preview(
+        client, token,
+        "2026-08-01,expense,10.00,Batch Twice,,,Batch Food,Coffee,",
+        "2026-08-01,expense,10.00,Batch Twice,,,Batch Food,Coffee,",
+        "2026-08-02,expense,20.00,Batch Twice,,,,",
+    )
+    assert preview["error_count"] == 3
+    rows = _draft_rows(preview)
+    await _create_wallet(client, token, "Batch Twice", "checking", "0.00")
+    await _create_category(client, token, "Batch Food", "expense")
+
+    verdicts = await _revalidate_rows(client, token, rows, targets=[2, 3, 4])
+    assert verdicts == [
+        {"row": 2, "status": "ok", "error": None},
+        {"row": 3, "status": "duplicate", "error": None},
+        {"row": 4, "status": "ok", "error": None},
+    ]
+
+    # Row 2 is not a target here, yet it still precedes row 3 in the file:
+    # its key makes row 3 a Duplicate all the same.
+    only_second = await _revalidate_rows(client, token, rows, targets=[3])
+    assert only_second == [{"row": 3, "status": "duplicate", "error": None}]
+
+async def test_revalidate_rows_flags_a_row_now_matching_the_database(
+    client: AsyncClient,
+) -> None:
+    """The database half of the Duplicate check, inside the batch: a problem
+    row whose references all resolve by now but that matches an existing
+    Transaction on the final key flips to Duplicate, never to Ready — the
+    import never double-writes."""
+    token = await _login(client)
+    preview = await _preview(
+        client, token,
+        "2026-08-01,expense,12.50,Batch Flip,,,Batch Flip Food,Lunch,",
+    )
+    assert preview["error_count"] == 1
+    rows = _draft_rows(preview)
+
+    # While the draft is open, the Wallet and Category are created and the
+    # matching Transaction is recorded by hand.
+    checking = await _create_wallet(client, token, "Batch Flip", "checking", "0.00")
+    food = await _create_category(client, token, "Batch Flip Food", "expense")
+    await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "12.50", "date": "2026-08-01",
+            "wallet_id": checking, "category_id": food, "description": "Lunch",
+        },
+        headers=_auth(token),
+    )
+
+    verdicts = await _revalidate_rows(client, token, rows, targets=[2])
+    assert verdicts == [{"row": 2, "status": "duplicate", "error": None}]
+
+async def test_revalidate_rows_matches_the_single_row_endpoint(
+    client: AsyncClient,
+) -> None:
+    """The equivalence the client relies on (issue #76): for every target,
+    the batch's verdict is what POST /import/validate-row returns for that
+    row with the same preceding rows — same resolution, rules, Duplicate
+    key, and in-file context. Checked across all three statuses: error
+    (missing category), duplicate (an earlier row of the file), and ok (once
+    the category is created)."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Batch Equiv", "checking", "0.00")
+    preview = await _preview(
+        client, token,
+        "2026-08-01,expense,10.00,Batch Equiv,,,,Coffee,",
+        "2026-08-02,expense,10.00,Batch Equiv,,,Batch Equiv Food,Tea,",
+        "2026-08-01,expense,10.00,Batch Equiv,,,,Coffee,",
+    )
+    assert [row["status"] for row in preview["rows"]] == ["ok", "error", "duplicate"]
+    rows = _draft_rows(preview)
+
+    batch = await _revalidate_rows(client, token, rows, targets=[3, 4])
+    single_error = await _validate(client, token, rows[1], earlier=rows[:1])
+    single_duplicate = await _validate(client, token, rows[2], earlier=rows[:2])
+    assert batch == [
+        {"row": 3, "status": single_error["status"], "error": single_error["error"]},
+        {"row": 4, "status": single_duplicate["status"], "error": single_duplicate["error"]},
+    ]
+    assert single_error["status"] == "error"
+    assert single_duplicate["status"] == "duplicate"
+
+    # The missing Category is created while the draft is open: both the
+    # batch and the single-row call now say ready for row 3.
+    await _create_category(client, token, "Batch Equiv Food", "expense")
+    batch = await _revalidate_rows(client, token, rows, targets=[3, 4])
+    single_ok = await _validate(client, token, rows[1], earlier=rows[:1])
+    assert batch[0] == {"row": 3, "status": single_ok["status"], "error": None}
+    assert single_ok["status"] == "ok"
+    assert batch[1] == {"row": 4, "status": "duplicate", "error": None}
+
+async def test_revalidate_rows_rejects_unknown_targets(
+    client: AsyncClient,
+) -> None:
+    """A target that names no row of the payload is a request bug: 422 with
+    the offending row numbers, and nothing is computed."""
+    token = await _login(client)
+    response = await client.post(
+        "/import/revalidate-rows",
+        json={"rows": [_expense("10.00", "Wallet", row=2)], "targets": [2, 99]},
+        headers=_auth(token),
+    )
+    assert response.status_code == 422
+    assert "Unknown target row(s): 99" in response.json()["detail"]
+
+
+async def test_revalidate_rows_is_scoped_to_the_account(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Foreign data is rejected (ADR-0003): a Wallet that exists only on
+    another Account resolves as unknown for this Account — the batch never
+    leaks or writes through foreign rows, exactly like the single-row
+    re-validation."""
+    token = await _login(client)
+    account_id = insert_foreign_account(database_url, "batch@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            session.add(
+                Wallet(
+                    account_id=account_id,
+                    name="Batch Foreign",
+                    type=WalletType.CHECKING.value,
+                )
+            )
+            session.commit()
+        engine.dispose()
+
+        verdicts = await _revalidate_rows(
+            client, token,
+            [_expense("10.00", "Batch Foreign", row=2)],
+            targets=[2],
+        )
+        assert verdicts == [
+            {
+                "row": 2,
+                "status": "error",
+                "error": "Unknown wallet 'Batch Foreign'",
+            }
+        ]
     finally:
         delete_account(database_url, account_id)

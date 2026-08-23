@@ -88,6 +88,36 @@ export async function validateImportRow(
   return (await response.json()) as ImportRowValidation
 }
 
+/** The fresh verdict for one target row of a batch Revalidation (issue
+ * #76): `row` echoes the target's row number so the client can map each
+ * verdict back to its draft row; `status` and `error` speak the Preview's
+ * vocabulary, exactly like the single-row re-validation. */
+export type ImportRowRevalidation = {
+  row: number
+  status: ImportRowStatus
+  error: string | null
+}
+
+/** Batch Revalidation (issue #76): the draft's rows (with the user's edits
+ * applied) plus the target row numbers in, every target's fresh verdict out
+ * — one call through the same pipeline as the single-row re-validation,
+ * including the in-file Duplicate context from preceding rows. Nothing is
+ * written. */
+export async function revalidateImportRows(
+  token: string,
+  rows: ImportRowInput[],
+  targets: number[],
+): Promise<ImportRowRevalidation[]> {
+  const response = await request('/import/revalidate-rows', {
+    method: 'POST',
+    token,
+    json: { rows, targets },
+    readDetail: true,
+    errorMessage: 'Could not re-validate the rows',
+  })
+  return (await response.json()) as ImportRowRevalidation[]
+}
+
 export async function confirmImport(
   token: string,
   rows: ImportRowInput[],

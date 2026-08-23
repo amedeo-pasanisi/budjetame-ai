@@ -17,7 +17,7 @@ columns.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 import csv
 import io
 import re
@@ -31,6 +31,7 @@ from app.models import Category, Transaction, TransactionType, Wallet
 from app.schemas import (
     ImportRow,
     ImportRowInput,
+    ImportRowRevalidation,
     ImportRowValidation,
     fmt_coord,
 )
@@ -637,3 +638,42 @@ def revalidate_row(
     if _is_duplicate(session, account_id, params) or key in seen:
         return ImportRowValidation(status="duplicate")
     return ImportRowValidation(status="ok")
+
+def revalidate_rows(
+    session: Session,
+    account_id: int,
+    rows: list[ImportRowInput],
+    targets: list[int],
+) -> list[ImportRowRevalidation]:
+    """The fresh verdicts for the draft's target rows (issue #76): one call
+    that walks the draft's rows in file order through the Preview's pipeline
+    — resolution, rules, and the Duplicate key, including the in-file check
+    against preceding rows — and returns each target's verdict. Non-target
+    rows are context only: they hold their keys in the in-file `seen` set
+    exactly as the rows preceding an edited row do in `revalidate_row`, so a
+    batch call is equivalent to running the single-row re-validation on each
+    target. Nothing is written."""
+    target_set = set(targets)
+    verdicts: dict[int, ImportRowRevalidation] = {}
+    seen: set[tuple] = set()
+    for item in rows:
+        try:
+            params = _resolved_params(session, account_id, _raw_from_input(item))
+        except ImportValidationError as error:
+            if item.row is not None and item.row in target_set:
+                verdicts[item.row] = ImportRowRevalidation(
+                    row=item.row, status="error", error=str(error)
+                )
+            continue
+        key = _duplicate_key(params)
+        if item.row is not None and item.row in target_set:
+            status: Literal["ok", "duplicate", "error"] = (
+                "duplicate"
+                if _is_duplicate(session, account_id, params) or key in seen
+                else "ok"
+            )
+            verdicts[item.row] = ImportRowRevalidation(
+                row=item.row, status=status
+            )
+        seen.add(key)
+    return [verdicts[row] for row in targets]

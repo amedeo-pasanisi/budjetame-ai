@@ -493,6 +493,30 @@ class ImportRowValidation(BaseModel):
     error: str | None = None
 
 
+class ImportBatchRevalidationRequest(BaseModel):
+    """A batch Revalidation (issue #76): the draft's rows plus the target row
+    numbers to re-validate, in one call. `rows` is the whole draft in file
+    order, with the user's edits applied — the preceding rows are the in-file
+    Duplicate context; `targets` names the rows (by their `row` number, the
+    file's line number) whose verdicts are wanted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[ImportRowInput]
+    targets: list[int]
+
+
+class ImportRowRevalidation(BaseModel):
+    """The fresh verdict for one target row of a batch Revalidation (issue
+    #76): `row` echoes the target's row number so the client can map each
+    verdict back to its draft row; `status` and `error` speak the Preview's
+    vocabulary, exactly like the single-row re-validation."""
+
+    row: int
+    status: Literal["ok", "duplicate", "error"]
+    error: str | None = None
+
+
 class TransactionOut(BaseModel):
     """A Transaction as seen through the API. `warning` is the Cash negative-
     Balance indicator (true only right after a write that made a Cash Wallet

@@ -11,6 +11,7 @@ import {
   TOKEN_KEY,
   confirmImport,
   previewImport,
+  revalidateImportRows,
   validateImportRow,
   type ImportPreview,
   type ImportRow,
@@ -49,6 +50,13 @@ export type ImportDraftController = {
    * it when it stops being ready. Throws when the call itself fails; the
    * draft stays untouched then. */
   saveRowEdit: (rowNumber: number, input: ImportRowInput) => Promise<void>
+  /** Batch Revalidation (issue #76): re-validate every problem row against
+   * the Account's current Wallets and Categories in one call and apply the
+   * flips — Ready rows auto-selected, Duplicates unselectable, remaining
+   * Problems narrowed. Ready, Duplicate, and hand-verified rows are
+   * untouched; a failed call surfaces as the draft's error, leaving the
+   * rows as they were. */
+  recheckProblems: () => Promise<void>
   confirm: () => Promise<void>
   pickAgain: () => void
   cancel: () => void
@@ -210,6 +218,68 @@ export function useImportDraft(): ImportDraftController {
     })
   }
 
+  const recheckProblems = async () => {
+    if (draft === null || draft.preview === null || draft.busy) return
+    // One batch call (issue #76): every sendable draft row travels as the
+    // in-file Duplicate context, and the problem rows are the targets.
+    // Rows without a sendable identity (parse errors) cannot be
+    // re-validated and keep their message.
+    const rows: ImportRowInput[] = []
+    const targets: number[] = []
+    for (const row of draft.preview.rows) {
+      const input = rowInput(row)
+      if (input === null) continue
+      rows.push(input)
+      if (row.status === 'error') targets.push(row.row)
+    }
+    if (targets.length === 0) return
+    try {
+      const verdicts = await revalidateImportRows(token, rows, targets)
+      setDraft((current) => {
+        if (
+          current === null ||
+          current.preview === null ||
+          current.phase !== 'preview'
+        ) {
+          return current
+        }
+        const verdictByRow = new Map(
+          verdicts.map((verdict) => [verdict.row, verdict]),
+        )
+        const next = new Set(current.selected)
+        const updated = current.preview.rows.map((row) => {
+          const verdict = verdictByRow.get(row.row)
+          if (verdict === undefined) return row
+          // A row that flips to ready joins the selection; anything else
+          // leaves it (a problem row is never selected anyway).
+          if (verdict.status === 'ok') {
+            next.add(row.row)
+          } else {
+            next.delete(row.row)
+          }
+          return { ...row, status: verdict.status, error: verdict.error ?? null }
+        })
+        return {
+          ...current,
+          preview: { ...current.preview, rows: updated },
+          selected: next,
+        }
+      })
+    } catch (cause) {
+      setDraft((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              error:
+                cause instanceof Error
+                  ? cause.message
+                  : 'Could not re-validate the rows.',
+            },
+      )
+    }
+  }
+
   const confirm = async () => {
     if (draft === null || draft.preview === null) return
     const rows: ImportRowInput[] = []
@@ -270,5 +340,17 @@ export function useImportDraft(): ImportDraftController {
     setDraft(null)
   }
 
-  return { draft, open, pickFile, readFile, toggle, saveRowEdit, confirm, pickAgain, cancel, done }
+  return {
+    draft,
+    open,
+    pickFile,
+    readFile,
+    toggle,
+    saveRowEdit,
+    recheckProblems,
+    confirm,
+    pickAgain,
+    cancel,
+    done,
+  }
 }

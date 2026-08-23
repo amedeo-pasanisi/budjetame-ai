@@ -5,8 +5,10 @@ from app.auth import get_current_account
 from app.deps import get_session
 from app.models import Account
 from app.schemas import (
+    ImportBatchRevalidationRequest,
     ImportConfirmRequest,
     ImportPreview,
+    ImportRowRevalidation,
     ImportRowValidation,
     ImportRowValidationRequest,
     TransactionOut,
@@ -55,6 +57,29 @@ def validate_row(
     Nothing is written."""
     return import_service.revalidate_row(
         session, account.id, payload.row, payload.earlier_rows
+    )
+
+
+@router.post("/revalidate-rows", response_model=list[ImportRowRevalidation])
+def revalidate_rows(
+    payload: ImportBatchRevalidationRequest,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> list[ImportRowRevalidation]:
+    """Batch Revalidation (issue #76): the draft's rows plus the target row
+    numbers in, every target's fresh verdict out — one call through the same
+    resolution, rules, and Duplicate key as the Preview and the single-row
+    re-validation, including the in-file Duplicate check against preceding
+    rows. Nothing is written."""
+    known = {item.row for item in payload.rows if item.row is not None}
+    unknown = [str(target) for target in payload.targets if target not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown target row(s): {', '.join(unknown)}",
+        )
+    return import_service.revalidate_rows(
+        session, account.id, payload.rows, payload.targets
     )
 
 

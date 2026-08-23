@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { formatEuros, type ImportPreview, type ImportRow } from './api'
 import type { ImportDraftController } from './importDraft'
@@ -28,6 +28,19 @@ export function ImportScreen({
   // saved — lives in the app shell (issue #43).
   const [editingRowNumber, setEditingRowNumber] = useState<number | null>(null)
   const draft = controller.draft
+  // The on-resume re-check (issue #76): a tab switch unmounts this screen,
+  // so a fresh mount with a live Preview re-validates every problem row
+  // against the Account's current Wallets and Categories — entities created
+  // elsewhere while the draft was open flip the rows that waited on them.
+  // A mount without a Preview (a fresh pick, or the done phase) re-checks
+  // nothing.
+  useEffect(() => {
+    if (draft?.phase === 'preview') {
+      void controller.recheckProblems()
+    }
+    // Mount-only: the resume, not every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   if (draft === null) return null
   const { phase, file, preview, selected, error, busy, imported, createdWithWarning, pickCount } =
     draft

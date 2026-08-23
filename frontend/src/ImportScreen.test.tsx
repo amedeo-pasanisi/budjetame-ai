@@ -26,13 +26,15 @@ vi.mock('./api', () => ({
   previewImport: vi.fn(),
   confirmImport: vi.fn(),
   validateImportRow: vi.fn(),
+  revalidateImportRows: vi.fn(),
 }))
 
-import { confirmImport, previewImport, validateImportRow } from './api'
+import { confirmImport, previewImport, revalidateImportRows, validateImportRow } from './api'
 
 const previewImportMock = vi.mocked(previewImport)
 const confirmImportMock = vi.mocked(confirmImport)
 const validateImportRowMock = vi.mocked(validateImportRow)
+const revalidateImportRowsMock = vi.mocked(revalidateImportRows)
 
 /** Two ready rows (auto-selected), one duplicate, one problem. */
 const preview: ImportPreview = {
@@ -154,6 +156,7 @@ beforeEach(() => {
   confirmImportMock.mockReset()
   previewImportMock.mockReset()
   validateImportRowMock.mockReset()
+  revalidateImportRowsMock.mockReset()
 })
 
 afterEach(() => {
