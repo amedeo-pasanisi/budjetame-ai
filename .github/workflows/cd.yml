@@ -87,7 +87,8 @@ jobs:
         run: >
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.VM_HOST }}
           'mkdir -p budjetame && mv -f ~/.env ~/compose.deploy.yaml budjetame/ &&
-           cd budjetame && sudo docker compose -f compose.deploy.yaml -p budjetame-ai up -d'
+           cd budjetame && sudo docker compose -f compose.deploy.yaml -p budjetame-ai pull &&
+           sudo docker compose -f compose.deploy.yaml -p budjetame-ai up -d'
       - name: Health check
         run: |
           for i in $(seq 1 24); do
