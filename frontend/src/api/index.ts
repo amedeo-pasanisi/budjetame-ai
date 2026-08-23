@@ -34,9 +34,11 @@ export {
   type TransactionInput,
   type TransactionPage,
   type TransactionType,
+  type ExportFile,
   PAGE_LIMIT,
   createTransaction,
   deleteTransaction,
+  exportTransactions,
   fetchTransactions,
   updateTransaction,
 } from './transactions'

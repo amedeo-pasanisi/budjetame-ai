@@ -191,6 +191,17 @@
   * The system allows the actual balance to be read and generates an alert if the balance calculated by the system differs from the actual balance.
 * **Note:** Deferred because its acceptance criteria depend on external parties (GoCardless + bank consent/PSD2) that block the Definition of Done. The derived-balance model already keeps the comparison trivial to add later.
 
+**US 7.3 - Excel Export**
+* **Story:** As a user, I want to export my saved transactions to Excel, so that I can analyze or archive them outside the app.
+* **Acceptance Criteria:**
+  * Export button in the Transactions screen header, next to Import.
+  * Tapping it downloads `budjetame-YYYY-MM-DD.xlsx` containing all Transactions matching the ledger's current filters and search — not just the visible page.
+  * The file is the import template: one flat sheet; columns `date`, `type` (expense | income | transfer), `amount` (positive, two decimals), `wallet`, `source wallet`, `destination wallet`, `category`, `description`, `location` (`lat,lon`); rows ordered by date ascending.
+  * Opening Balance Transactions are not exported (the template's type vocabulary has no value for them).
+  * Linked Expenses/Incomes export as ordinary rows — the link is not carried. Places flatten to coordinates.
+  * Rows on Frozen Wallets are included.
+  * Backend: `GET /transactions/export` with the ledger search endpoint's filter params (ADR-0009), bearer auth, `Content-Disposition: attachment`.
+
 ---
 
 ### OUT OF SCOPE FOR v1
@@ -200,4 +211,3 @@
 - Budgets (may be implemented in the future).
 - Multi-currency.
 - Bank sync via GoCardless (deferred — see US 7.2).
-- Data export.

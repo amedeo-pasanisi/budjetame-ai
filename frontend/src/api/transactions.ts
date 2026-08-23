@@ -86,12 +86,11 @@ export type TransactionPage = {
 /** Page size for the ledger, matching the backend default (issue #30). */
 export const PAGE_LIMIT = 50
 
-export async function fetchTransactions(
-  token: string,
-  filters: TransactionFilters = {},
-  limit: number = PAGE_LIMIT,
-  cursor: string | null = null,
-): Promise<TransactionPage> {
+/** The query params the ledger filters and the export share (US 7.3): the
+ * same names the backend accepts on both endpoints, so what the list shows
+ * is exactly what the export writes. `q` rides along only when non-blank —
+ * a blank or whitespace-only needle means no search (ADR-0009). */
+function transactionParams(filters: TransactionFilters): URLSearchParams {
   const params = new URLSearchParams()
   if (filters.walletId !== undefined) {
     params.set('wallet_id', String(filters.walletId))
@@ -105,11 +104,19 @@ export async function fetchTransactions(
   if (filters.toDate !== undefined && filters.toDate !== '') {
     params.set('to_date', filters.toDate)
   }
-  // ADR-0009: q rides the query string only when non-blank — a blank or
-  // whitespace-only needle means no search (the backend treats it the same).
   if (filters.q !== undefined && filters.q.trim() !== '') {
     params.set('q', filters.q)
   }
+  return params
+}
+
+export async function fetchTransactions(
+  token: string,
+  filters: TransactionFilters = {},
+  limit: number = PAGE_LIMIT,
+  cursor: string | null = null,
+): Promise<TransactionPage> {
+  const params = transactionParams(filters)
   params.set('limit', String(limit))
   if (cursor !== null) {
     params.set('cursor', cursor)
@@ -120,6 +127,36 @@ export async function fetchTransactions(
     errorMessage: 'Could not load transactions',
   })
   return (await response.json()) as TransactionPage
+}
+
+/** The export's download payload (US 7.3): the file's bytes and the filename
+ * the server attached — the dated `budjetame-YYYY-MM-DD.xlsx` name decided
+ * in Europe/Rome on the server, so the client never guesses the day. */
+export type ExportFile = {
+  blob: Blob
+  filename: string
+}
+
+function exportFilename(disposition: string | null): string {
+  const match = disposition?.match(/filename="([^"]+)"/)
+  return match?.[1] ?? 'budjetame-export.xlsx'
+}
+
+/** The ledger as the import template's .xlsx (US 7.3): all rows matching
+ * `filters`, not just the visible page. The caller triggers the browser
+ * download; the filename comes from Content-Disposition. */
+export async function exportTransactions(
+  token: string,
+  filters: TransactionFilters = {},
+): Promise<ExportFile> {
+  const response = await request(`/transactions/export?${transactionParams(filters).toString()}`, {
+    token,
+    errorMessage: 'Could not export transactions',
+  })
+  return {
+    blob: await response.blob(),
+    filename: exportFilename(response.headers.get('content-disposition')),
+  }
 }
 
 export async function createTransaction(

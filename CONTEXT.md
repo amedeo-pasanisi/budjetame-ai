@@ -124,6 +124,10 @@ _Avoid_: re-check, refresh, re-scan
 The act of editing a Preview row — date, amount, type, wallet(s), category, description, location — so it becomes acceptable for import. A verified row is re-validated against the database as it is saved.
 _Avoid_: fixing rows
 
+**Export**:
+A generated .xlsx of the Account's Transactions in the import template's format, downloaded from the ledger with the current filters and search applied. It carries only what the template carries: Opening Balance Transactions are left out (the template's type vocabulary has no value for them), Recurring links are never carried, and Places flatten to coordinates. Re-importing an Export into the same Account flags every row as a Duplicate; into a fresh Account it restores the ledger once its Wallets and Categories exist.
+_Avoid_: backup, dump, statement
+
 ## Rules
 
 - The only supported currency is EUR.
@@ -145,6 +149,7 @@ _Avoid_: fixing rows
 - Monthly Spendable counts Occurrences by due date, paid or not; Expenses linked to a Recurring Cost never drain Spendable Today, and one-off Incomes never fill it.
 - Each month's Budget starts fresh at 0; Spendable Today may go negative within the month and is displayed as 0 until future accruals repay it.
 - Imports never set the link.
+- An Export never carries the link either: an exported row has no Recurring link and no Place — coordinates only — and Opening Balance Transactions are not exported.
 - All data is scoped to the single Account; foreign data gets a 403.
 
 ## Non-goals
@@ -153,4 +158,3 @@ _Avoid_: fixing rows
 - Auto-generated transactions: the app never creates them — Recurring Costs and Recurring Incomes are tracking-only
 - Multi-currency
 - Bank sync via GoCardless (deferred to a later milestone)
-- Data export

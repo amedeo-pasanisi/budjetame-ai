@@ -47,6 +47,7 @@ vi.mock('./api', () => {
     createTransaction: vi.fn(),
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),
+    exportTransactions: vi.fn(),
     createCategory: vi.fn(),
     createWallet: vi.fn(),
     createRecurringCost: vi.fn(),
@@ -67,6 +68,7 @@ import {
   createTransaction,
   createWallet,
   deleteTransaction,
+  exportTransactions,
   fetchCategories,
   fetchRecurringCosts,
   fetchRecurringIncomes,
@@ -279,6 +281,7 @@ const createCategoryMock = vi.mocked(createCategory)
 const createWalletMock = vi.mocked(createWallet)
 const createRecurringCostMock = vi.mocked(createRecurringCost)
 const createRecurringIncomeMock = vi.mocked(createRecurringIncome)
+const exportTransactionsMock = vi.mocked(exportTransactions)
 
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
@@ -303,6 +306,10 @@ beforeEach(() => {
   createRecurringCostMock.mockResolvedValue(rentCost)
   createRecurringIncomeMock.mockResolvedValue(salaryIncome)
   deleteTransactionMock.mockResolvedValue({ warning: false })
+  exportTransactionsMock.mockResolvedValue({
+    blob: new Blob(['xlsx']),
+    filename: 'budjetame-2026-08-23.xlsx',
+  })
 })
 
 afterEach(() => {
@@ -1704,3 +1711,72 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
 
 
 
+
+describe('TransactionsScreen export (US 7.3)', () => {
+  it('downloads the filtered ledger under the server filename', async () => {
+    const createObjectURL = vi.fn(() => 'blob:export')
+    const revokeObjectURL = vi.fn()
+    // Restore URL by hand instead of unstubAllGlobals: the file-wide
+    // IntersectionObserver stub (beforeAll) must survive this test.
+    const realURL = URL
+    vi.stubGlobal('URL', { ...realURL, createObjectURL, revokeObjectURL })
+    // Mutated by the click spy (a closure assignment would not widen the
+    // outer flow's narrowing), so the read below stays typed.
+    const downloaded = { href: '', name: '' }
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloaded.href = this.href
+        downloaded.name = this.download
+      })
+
+    // Frozen Wallets are fetched explicitly so the dropdown can offer them;
+    // override before render, so the select has the option when the change
+    // fires.
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+    // The export honors the current filters: select a Frozen Wallet first.
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), {
+      target: { value: '2' },
+    })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+
+    await waitFor(() =>
+      expect(exportTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(downloaded.name).toBe('budjetame-2026-08-23.xlsx')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:export')
+
+    click.mockRestore()
+    vi.stubGlobal('URL', realURL)
+  })
+
+  it('shows an error banner when the export fails', async () => {
+    exportTransactionsMock.mockRejectedValue(
+      new ApiError('Could not export transactions', 500),
+    )
+
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+
+    expect(
+      await screen.findByText(/could not export transactions/i),
+    ).toBeInTheDocument()
+  })
+
+  it('hides the export button while the import draft is open', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+  })
+})

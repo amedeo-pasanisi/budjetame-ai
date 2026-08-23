@@ -3,12 +3,12 @@ import binascii
 import json
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_account
-from app.dates import from_rome_day, to_rome_day
+from app.dates import ROME, from_rome_day, to_rome_day
 from app.deps import get_session
 from app.models import Account, Category, Transaction, TransactionType, Wallet, WalletType
 from app.schemas import (
@@ -21,8 +21,12 @@ from app.schemas import (
 )
 from app.services import scoping, transactions as transaction_service
 from app.services import wallets as wallet_service
+from app.services.exports import ExportRow, build_export_workbook
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+# The .xlsx content type (US 7.3): the export is a file download, never JSON.
+EXPORT_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _rome_day_or_422(value: str) -> datetime:
@@ -174,31 +178,25 @@ def _decode_cursor(cursor: str) -> tuple[datetime, int]:
     return date, transaction_id
 
 
-@router.get("", response_model=TransactionPage)
-def list_transactions(
-    wallet_id: int | None = None,
-    category_id: int | None = None,
-    from_date: str | None = None,
-    to_date: str | None = None,
-    q: str | None = None,
-    limit: int = Query(default=_PAGE_LIMIT_DEFAULT, ge=1, le=_PAGE_LIMIT_MAX),
-    cursor: str | None = None,
-    account: Account = Depends(get_current_account),
-    session: Session = Depends(get_session),
-) -> TransactionPage:
-    """The ledger listing, newest first, one page at a time (cursor paging).
-
-    Filters compose — a Wallet (including frozen Wallets, whose history stays
-    viewable), a Category, and a Europe/Rome inclusive date range
-    (`YYYY-MM-DD` days) — with the paging: a page is the first `limit` rows
-    strictly after the cursor's (date, id), so rows inserted mid-scroll (e.g.
-    by Import) can never duplicate or skip already-fetched rows. `next_cursor`
-    is null exactly when no further rows remain. `q` narrows to rows whose
-    Description contains the needle as a case-insensitive, accent-exact,
-    literal substring (ADR-0009); a blank or whitespace-only `q` is no
-    filter.
-    """
-    stmt = select(Transaction).where(Transaction.account_id == account.id)
+def _apply_ledger_filters(
+    stmt: Select[tuple[Transaction]],
+    session: Session,
+    account: Account,
+    *,
+    wallet_id: int | None,
+    category_id: int | None,
+    from_date: str | None,
+    to_date: str | None,
+    q: str | None,
+) -> Select[tuple[Transaction]]:
+    """The ledger's one filter set, shared by the listing and the export so
+    the two can never drift: the Account's rows, narrowed by a Wallet
+    (frozen ones included, matching a Transfer on either leg), a Category,
+    an inclusive Europe/Rome date range (`YYYY-MM-DD` days), and the
+    Description needle (ADR-0009: case-insensitive, accent-exact, literal;
+    a blank `q` is no filter). Foreign or missing ids are 403 — the same
+    answer the listing gives, so export and ledger filter identically."""
+    stmt = stmt.where(Transaction.account_id == account.id)
     needle = (q or "").strip()
     if needle:
         # ADR-0009: both sides are lowered (so the match is case-insensitive,
@@ -231,7 +229,127 @@ def list_transactions(
         stmt = stmt.where(Transaction.date >= _rome_day_or_422(from_date))
     if to_date is not None:
         # Inclusive upper bound: strictly before the next Rome day.
-        stmt = stmt.where(Transaction.date < _rome_day_or_422(to_date) + timedelta(days=1))
+        stmt = stmt.where(
+            Transaction.date < _rome_day_or_422(to_date) + timedelta(days=1)
+        )
+    return stmt
+
+
+def _export_row(session: Session, transaction: Transaction) -> ExportRow:
+    """The template row for one Transaction: names resolved against the
+    Account (the ids are the Account's own — reads always pass through
+    scoping), the Europe/Rome day, and the coordinates the location column
+    carries. Opening Balance never reaches here (ADR-0015); a blank or
+    missing description writes the same cell."""
+    if transaction.type == TransactionType.TRANSFER.value:
+        source = session.get(Wallet, transaction.source_wallet_id)
+        destination = session.get(Wallet, transaction.destination_wallet_id)
+        return ExportRow(
+            date=to_rome_day(transaction.date),
+            type=transaction.type,
+            amount=transaction.amount,
+            wallet=None,
+            source_wallet=source.name if source is not None else None,
+            destination_wallet=destination.name if destination is not None else None,
+            category=None,
+            description=transaction.description,
+            latitude=transaction.latitude,
+            longitude=transaction.longitude,
+        )
+    wallet = session.get(Wallet, transaction.wallet_id)
+    category = (
+        session.get(Category, transaction.category_id)
+        if transaction.category_id is not None
+        else None
+    )
+    return ExportRow(
+        date=to_rome_day(transaction.date),
+        type=transaction.type,
+        amount=transaction.amount,
+        wallet=wallet.name if wallet is not None else None,
+        source_wallet=None,
+        destination_wallet=None,
+        category=category.name if category is not None else None,
+        description=transaction.description,
+        latitude=transaction.latitude,
+        longitude=transaction.longitude,
+    )
+
+
+@router.get("/export")
+def export_transactions(
+    wallet_id: int | None = None,
+    category_id: int | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    q: str | None = None,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> Response:
+    """The ledger as the import template's .xlsx (US 7.3): every Transaction
+    matching the same filters as the listing, excluding Opening Balance
+    (the template's type vocabulary has no value for them — ADR-0015), in
+    date-ascending order. The file downloads with a dated name, so exports
+    of the same ledger never overwrite each other."""
+    stmt = select(Transaction)
+    stmt = _apply_ledger_filters(
+        stmt,
+        session,
+        account,
+        wallet_id=wallet_id,
+        category_id=category_id,
+        from_date=from_date,
+        to_date=to_date,
+        q=q,
+    )
+    stmt = stmt.where(Transaction.type != TransactionType.OPENING_BALANCE.value)
+    transactions = session.scalars(
+        stmt.order_by(Transaction.date.asc(), Transaction.id.asc())
+    ).all()
+    rows = [_export_row(session, t) for t in transactions]
+    filename = f"budjetame-{datetime.now(ROME).strftime('%Y-%m-%d')}.xlsx"
+    return Response(
+        content=build_export_workbook(rows),
+        media_type=EXPORT_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("", response_model=TransactionPage)
+def list_transactions(
+    wallet_id: int | None = None,
+    category_id: int | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    q: str | None = None,
+    limit: int = Query(default=_PAGE_LIMIT_DEFAULT, ge=1, le=_PAGE_LIMIT_MAX),
+    cursor: str | None = None,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> TransactionPage:
+    """The ledger listing, newest first, one page at a time (cursor paging).
+
+    Filters compose — a Wallet (including frozen Wallets, whose history stays
+    viewable), a Category, and a Europe/Rome inclusive date range
+    (`YYYY-MM-DD` days) — with the paging: a page is the first `limit` rows
+    strictly after the cursor's (date, id), so rows inserted mid-scroll (e.g.
+    by Import) can never duplicate or skip already-fetched rows. `next_cursor`
+    is null exactly when no further rows remain. `q` narrows to rows whose
+    Description contains the needle as a case-insensitive, accent-exact,
+    literal substring (ADR-0009); a blank or whitespace-only `q` is no
+    filter.
+    """
+    stmt = select(Transaction)
+    stmt = _apply_ledger_filters(
+        stmt,
+        session,
+        account,
+        wallet_id=wallet_id,
+        category_id=category_id,
+        from_date=from_date,
+        to_date=to_date,
+        q=q,
+    )
     if cursor is not None:
         cursor_date, cursor_id = _decode_cursor(cursor)
         # Keyset boundary (date desc, id desc): only rows strictly older than

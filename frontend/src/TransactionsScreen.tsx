@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   PAGE_LIMIT,
+  exportTransactions,
   fetchCategories,
   fetchRecurringCosts,
   fetchRecurringIncomes,
@@ -9,6 +10,7 @@ import {
   fetchWallets,
   formatEuros,
   TOKEN_KEY,
+  ApiError,
   type Category,
   type RecurringCost,
   type RecurringIncome,
@@ -101,6 +103,7 @@ export function TransactionsScreen({
   const [recurringIncomeModalOpen, setRecurringIncomeModalOpen] = useState(false)
   const [recurringIncomeToSelect, setRecurringIncomeToSelect] = useState<number | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
   // then the search bar hides — there is nothing to search.
   const [ledgerEmpty, setLedgerEmpty] = useState(false)
@@ -367,6 +370,30 @@ export function TransactionsScreen({
     }
   }
 
+  // Export (US 7.3): the ledger exactly as the filters show it — every
+  // matching row, not just the visible page — downloads as the import
+  // template's .xlsx under the server's dated filename. The browser anchor
+  // trick is the standard no-navigation download; the object URL lives only
+  // for the click and is revoked right after.
+  const handleExport = async () => {
+    setExportError(null)
+    try {
+      const { blob, filename } = await exportTransactions(token, requestFilters())
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setExportError(
+        error instanceof ApiError ? error.message : 'Could not export transactions',
+      )
+    }
+  }
+
   return (
     <>
       <div className="flex items-center justify-between">
@@ -388,6 +415,13 @@ export function TransactionsScreen({
             >
               Import
             </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
+            >
+              Export
+            </button>
           </div>
         )}
       </div>
@@ -407,6 +441,9 @@ export function TransactionsScreen({
       ) : (
         <>
           {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
+          {exportError !== null && (
+            <p className="mt-2 text-sm text-red-600">{exportError}</p>
+          )}
           {savedWarning !== null && (
             <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {savedWarning}
