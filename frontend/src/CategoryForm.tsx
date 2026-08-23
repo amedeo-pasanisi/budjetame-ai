@@ -38,6 +38,10 @@ type CategoryFormProps = {
    * form whose field only accepts one type (e.g. an Expense form can only
    * create expense Categories). */
   lockedType?: CategoryType
+  /** The create form's prefilled Name (issue #77), e.g. the row editor's
+   * missing name from the file. Create mode only: an edited Category keeps
+   * its own name. */
+  prefillName?: string
   onSaved: (category: Category) => void
   onDeleted?: (categoryId: number) => void
   /** The confirmed merge (ADR-0007): the renamed Category is gone and the
@@ -58,13 +62,14 @@ type CategoryFormProps = {
 export function CategoryForm({
   category,
   lockedType,
+  prefillName,
   onSaved,
   onDeleted,
   onMerged,
   onCancel,
 }: CategoryFormProps) {
   const editing = category !== undefined
-  const [name, setName] = useState(category?.name ?? '')
+  const [name, setName] = useState(category?.name ?? prefillName ?? '')
   const [type, setType] = useState<CategoryType>(category?.type ?? lockedType ?? 'expense')
   const [icon, setIcon] = useState(category?.icon ?? '')
   const [color, setColor] = useState(category?.color ?? PRESET_COLORS[0])

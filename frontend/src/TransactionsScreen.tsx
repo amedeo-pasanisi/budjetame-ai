@@ -284,13 +284,23 @@ export function TransactionsScreen({
     return wallet === undefined || wallet.frozen
   }
 
+  // The list-append shared by both inline-creation hosts — the transaction
+  // form and the import row editor (ADR-0013/0014): a created entity joins
+  // the list state so every dropdown offers it again without a reload.
+  const addWalletToList = (wallet: Wallet) => {
+    setWallets((current) => (current === null ? [wallet] : [...current, wallet]))
+  }
+  const addCategoryToList = (category: Category) => {
+    setCategories((current) => (current === null ? [category] : [...current, category]))
+  }
+
   // The inner Category modal's save (ADR-0013): add the Category to the
   // list state (so the dropdown offers it again without a reload), close
   // only the inner modal, and report the new id to the open form so the
   // originating field selects it — the transaction form's Category field.
   // The form's draft is untouched.
   const handleCategoryCreated = (category: Category) => {
-    setCategories((current) => (current === null ? [category] : [...current, category]))
+    addCategoryToList(category)
     setCategoryToSelect(category.id)
     setCategoryModalOpen(false)
   }
@@ -301,7 +311,7 @@ export function TransactionsScreen({
   // originating field selects it — the transaction form's exact field whose
   // sentinel was picked. The form's draft is untouched.
   const handleWalletCreated = (wallet: Wallet) => {
-    setWallets((current) => (current === null ? [wallet] : [...current, wallet]))
+    addWalletToList(wallet)
     if (walletModalTarget !== null) {
       setWalletToSelect({ id: wallet.id, target: walletModalTarget })
     }
@@ -385,6 +395,10 @@ export function TransactionsScreen({
       {importState.draft !== null ? (
         <ImportScreen
           controller={importState}
+          wallets={wallets}
+          categories={categories}
+          onWalletCreated={addWalletToList}
+          onCategoryCreated={addCategoryToList}
           onDone={() => {
             importState.done()
             reload()

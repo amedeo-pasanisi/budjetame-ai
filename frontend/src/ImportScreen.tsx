@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react'
 
-import { formatEuros, type ImportPreview, type ImportRow } from './api'
+import {
+  formatEuros,
+  type Category,
+  type ImportPreview,
+  type ImportRow,
+  type Wallet,
+} from './api'
 import type { ImportDraftController } from './importDraft'
 import { ImportRowModal } from './ImportRowModal'
+import { CategoryModal } from './CategoryModal'
+import { WalletModal } from './WalletModal'
 import { descriptionText } from './transactions'
+import type { WalletTarget } from './transactionFields'
 
 const TYPE_LABEL: Record<string, string> = {
   expense: 'Expense',
@@ -18,15 +27,54 @@ const TYPE_LABEL: Record<string, string> = {
  * tab switches; this component only renders and drives it. */
 export function ImportScreen({
   controller,
+  wallets,
+  categories,
+  onWalletCreated,
+  onCategoryCreated,
   onDone,
 }: {
   controller: ImportDraftController
+  /** The Account's Wallets for the row editor's selects (issue #77), owned
+   * by the Transactions screen; null while the ledger is still loading. */
+  wallets: Wallet[] | null
+  /** The Account's Categories for the row editor's Category select. */
+  categories: Category[] | null
+  /** Inline entity creation (ADR-0014): the created Wallet is real
+   * immediately — the Transactions screen adds it to its list state, so the
+   * selects and the ledger offer it without a reload. */
+  onWalletCreated: (wallet: Wallet) => void
+  /** The created Category, added to the Transactions screen's list the same
+   * way (ADR-0014). */
+  onCategoryCreated: (category: Category) => void
   onDone: () => void
 }) {
   // Which Preview row the editor modal is open for (null: none). The modal
   // itself lives in this screen's state; the draft — and with it every edit
   // saved — lives in the app shell (issue #43).
   const [editingRowNumber, setEditingRowNumber] = useState<number | null>(null)
+  // Inline entity creation (ADR-0013): the inner Wallet create modal,
+  // stacked on top of the row editor, and the new Wallet it created —
+  // reported back to the open editor so its field selects it. The modal
+  // state is the target field whose sentinel was picked (driving the
+  // eligibility lock: the Expense/Income Wallet field restricts the modal
+  // to Checking, Credit Card, and Cash; a Transfer's From/To allow all four
+  // types) plus the missing name from the file the form prefills.
+  const [walletModal, setWalletModal] = useState<{
+    target: WalletTarget
+    prefillName: string
+  } | null>(null)
+  const [walletToSelect, setWalletToSelect] = useState<{
+    name: string
+    target: WalletTarget
+  } | null>(null)
+  // The inner Category create modal, stacked on top of the row editor,
+  // locked to the row's type at pick time and prefilled with the field's
+  // missing name; the created Category is reported back for auto-select.
+  const [categoryModal, setCategoryModal] = useState<{
+    type: 'expense' | 'income'
+    prefillName: string
+  } | null>(null)
+  const [categoryToSelect, setCategoryToSelect] = useState<string | null>(null)
   const draft = controller.draft
   // The on-resume re-check (issue #76): a tab switch unmounts this screen,
   // so a fresh mount with a live Preview re-validates every problem row
@@ -48,6 +96,36 @@ export function ImportScreen({
     phase === 'preview' && preview !== null
       ? (preview.rows.find((row) => row.row === editingRowNumber) ?? null)
       : null
+
+  // The inner Wallet modal's save (ADR-0013): report the creation up so the
+  // Transactions screen adds the Wallet to its list state (the entity is
+  // real at once, ADR-0014), close only the inner modal, and report the new
+  // name to the open row editor so the originating field selects it — the
+  // editor's other fields stay untouched.
+  const handleWalletCreated = (wallet: Wallet) => {
+    onWalletCreated(wallet)
+    if (walletModal !== null) {
+      setWalletToSelect({ name: wallet.name, target: walletModal.target })
+    }
+    setWalletModal(null)
+  }
+
+  // The inner Category modal's save, the mirror of the Wallet contract: the
+  // created Category is real at once and auto-selected in the row editor's
+  // Category field.
+  const handleCategoryCreated = (category: Category) => {
+    onCategoryCreated(category)
+    setCategoryToSelect(category.name)
+    setCategoryModal(null)
+  }
+
+  // Closing the row editor also clears the pending auto-selects: a stale
+  // name must not be re-applied when the editor opens again later.
+  const closeEditor = () => {
+    setEditingRowNumber(null)
+    setWalletToSelect(null)
+    setCategoryToSelect(null)
+  }
 
   return (
     <>
@@ -89,8 +167,40 @@ export function ImportScreen({
       {editingRow !== null && (
         <ImportRowModal
           row={editingRow}
+          wallets={wallets ?? []}
+          categories={categories ?? []}
           onSave={(input) => controller.saveRowEdit(editingRow.row, input)}
-          onClose={() => setEditingRowNumber(null)}
+          onClose={closeEditor}
+          onAddWallet={(target, prefillName) =>
+            setWalletModal({ target, prefillName })
+          }
+          walletToSelect={walletToSelect}
+          onAddCategory={(type, prefillName) =>
+            setCategoryModal({ type, prefillName })
+          }
+          categoryToSelect={categoryToSelect}
+        />
+      )}
+
+      {walletModal !== null && (
+        <WalletModal
+          allowedTypes={
+            walletModal.target === 'wallet'
+              ? ['checking', 'credit_card', 'cash']
+              : undefined
+          }
+          prefillName={walletModal.prefillName}
+          onSaved={handleWalletCreated}
+          onClose={() => setWalletModal(null)}
+        />
+      )}
+
+      {categoryModal !== null && (
+        <CategoryModal
+          lockedType={categoryModal.type}
+          prefillName={categoryModal.prefillName}
+          onSaved={handleCategoryCreated}
+          onClose={() => setCategoryModal(null)}
         />
       )}
 

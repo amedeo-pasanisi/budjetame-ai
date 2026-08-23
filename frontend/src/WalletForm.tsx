@@ -30,6 +30,10 @@ type WalletFormProps = {
    * whose field only accepts some types (e.g. costs accept Checking, Credit
    * Card, and Cash, never Contact). */
   allowedTypes?: WalletType[]
+  /** The create form's prefilled Name (issue #77), e.g. the row editor's
+   * missing name from the file. Create mode only: an edited Wallet keeps
+   * its own name. */
+  prefillName?: string
   onSaved: (wallet: Wallet) => void
   onFrozen?: (walletId: number) => void
   onCancel: () => void
@@ -43,9 +47,16 @@ type WalletFormProps = {
  * (ADR-0013), so an inline wallet created from a form field can never be
  * of a type the field would reject. Cancel — like the shell's backdrop and
  * Escape — abandons the draft without saving. */
-export function WalletForm({ wallet, allowedTypes, onSaved, onFrozen, onCancel }: WalletFormProps) {
+export function WalletForm({
+  wallet,
+  allowedTypes,
+  prefillName,
+  onSaved,
+  onFrozen,
+  onCancel,
+}: WalletFormProps) {
   const editing = wallet !== undefined
-  const [name, setName] = useState(wallet?.name ?? '')
+  const [name, setName] = useState(wallet?.name ?? prefillName ?? '')
   const [type, setType] = useState<WalletType>(
     wallet?.type ?? (allowedTypes !== undefined && !allowedTypes.includes('checking')
       ? allowedTypes[0]

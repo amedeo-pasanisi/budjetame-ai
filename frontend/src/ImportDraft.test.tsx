@@ -654,11 +654,12 @@ describe('on-resume re-check (issue #76)', () => {
   })
 
   it('re-checks a hand-edited problem row against its edited values', async () => {
-    // The user edited the problem row to a wallet that still does not exist,
-    // so it stayed a Problem — the resume re-check judges its edited values.
+    // The user hand-edited the problem row — its amount — but the missing
+    // Wallet still makes it a Problem, so the resume re-check must judge the
+    // edited values, not the file's originals.
     validateImportRowMock.mockResolvedValue({
       status: 'error',
-      error: "Unknown wallet 'Edited Missing'",
+      error: "Unknown wallet 'Unknown'",
     })
     revalidateImportRowsMock.mockResolvedValue([
       { row: 4, status: 'ok', error: null },
@@ -668,11 +669,11 @@ describe('on-resume re-check (issue #76)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
-    fireEvent.change(within(dialog).getByLabelText('Wallet'), {
-      target: { value: 'Edited Missing' },
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '13.00' },
     })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await screen.findByText("Unknown wallet 'Edited Missing'")
+    await screen.findByText("Unknown wallet 'Unknown'")
 
     fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
     fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
@@ -682,7 +683,7 @@ describe('on-resume re-check (issue #76)', () => {
       expect(revalidateImportRowsMock).toHaveBeenCalledWith(
         'budjetame.token',
         draftRows.map((row) =>
-          row.row === 4 ? { ...row, wallet: 'Edited Missing' } : row,
+          row.row === 4 ? { ...row, amount: '13.00' } : row,
         ),
         [4],
       ),

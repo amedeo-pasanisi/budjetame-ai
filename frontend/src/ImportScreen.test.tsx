@@ -10,31 +10,73 @@
  * and flips its status inline, auto-selecting rows that become Ready and
  * deselecting ones that stop being Ready; confirm sends the edited values.
  *
+ * Import row editor entity selects and inline creation (issue #77): the
+ * Wallet and Category fields are dropdowns of the Account's entities with a
+ * trailing "＋ Add…" sentinel; picking it opens the create modal stacked on
+ * the editor, prefilled with the row's missing name; submitting creates the
+ * entity for real, closes only the modal, and auto-selects it in the
+ * originating field.
+ *
  * The API client is mocked; the screen is driven like a user would (pick a
  * file, read, toggle, edit a row, confirm). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { ImportScreen } from './ImportScreen'
 import { useImportDraft } from './importDraft'
-import type { ImportPreview, ImportRowInput, Transaction } from './api'
+import type { Category, ImportPreview, ImportRowInput, Transaction, Wallet } from './api'
 
-vi.mock('./api', () => ({
-  TOKEN_KEY: 'budjetame.token',
-  formatEuros: (value: string) => `€${value}`,
-  previewImport: vi.fn(),
-  confirmImport: vi.fn(),
-  validateImportRow: vi.fn(),
-  revalidateImportRows: vi.fn(),
-}))
+vi.mock('./api', () => {
+  class ApiError extends Error {
+    status: number
 
-import { confirmImport, previewImport, revalidateImportRows, validateImportRow } from './api'
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  }
+
+  class CategoryMergeConflict extends Error {}
+
+  return {
+    ApiError,
+    CategoryMergeConflict,
+    TOKEN_KEY: 'budjetame.token',
+    apiErrorMessage: (error: unknown, conflict: string, fallback: string) =>
+      error instanceof ApiError ? (error.status === 409 ? conflict : fallback) : fallback,
+    formatEuros: (value: string) => `€${value}`,
+    previewImport: vi.fn(),
+    confirmImport: vi.fn(),
+    validateImportRow: vi.fn(),
+    revalidateImportRows: vi.fn(),
+    createWallet: vi.fn(),
+    freezeWallet: vi.fn(),
+    renameWallet: vi.fn(),
+    createCategory: vi.fn(),
+    deleteCategory: vi.fn(),
+    updateCategory: vi.fn(),
+    mergeCategories: vi.fn(),
+  }
+})
+
+import {
+  ApiError,
+  confirmImport,
+  createCategory,
+  createWallet,
+  previewImport,
+  revalidateImportRows,
+  validateImportRow,
+} from './api'
+import { SENTINEL_VALUE } from './EntitySelect'
 
 const previewImportMock = vi.mocked(previewImport)
 const confirmImportMock = vi.mocked(confirmImport)
 const validateImportRowMock = vi.mocked(validateImportRow)
 const revalidateImportRowsMock = vi.mocked(revalidateImportRows)
+const createWalletMock = vi.mocked(createWallet)
+const createCategoryMock = vi.mocked(createCategory)
 
 /** Two ready rows (auto-selected), one duplicate, one problem. */
 const preview: ImportPreview = {
@@ -126,24 +168,118 @@ const importedTransaction: Transaction = {
   created_at: '2026-08-02T10:00:00Z',
 }
 
+/** The Account's Wallets the row editor offers (issue #77): the two the file
+ * references plus a Contact one that only a Transfer's From/To may offer. */
+const wallets: Wallet[] = [
+  {
+    id: 1,
+    name: 'Cash',
+    type: 'cash',
+    balance: '100.00',
+    frozen: false,
+    created_at: '2026-08-01T00:00:00Z',
+  },
+  {
+    id: 2,
+    name: 'Bank',
+    type: 'checking',
+    balance: '500.00',
+    frozen: false,
+    created_at: '2026-08-01T00:00:00Z',
+  },
+  {
+    id: 3,
+    name: 'Marco',
+    type: 'contact',
+    balance: '0.00',
+    frozen: false,
+    created_at: '2026-08-01T00:00:00Z',
+  },
+]
+
+/** The Account's Categories: one per type, matching the file's names. */
+const categories: Category[] = [
+  {
+    id: 1,
+    name: 'Food',
+    type: 'expense',
+    icon: '🍔',
+    color: '#ef4444',
+    created_at: '2026-08-01T00:00:00Z',
+  },
+  {
+    id: 2,
+    name: 'Salary',
+    type: 'income',
+    icon: null,
+    color: '#3b82f6',
+    created_at: '2026-08-01T00:00:00Z',
+  },
+]
+
+/** The Wallet the inline create flow returns (issue #77). */
+const revolutWallet: Wallet = {
+  id: 7,
+  name: 'Revolut',
+  type: 'checking',
+  balance: '0.00',
+  frozen: false,
+  created_at: '2026-08-05T00:00:00Z',
+}
+
+/** The Category the inline create flow returns. */
+const billsCategory: Category = {
+  id: 5,
+  name: 'Bills',
+  type: 'income',
+  icon: null,
+  color: '#ef4444',
+  created_at: '2026-08-05T00:00:00Z',
+}
+
 /** The draft itself lives in the app shell (issue #43); this harness opens
  * a fresh draft locally and hands the controller to the screen, so the tests
- * keep driving the real state transitions. */
-function Harness() {
+ * keep driving the real state transitions. The entity lists live in the
+ * Transactions screen; the harness mirrors them in local state so an
+ * inline-created entity (issue #77) flows back into the dropdowns exactly
+ * the way the real host updates its list state. */
+function Harness({
+  initialWallets = wallets,
+  initialCategories = categories,
+}: {
+  initialWallets?: Wallet[]
+  initialCategories?: Category[]
+}) {
   const controller = useImportDraft()
+  const [walletList, setWalletList] = useState<Wallet[]>(initialWallets)
+  const [categoryList, setCategoryList] = useState<Category[]>(initialCategories)
   useEffect(() => {
     controller.open()
     // The harness mounts once; opening on mount is the whole point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   if (controller.draft === null) return null
-  return <ImportScreen controller={controller} onDone={vi.fn()} />
+  return (
+    <ImportScreen
+      controller={controller}
+      wallets={walletList}
+      categories={categoryList}
+      onWalletCreated={(wallet) => setWalletList((current) => [...current, wallet])}
+      onCategoryCreated={(category) =>
+        setCategoryList((current) => [...current, category])
+      }
+      onDone={vi.fn()}
+    />
+  )
 }
 
 /** Picks a file, reads it, and lands on the preview phase. */
-async function openPreview() {
-  previewImportMock.mockResolvedValue(preview)
-  const view = render(<Harness />)
+async function openPreview(
+  previewOverride: ImportPreview = preview,
+  harnessProps: { initialWallets?: Wallet[]; initialCategories?: Category[] } = {},
+) {
+  previewImportMock.mockResolvedValue(previewOverride)
+  const view = render(<Harness {...harnessProps} />)
   const file = new File(['rows'], 'rows.csv', { type: 'text/csv' })
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
   fireEvent.change(input!, { target: { files: [file] } })
@@ -157,6 +293,8 @@ beforeEach(() => {
   previewImportMock.mockReset()
   validateImportRowMock.mockReset()
   revalidateImportRowsMock.mockReset()
+  createWalletMock.mockReset()
+  createCategoryMock.mockReset()
 })
 
 afterEach(() => {
@@ -535,5 +673,399 @@ describe('ImportScreen preview description title', () => {
     expect(titleLines(withoutDescription).map((span) => span.textContent)).toEqual([
       '2026-08-02 · Income',
     ])
+  })
+})
+
+describe('ImportScreen row editor entity selects and inline creation (issue #77)', () => {
+  /** The row editor's Wallet select options, in order. */
+  const walletOptions = (dialog: HTMLElement) =>
+    Array.from(
+      within(dialog).getByLabelText('Wallet').querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  /** The row editor's Category select options, in order. */
+  const categoryOptions = (dialog: HTMLElement) =>
+    Array.from(
+      within(dialog).getByLabelText('Category').querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  /** A Transfer's From/To select options, in order. */
+  const transferOptions = (dialog: HTMLElement, label: string) =>
+    Array.from(
+      within(dialog).getByLabelText(label).querySelectorAll('option'),
+    ).map((option) => option.textContent)
+
+  it('lists the existing Wallets and Categories with the sentinel last; Transfer rows get From/To with all four Wallet types and no Category field', async () => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    // Expense row: only the three non-Contact active Wallets; the Category
+    // select offers None and the expense Categories; the sentinel is last.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    expect(walletOptions(dialog)).toEqual(['Cash', 'Bank', '＋ Add wallet…'])
+    expect(categoryOptions(dialog)).toEqual(['None', '🍔 Food', '＋ Add category…'])
+
+    // Income row: the same Wallets, the income Categories.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 2' }))
+    const incomeDialog = await screen.findByRole('dialog', { name: 'Edit row 2' })
+    expect(walletOptions(incomeDialog)).toEqual(['Cash', 'Bank', '＋ Add wallet…'])
+    expect(categoryOptions(incomeDialog)).toEqual(['None', 'Salary', '＋ Add category…'])
+
+    // Transfer: From/To offer all four types including Contact, and no
+    // Category field at all.
+    fireEvent.click(within(incomeDialog).getByRole('button', { name: 'Transfer' }))
+    expect(transferOptions(incomeDialog, 'From')).toEqual([
+      'Cash',
+      'Bank',
+      'Marco',
+      '＋ Add wallet…',
+    ])
+    expect(transferOptions(incomeDialog, 'To')).toEqual([
+      'Cash',
+      'Bank',
+      'Marco',
+      '＋ Add wallet…',
+    ])
+    expect(within(incomeDialog).queryByLabelText('Category')).not.toBeInTheDocument()
+    expect(
+      within(incomeDialog).getByText('Transfers never carry a category.'),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps a missing name as the current value in a "doesn\'t exist yet" option', async () => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    // Row 4's file name 'Unknown' matches no Wallet: it stays the current
+    // value, shown as a "doesn't exist yet" option.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    expect(walletSelect).toHaveValue('Unknown')
+    expect(
+      within(walletSelect as HTMLElement).getByText("Unknown (doesn't exist yet)"),
+    ).toBeInTheDocument()
+
+    // A row's name that resolves only under the other type is missing too:
+    // switching the Expense row to Income leaves 'Food' (an expense
+    // Category) unresolved.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const row1 = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    fireEvent.click(within(row1).getByRole('button', { name: 'Income' }))
+    const categorySelect = within(row1).getByLabelText('Category')
+    expect(categorySelect).toHaveValue('Food')
+    expect(
+      within(categorySelect as HTMLElement).getByText("Food (doesn't exist yet)"),
+    ).toBeInTheDocument()
+  })
+
+  it('a file name that differs only in case shows the resolved entity as the current selection', async () => {
+    await openPreview({
+      rows: [
+        {
+          row: 1,
+          status: 'ok',
+          type: 'expense',
+          date: '2026-08-01',
+          amount: '4.50',
+          wallet: 'cash',
+          source_wallet: null,
+          destination_wallet: null,
+          category: 'food',
+          description: null,
+          latitude: null,
+          longitude: null,
+          error: null,
+        },
+      ],
+      ok_count: 1,
+      error_count: 0,
+      duplicate_count: 0,
+    })
+    await screen.findByRole('button', { name: 'Import 1 row' })
+
+    // The lowercase file names resolve case-insensitively, exactly like the
+    // import's validation: the selects show the canonical names selected.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    expect(within(dialog).getByLabelText('Wallet')).toHaveValue('Cash')
+    expect(within(dialog).getByLabelText('Category')).toHaveValue('Food')
+    expect(within(dialog).queryByText(/doesn't exist yet/)).not.toBeInTheDocument()
+  })
+
+  it('picking the Wallet sentinel on an Expense/Income row opens the New wallet modal prefilled with the missing name, restricted to the three types, while the dropdown keeps its value', async () => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    expect(walletSelect).toHaveValue('Unknown')
+
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // Prefilled with the file's missing name; the Type selector offers only
+    // Checking, Credit Card, and Cash (never Contact).
+    expect(within(walletDialog).getByLabelText('Name')).toHaveValue('Unknown')
+    expect(
+      Array.from(
+        within(walletDialog).getByLabelText('Type').querySelectorAll('option'),
+      ).map((option) => option.textContent),
+    ).toEqual(['Checking', 'Credit Card', 'Cash'])
+    expect(
+      within(walletDialog).getByText('Checking, Credit Card, Cash · fixed for this form'),
+    ).toBeInTheDocument()
+    // The editor behind keeps its state; nothing was created.
+    expect(screen.getByRole('dialog', { name: 'Edit row 4' })).toBeInTheDocument()
+    expect(walletSelect).toHaveValue('Unknown')
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(createWalletMock).not.toHaveBeenCalled()
+  })
+
+  it('picking the sentinel from a Transfer From/To opens the modal with all four Wallet types', async () => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer' }))
+
+    fireEvent.change(within(dialog).getByLabelText('From'), {
+      target: { value: SENTINEL_VALUE },
+    })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // No restriction: Contact is offered, and no "fixed for this form" note.
+    expect(
+      Array.from(
+        within(walletDialog).getByLabelText('Type').querySelectorAll('option'),
+      ).map((option) => option.textContent),
+    ).toEqual(['Checking', 'Credit Card', 'Cash', 'Contact'])
+    expect(within(walletDialog).queryByText('fixed for this form')).not.toBeInTheDocument()
+  })
+
+  it('picking the Category sentinel opens the New category modal locked to the row\'s type, prefilled with the missing name; the lock follows the row\'s live Type', async () => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    // Switch to Income: the file's 'Food' is an expense Category, so it is
+    // missing here — and the modal must open locked to Income.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
+    const categorySelect = within(dialog).getByLabelText('Category')
+    expect(categorySelect).toHaveValue('Food')
+
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    expect(within(categoryDialog).getByLabelText('Name')).toHaveValue('Food')
+    expect(within(categoryDialog).queryByLabelText('Type')).not.toBeInTheDocument()
+    expect(
+      within(categoryDialog).getByText('Income · fixed for this form'),
+    ).toBeInTheDocument()
+
+    // Cancel, switch the row back to Expense, and re-pick: the lock is the
+    // row's live type, and a resolving name prefills nothing.
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Expense' }))
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const expenseDialog = await screen.findByRole('dialog', { name: 'New category' })
+    expect(
+      within(expenseDialog).getByText('Expense · fixed for this form'),
+    ).toBeInTheDocument()
+    expect(within(expenseDialog).getByLabelText('Name')).toHaveValue('')
+  })
+
+  it('the full Wallet flow — sentinel, create, auto-select, save — creates the Wallet for real and carries its name', async () => {
+    createWalletMock.mockResolvedValue(revolutWallet)
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // The missing name is prefilled; the user corrects it and creates.
+    expect(within(walletDialog).getByLabelText('Name')).toHaveValue('Unknown')
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('budjetame.token', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '',
+      }),
+    )
+    // Only the inner modal closes; the editor and its draft survive.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'Edit row 4' })).toBeInTheDocument()
+    // The new Wallet is auto-selected and offered in the dropdown.
+    await waitFor(() => expect(walletSelect).toHaveValue('Revolut'))
+    expect(walletOptions(dialog)).toEqual(['Cash', 'Bank', 'Revolut', '＋ Add wallet…'])
+    // The rest of the draft is untouched.
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(within(dialog).getByLabelText('Date')).toHaveValue('2026-08-03')
+    expect(within(dialog).getByLabelText('Category')).toHaveValue('')
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+
+    // Saving the row sends the new Wallet's name through re-validation.
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(validateImportRowMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        expect.objectContaining({ row: 4, wallet: 'Revolut' }),
+        wireRows,
+      ),
+    )
+  })
+
+  it('the full Category flow — sentinel, create, auto-select, save — creates the Category with the locked type and carries its name', async () => {
+    createCategoryMock.mockResolvedValue(billsCategory)
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
+    const categorySelect = within(dialog).getByLabelText('Category')
+    fireEvent.change(categorySelect, { target: { value: SENTINEL_VALUE } })
+    const categoryDialog = await screen.findByRole('dialog', { name: 'New category' })
+    // The missing name is prefilled; the user corrects it and creates.
+    expect(within(categoryDialog).getByLabelText('Name')).toHaveValue('Food')
+    fireEvent.change(within(categoryDialog).getByLabelText('Name'), {
+      target: { value: 'Bills' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Create category' }))
+
+    await waitFor(() =>
+      expect(createCategoryMock).toHaveBeenCalledWith('budjetame.token', {
+        name: 'Bills',
+        type: 'income',
+        icon: '',
+        color: '#ef4444',
+      }),
+    )
+    // Only the inner modal closes; the editor survives with its draft.
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'Edit row 1' })).toBeInTheDocument()
+    await waitFor(() => expect(categorySelect).toHaveValue('Bills'))
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(4.5)
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+
+    // Saving the row sends the new Category's name, with the row's type.
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(validateImportRowMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        expect.objectContaining({ row: 1, type: 'income', category: 'Bills' }),
+        [],
+      ),
+    )
+  })
+
+  it('Cancel, backdrop, and Escape close only the create modal and leave the editor exactly as it was', async () => {
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    const openWalletModal = async () => {
+      fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+      return await screen.findByRole('dialog', { name: 'New wallet' })
+    }
+    const editorSurvives = () => {
+      expect(screen.getByRole('dialog', { name: 'Edit row 4' })).toBeInTheDocument()
+      expect(walletSelect).toHaveValue('Unknown')
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    }
+
+    // Cancel closes only the inner modal.
+    let walletDialog = await openWalletModal()
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    editorSurvives()
+
+    // Backdrop tap closes only the inner modal.
+    walletDialog = await openWalletModal()
+    fireEvent.click(walletDialog.previousElementSibling as Element)
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    editorSurvives()
+
+    // One Escape closes only the topmost modal; a second closes the editor.
+    walletDialog = await openWalletModal()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    editorSurvives()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(createWalletMock).not.toHaveBeenCalled()
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+  })
+
+  it('a name that case-insensitively matches an existing Wallet surfaces the validation error inside the modal, with nothing selected', async () => {
+    createWalletMock.mockRejectedValue(new ApiError('Conflict', 409))
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    const walletSelect = within(dialog).getByLabelText('Wallet')
+    fireEvent.change(walletSelect, { target: { value: SENTINEL_VALUE } })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    // 'cash' collides with the existing 'Cash', case-insensitively.
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'cash' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+
+    expect(
+      await within(walletDialog).findByText('A wallet with this name already exists.'),
+    ).toBeInTheDocument()
+    // The modal stays open and nothing is selected; the editor is intact.
+    expect(screen.getByRole('dialog', { name: 'New wallet' })).toBeInTheDocument()
+    expect(walletSelect).toHaveValue('Unknown')
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'Edit row 4' })).toBeInTheDocument()
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the sentinels when no Wallets or Categories exist yet', async () => {
+    await openPreview(preview, { initialWallets: [], initialCategories: [] })
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    expect(walletOptions(dialog)).toEqual(["Unknown (doesn't exist yet)", '＋ Add wallet…'])
+    expect(categoryOptions(dialog)).toEqual(['None', '＋ Add category…'])
   })
 })
