@@ -653,6 +653,44 @@ describe('on-resume re-check (issue #76)', () => {
     expect(screen.getByRole('button', { name: 'Edit row 3' })).toHaveTextContent('Problem')
   })
 
+  it('re-checks a hand-edited problem row against its edited values', async () => {
+    // The user edited the problem row to a wallet that still does not exist,
+    // so it stayed a Problem — the resume re-check judges its edited values.
+    validateImportRowMock.mockResolvedValue({
+      status: 'error',
+      error: "Unknown wallet 'Edited Missing'",
+    })
+    revalidateImportRowsMock.mockResolvedValue([
+      { row: 4, status: 'ok', error: null },
+    ])
+    const view = renderShell()
+    await openPreview(view)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    fireEvent.change(within(dialog).getByLabelText('Wallet'), {
+      target: { value: 'Edited Missing' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await screen.findByText("Unknown wallet 'Edited Missing'")
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
+
+    // The batch carried the edited values, and the flip judged them.
+    await waitFor(() =>
+      expect(revalidateImportRowsMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        draftRows.map((row) =>
+          row.row === 4 ? { ...row, wallet: 'Edited Missing' } : row,
+        ),
+        [4],
+      ),
+    )
+    await screen.findByText('3 ready')
+    expect(screen.getByRole('checkbox', { name: 'Select row 4' })).toBeChecked()
+  })
+
   it('surfaces a failed re-check without disturbing the draft', async () => {
     revalidateImportRowsMock.mockRejectedValue(
       new Error('Could not re-validate the rows.'),
