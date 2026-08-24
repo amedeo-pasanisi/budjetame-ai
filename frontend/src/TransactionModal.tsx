@@ -7,7 +7,7 @@ import {
 } from './api'
 import { ModalShell } from './ModalShell'
 import { TransactionForm } from './TransactionForm'
-import type { WalletTarget } from './transactionFields'
+import type { TransactionFormType, WalletTarget } from './transactionFields'
 
 type TransactionModalProps = {
   wallets: Wallet[]
@@ -25,8 +25,10 @@ type TransactionModalProps = {
    * it, leaving the rest of the draft untouched. */
   categoryToSelect: number | null
   /** Inline entity creation (ADR-0013): opens the Wallet create modal
-   * hosted by the screen, for the field whose sentinel was picked. */
-  onAddWallet: (target: WalletTarget) => void
+   * hosted by the screen, for the field whose sentinel was picked — the
+   * form's current type rides along so the modal can restrict the
+   * allowed Wallet types (ADR-0015). */
+  onAddWallet: (target: WalletTarget, type: TransactionFormType) => void
   /** The freshly created Wallet the screen reports back, with the field
    * whose sentinel was picked. */
   walletToSelect: { id: number; target: WalletTarget } | null

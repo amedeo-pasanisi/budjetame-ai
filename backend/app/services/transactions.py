@@ -4,10 +4,11 @@ Rules from CONTEXT.md: Expense/Income reference one Wallet of the Account;
 Transfers reference Source and Destination Wallets that must differ, never
 carry a Category, and never change Net Worth; Cash negativity is allowed but
 warned (the indicator is computed at the HTTP layer from the derived Balance);
-Contact Wallets only participate in Transfers; a Category attaches only to
-Transactions of its Type; Opening Balance Transactions are created by the
-Wallet lifecycle and are read-only here. An Expense may optionally link one
-Recurring Cost (issue #57) and an Income may optionally link one Recurring
+Contact Wallets move money via Transfers and may be the Wallet of an Expense
+(consumption the contact paid for, ADR-0015); Incomes never touch them; a
+Category attaches only to Transactions of its Type; Opening Balance
+Transactions are created by the Wallet lifecycle and are read-only here. An
+Expense may optionally link one Recurring Cost (issue #57) and an Income may Recurring
 Income (issue #61), each paying exactly one Occurrence — the oldest Unpaid
 one at link time, pinned then and never reassigned; because a Transaction is
 one type, the two links can never coexist (at most one link per Transaction);
@@ -152,8 +153,17 @@ def _check_create_rules(
         )
     wallet = owned_or_raise(session, Wallet, account_id, wallet_id)
     _ensure_wallet_writable(wallet)
-    if wallet.type == WalletType.CONTACT.value:
-        raise TransactionRuleError("Contact Wallets only participate in Transfers")
+    # ADR-0015: an Expense on a Contact Wallet records consumption the
+    # contact paid for (the Balance moves toward zero or negative); Incomes
+    # never touch Contact Wallets — money coming in from a contact is a
+    # Transfer, and a gift is an Income on the user's own Wallet.
+    if (
+        wallet.type == WalletType.CONTACT.value
+        and type != TransactionType.EXPENSE.value
+    ):
+        raise TransactionRuleError(
+            "Incomes can't be recorded on Contact Wallets"
+        )
     if category_id is not None:
         _check_category_matches(session, account_id, category_id, type)
     if recurring_cost_id is not None:

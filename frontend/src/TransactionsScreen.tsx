@@ -24,7 +24,7 @@ import type { ImportDraftController } from './importDraft'
 import { RecurringCostModal } from './RecurringCostModal'
 import { RecurringIncomeModal } from './RecurringIncomeModal'
 import { TransactionModal } from './TransactionModal'
-import type { WalletTarget } from './transactionFields'
+import type { TransactionFormType, WalletTarget } from './transactionFields'
 import { WalletModal } from './WalletModal'
 import { signedAmount, hasLocation, transactionTitle } from './transactions'
 
@@ -79,12 +79,17 @@ export function TransactionsScreen({
   // transaction form's modal, and the new Wallet it created — reported back
   // to the open form with the exact field whose sentinel was picked, so
   // that field selects it. The target doubles as the open flag (null =
-  // closed) and drives the eligibility lock: 'wallet' (an Expense/Income's
-  // single Wallet field) restricts the modal to Checking, Credit Card, and
-  // Cash — Contact Wallets move money only via Transfers — while a
-  // Transfer's From/To ('source'/'destination') allow all four types,
-  // since Transfers are where Contact Wallets belong.
-  const [walletModalTarget, setWalletModalTarget] = useState<WalletTarget | null>(null)
+  // closed) and, together with the form's current type, drives the
+  // eligibility lock (ADR-0015): an Expense's 'wallet' field allows all
+  // four types — the modal can create a Contact Wallet to record
+  // consumption it paid for — while an Income's 'wallet' field stays
+  // Checking/Credit Card/Cash, and a Transfer's From/To
+  // ('source'/'destination') allow all four types, since Transfers are
+  // where Contact Wallets belong.
+  const [walletModalTarget, setWalletModalTarget] = useState<{
+    target: WalletTarget
+    type: TransactionFormType
+  } | null>(null)
   const [walletToSelect, setWalletToSelect] = useState<{
     id: number
     target: WalletTarget
@@ -316,7 +321,7 @@ export function TransactionsScreen({
   const handleWalletCreated = (wallet: Wallet) => {
     addWalletToList(wallet)
     if (walletModalTarget !== null) {
-      setWalletToSelect({ id: wallet.id, target: walletModalTarget })
+      setWalletToSelect({ id: wallet.id, target: walletModalTarget.target })
     }
     setWalletModalTarget(null)
   }
@@ -633,8 +638,8 @@ export function TransactionsScreen({
             setCategoryModalOpen(true)
           }}
           categoryToSelect={categoryToSelect}
-          onAddWallet={(target) => {
-            setWalletModalTarget(target)
+          onAddWallet={(target, type) => {
+            setWalletModalTarget({ target, type })
           }}
           walletToSelect={walletToSelect}
           onAddRecurringCost={() => setRecurringCostModalOpen(true)}
@@ -669,8 +674,12 @@ export function TransactionsScreen({
       {walletModalTarget !== null && (
         <WalletModal
           allowedTypes={
-            walletModalTarget === 'wallet'
-              ? ['checking', 'credit_card', 'cash']
+            walletModalTarget.target === 'wallet'
+              ? // ADR-0015: an Expense may record consumption a Contact
+                // paid for — all four types; an Income never may.
+                walletModalTarget.type === 'expense'
+                ? undefined
+                : ['checking', 'credit_card', 'cash']
               : undefined
           }
           onSaved={handleWalletCreated}

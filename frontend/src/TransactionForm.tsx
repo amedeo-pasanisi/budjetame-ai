@@ -63,11 +63,12 @@ type TransactionFormProps = {
    * it, leaving the rest of the draft untouched. */
   categoryToSelect: number | null
   /** Inline entity creation (ADR-0013): opens the Wallet create modal
-   * hosted by the screen — restricted to Checking, Credit Card, and Cash
-   * for the Expense/Income Wallet field ('wallet'), all four types for a
-   * Transfer's From/To ('source'/'destination'), since Transfers are where
-   * Contact Wallets belong. */
-  onAddWallet: (target: WalletTarget) => void
+   * hosted by the screen — all four types (including Contact) for an
+   * Expense's Wallet field and a Transfer's From/To, Checking/Credit
+   * Card/Cash only for an Income's Wallet field (ADR-0015). The form
+   * reports its current type so the screen can restrict the modal
+   * accordingly. */
+  onAddWallet: (target: WalletTarget, type: TransactionFormType) => void
   /** The freshly created Wallet the screen reports back, with the field
    * whose sentinel was picked: that exact field selects it, leaving the
    * rest of the draft untouched. */
@@ -127,12 +128,33 @@ export function TransactionForm({
   // seeds its defaults from them. The screen passes the full list
   // (include_frozen) because the ledger filter needs it.
   const assignableWallets = wallets.filter((wallet) => !wallet.frozen)
+  // The default Wallet for an Expense/Income: the first spendable one. A
+  // Contact Wallet never defaults — an Expense on one is a deliberate pick
+  // (ADR-0015), and Incomes cannot use one at all. Shared by the seed and
+  // the Expense→Income reset below, so the two can never drift.
+  const spendableWallets = useMemo(
+    () => assignableWallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type)),
+    [assignableWallets],
+  )
+  const firstSpendableWalletId = spendableWallets[0]?.id
   const [walletId, setWalletId] = useState<number | undefined>(
     editing?.type === 'transfer'
       ? undefined
-      : (editing?.wallet_id ??
-        assignableWallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type))[0]?.id),
+      : (editing?.wallet_id ?? firstSpendableWalletId),
   )
+  // The Wallet picker's allowed types depend on the form type (ADR-0015):
+  // Expenses may record consumption a Contact paid for, Incomes may not.
+  // Switching an Expense that picked a Contact Wallet to Income must not
+  // ride the stale Contact selection along to the API (where the backend
+  // would reject it) — reset to the first spendable Wallet, like the
+  // initial seed.
+  useEffect(() => {
+    if (type !== 'income') return
+    const selected = wallets.find((w) => w.id === walletId)
+    if (selected !== undefined && selected.type === 'contact') {
+      setWalletId(firstSpendableWalletId)
+    }
+  }, [type, walletId, wallets, firstSpendableWalletId])
   const [sourceWalletId, setSourceWalletId] = useState<number | undefined>(
     editing?.type === 'transfer' ? (editing.source_wallet_id ?? undefined) : assignableWallets[0]?.id,
   )
@@ -524,15 +546,16 @@ export function TransactionForm({
           disabled={isEditing}
           onSourceChange={setSourceWalletId}
           onDestinationChange={setDestinationWalletId}
-          onAdd={onAddWallet}
+          onAdd={(target) => onAddWallet(target, type)}
         />
       ) : (
         <WalletField
           wallets={assignableWallets}
+          type={type}
           value={walletId}
           disabled={isEditing}
           onChange={setWalletId}
-          onAdd={() => onAddWallet('wallet')}
+          onAdd={() => onAddWallet('wallet', type)}
         />
       )}
 

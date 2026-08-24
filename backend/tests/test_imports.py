@@ -633,8 +633,8 @@ async def test_preview_checks_category_type_and_wallet_rules(client: AsyncClient
                 _csv_bytes(
                     # Income Category on an Expense row.
                     "2026-08-01,expense,10.00,Rules Checking,,,Rules Income Cat,,",
-                    # Contact Wallet as the Expense's Wallet.
-                    "2026-08-01,expense,10.00,Rules Marco,,,,,",
+                    # Income on a Contact Wallet: Incomes never touch them.
+                    "2026-08-01,income,10.00,Rules Marco,,,,,",
                     # Frozen Wallet is read-only.
                     "2026-08-01,expense,10.00,Rules Frozen,,,,,",
                     # Transfer rows carry no wallet, no category.
@@ -656,7 +656,7 @@ async def test_preview_checks_category_type_and_wallet_rules(client: AsyncClient
     assert rows[0]["status"] == "error"
     assert "Rules Income Cat" in errors[0] and "not expense" in errors[0]
     assert rows[1]["status"] == "error"
-    assert "Contact Wallets only participate in Transfers" in errors[1]
+    assert "Incomes can't be recorded on Contact Wallets" in errors[1]
     assert rows[2]["status"] == "error"
     assert "is frozen" in errors[2]
     assert rows[3]["status"] == "error"
@@ -781,6 +781,24 @@ def _expense(
 ) -> dict:
     return {
         "type": "expense", "date": date, "amount": amount, "wallet": wallet,
+        "source_wallet": None, "destination_wallet": None, "category": None,
+        "description": None, "latitude": None, "longitude": None,
+        **({"row": row} if row is not None else {}),
+        **extra,
+    }
+
+
+def _income(
+    amount: str,
+    wallet: str,
+    *,
+    date: str = "2026-08-01",
+    row: int | None = None,
+    **extra: str | None,
+) -> dict:
+    """The mirror of `_expense`: a single-Wallet Income row."""
+    return {
+        "type": "income", "date": date, "amount": amount, "wallet": wallet,
         "source_wallet": None, "destination_wallet": None, "category": None,
         "description": None, "latitude": None, "longitude": None,
         **({"row": row} if row is not None else {}),
@@ -1223,10 +1241,10 @@ async def test_validate_row_keeps_rule_violations_as_errors(
     await _create_category(client, token, "Verify Income Cat", "income")
 
     contact = await _validate(
-        client, token, _expense("10.00", "Verify Marco")
+        client, token, _income("10.00", "Verify Marco")
     )
     assert contact["status"] == "error"
-    assert "Contact Wallets only participate in Transfers" in contact["error"]
+    assert "Incomes can't be recorded on Contact Wallets" in contact["error"]
 
     wrong_type = await _validate(
         client, token,
@@ -1250,6 +1268,38 @@ async def test_validate_row_keeps_rule_violations_as_errors(
     )
     assert same_legs["status"] == "error"
     assert "different Wallets" in same_legs["error"]
+
+
+async def test_preview_accepts_an_expense_on_a_contact_wallet(
+    client: AsyncClient,
+) -> None:
+    """ADR-0015 inherits into the import pipeline (the Preview judges rows
+    through the same rules as a typed Transaction): an Expense row on a
+    Contact Wallet is ready — consumption the contact paid for — while an
+    Income row on one keeps its error."""
+    token = await _login(client)
+    await _create_wallet(client, token, "Draft Chiara", "contact", "0.00")
+
+    response = await client.post(
+        "/import/preview",
+        files={
+            "file": (
+                "import.csv",
+                _csv_bytes(
+                    "2026-08-01,expense,10.00,Draft Chiara,,,,,",
+                    "2026-08-01,income,10.00,Draft Chiara,,,,,",
+                ),
+                "text/csv",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    rows = response.json()["rows"]
+    assert rows[0]["status"] == "ok"
+    assert rows[1]["status"] == "error"
+    assert "Incomes can't be recorded on Contact Wallets" in rows[1]["error"]
 
 
 async def test_validate_row_duplicate_keys_on_every_dimension(

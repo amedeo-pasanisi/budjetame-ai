@@ -237,17 +237,135 @@ async def test_non_cash_wallet_going_negative_has_no_warning(client: AsyncClient
     assert await _wallet_balance(client, token, wallet_id) == "-15.00"
 
 
-async def test_contact_wallet_rejects_expense_and_income(client: AsyncClient) -> None:
+async def test_expense_on_contact_wallet_records_the_debt(client: AsyncClient) -> None:
+    """An Expense on a Contact Wallet (ADR-0015) records consumption the
+    contact paid for: Chiara buys me a €10 ice cream, one Transaction, her
+    Balance goes negative and Net Worth drops the same day."""
     token = await _login(client)
-    wallet_id = await _create_wallet(client, token, "Marco Contact", "contact", "0.00")
+    wallet_id = await _create_wallet(client, token, "Chiara", "contact", "0.00")
+    before = await _net_worth(client, token)
 
-    for type_ in ("expense", "income"):
-        response = await client.post(
-            "/transactions",
-            json={"type": type_, "amount": "10.00", "date": "2026-08-06", "wallet_id": wallet_id},
-            headers=_auth(token),
-        )
-        assert response.status_code == 422, type_
+    response = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["wallet_id"] == wallet_id
+    assert await _wallet_balance(client, token, wallet_id) == "-10.00"
+    assert await _net_worth(client, token) == before - Decimal("10.00")
+
+
+async def test_expense_on_a_receivable_contact_shrinks_their_balance(
+    client: AsyncClient,
+) -> None:
+    """ADR-0015 has no balance-sign restriction: an Expense on a Contact
+    Wallet that owes the user shrinks the receivable — Marco owes me €50,
+    he buys me a €10 coffee, one Transaction leaves him at +€40."""
+    token = await _login(client)
+    checking = await _create_wallet(client, token, "Lend Checking", "checking", "100.00")
+    marco = await _create_wallet(client, token, "Marco Receivable", "contact", "0.00")
+    lend = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer", "amount": "50.00", "date": "2026-08-06",
+            "source_wallet_id": checking, "destination_wallet_id": marco,
+        },
+        headers=_auth(token),
+    )
+    assert lend.status_code == 201
+    before = await _net_worth(client, token)
+
+    response = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-07", "wallet_id": marco},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    assert await _wallet_balance(client, token, marco) == "40.00"
+    assert await _net_worth(client, token) == before - Decimal("10.00")
+
+
+async def test_repaying_a_contact_debt_is_a_net_worth_neutral_transfer(
+    client: AsyncClient,
+) -> None:
+    """Repayment stays a Transfer (ADR-0015): paying Chiara back clears her
+    Balance to zero and moves the money out of my wallet, but Net Worth does
+    not move — the ice cream was already expensed."""
+    token = await _login(client)
+    chiara = await _create_wallet(client, token, "Repay Chiara", "contact", "0.00")
+    cash = await _create_wallet(client, token, "Repay Cash", "cash", "100.00")
+    expense = await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "10.00", "date": "2026-08-06", "wallet_id": chiara},
+        headers=_auth(token),
+    )
+    assert expense.status_code == 201
+    before = await _net_worth(client, token)
+
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer", "amount": "10.00", "date": "2026-08-10",
+            "source_wallet_id": cash, "destination_wallet_id": chiara,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201
+    assert await _wallet_balance(client, token, chiara) == "0.00"
+    assert await _wallet_balance(client, token, cash) == "90.00"
+    assert await _net_worth(client, token) == before
+
+
+async def test_expense_on_contact_wallet_counts_in_monthly_stats(
+    client: AsyncClient,
+) -> None:
+    """The Dashboard's month pie never filters by Wallet type: an Expense on
+    a Contact Wallet appears in the month's category stats like any other
+    Expense (ADR-0015)."""
+    token = await _login(client)
+    chiara = await _create_wallet(client, token, "Stats Chiara", "contact", "0.00")
+    food = await _create_category(client, token, "Stats Food", "expense")
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "expense", "amount": "10.00", "date": "2027-01-06",
+            "wallet_id": chiara, "category_id": food,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+
+    summary = await client.get(
+        "/dashboard/summary?month=2027-01", headers=_auth(token)
+    )
+
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["expenses"] == "10.00"
+    assert any(
+        slice_["category_id"] == food and slice_["amount"] == "10.00"
+        for slice_ in body["expenses_by_category"]
+    )
+
+
+async def test_income_on_contact_wallet_is_rejected(client: AsyncClient) -> None:
+    """Incomes never touch Contact Wallets (ADR-0015): money coming in from
+    a contact is a Transfer, a gift is an Income on the user's own Wallet."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Luca", "contact", "0.00")
+
+    response = await client.post(
+        "/transactions",
+        json={"type": "income", "amount": "10.00", "date": "2026-08-06", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+    assert "Incomes can't be recorded on Contact Wallets" in response.json()["detail"]
 
 
 async def test_category_must_match_the_transaction_type(client: AsyncClient) -> None:
