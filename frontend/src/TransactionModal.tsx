@@ -27,7 +27,7 @@ type TransactionModalProps = {
   /** Inline entity creation (ADR-0013): opens the Wallet create modal
    * hosted by the screen, for the field whose sentinel was picked — the
    * form's current type rides along so the modal can restrict the
-   * allowed Wallet types (ADR-0015). */
+   * allowed Wallet types (ADR-0017). */
   onAddWallet: (target: WalletTarget, type: TransactionFormType) => void
   /** The freshly created Wallet the screen reports back, with the field
    * whose sentinel was picked. */

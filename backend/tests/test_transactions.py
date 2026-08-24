@@ -238,7 +238,7 @@ async def test_non_cash_wallet_going_negative_has_no_warning(client: AsyncClient
 
 
 async def test_expense_on_contact_wallet_records_the_debt(client: AsyncClient) -> None:
-    """An Expense on a Contact Wallet (ADR-0015) records consumption the
+    """An Expense on a Contact Wallet (ADR-0017) records consumption the
     contact paid for: Chiara buys me a €10 ice cream, one Transaction, her
     Balance goes negative and Net Worth drops the same day."""
     token = await _login(client)
@@ -260,7 +260,7 @@ async def test_expense_on_contact_wallet_records_the_debt(client: AsyncClient) -
 async def test_expense_on_a_receivable_contact_shrinks_their_balance(
     client: AsyncClient,
 ) -> None:
-    """ADR-0015 has no balance-sign restriction: an Expense on a Contact
+    """ADR-0017 has no balance-sign restriction: an Expense on a Contact
     Wallet that owes the user shrinks the receivable — Marco owes me €50,
     he buys me a €10 coffee, one Transaction leaves him at +€40."""
     token = await _login(client)
@@ -291,7 +291,7 @@ async def test_expense_on_a_receivable_contact_shrinks_their_balance(
 async def test_repaying_a_contact_debt_is_a_net_worth_neutral_transfer(
     client: AsyncClient,
 ) -> None:
-    """Repayment stays a Transfer (ADR-0015): paying Chiara back clears her
+    """Repayment stays a Transfer (ADR-0017): paying Chiara back clears her
     Balance to zero and moves the money out of my wallet, but Net Worth does
     not move — the ice cream was already expensed."""
     token = await _login(client)
@@ -325,7 +325,7 @@ async def test_expense_on_contact_wallet_counts_in_monthly_stats(
 ) -> None:
     """The Dashboard's month pie never filters by Wallet type: an Expense on
     a Contact Wallet appears in the month's category stats like any other
-    Expense (ADR-0015)."""
+    Expense (ADR-0017)."""
     token = await _login(client)
     chiara = await _create_wallet(client, token, "Stats Chiara", "contact", "0.00")
     food = await _create_category(client, token, "Stats Food", "expense")
@@ -353,7 +353,7 @@ async def test_expense_on_contact_wallet_counts_in_monthly_stats(
 
 
 async def test_income_on_contact_wallet_is_rejected(client: AsyncClient) -> None:
-    """Incomes never touch Contact Wallets (ADR-0015): money coming in from
+    """Incomes never touch Contact Wallets (ADR-0017): money coming in from
     a contact is a Transfer, a gift is an Income on the user's own Wallet."""
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Luca", "contact", "0.00")

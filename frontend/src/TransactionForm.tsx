@@ -65,7 +65,7 @@ type TransactionFormProps = {
   /** Inline entity creation (ADR-0013): opens the Wallet create modal
    * hosted by the screen — all four types (including Contact) for an
    * Expense's Wallet field and a Transfer's From/To, Checking/Credit
-   * Card/Cash only for an Income's Wallet field (ADR-0015). The form
+   * Card/Cash only for an Income's Wallet field (ADR-0017). The form
    * reports its current type so the screen can restrict the modal
    * accordingly. */
   onAddWallet: (target: WalletTarget, type: TransactionFormType) => void
@@ -130,7 +130,7 @@ export function TransactionForm({
   const assignableWallets = wallets.filter((wallet) => !wallet.frozen)
   // The default Wallet for an Expense/Income: the first spendable one. A
   // Contact Wallet never defaults — an Expense on one is a deliberate pick
-  // (ADR-0015), and Incomes cannot use one at all. Shared by the seed and
+  // (ADR-0017), and Incomes cannot use one at all. Shared by the seed and
   // the Expense→Income reset below, so the two can never drift.
   const spendableWallets = useMemo(
     () => assignableWallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type)),
@@ -142,7 +142,7 @@ export function TransactionForm({
       ? undefined
       : (editing?.wallet_id ?? firstSpendableWalletId),
   )
-  // The Wallet picker's allowed types depend on the form type (ADR-0015):
+  // The Wallet picker's allowed types depend on the form type (ADR-0017):
   // Expenses may record consumption a Contact paid for, Incomes may not.
   // Switching an Expense that picked a Contact Wallet to Income must not
   // ride the stale Contact selection along to the API (where the backend

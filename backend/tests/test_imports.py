@@ -1273,7 +1273,7 @@ async def test_validate_row_keeps_rule_violations_as_errors(
 async def test_preview_accepts_an_expense_on_a_contact_wallet(
     client: AsyncClient,
 ) -> None:
-    """ADR-0015 inherits into the import pipeline (the Preview judges rows
+    """ADR-0017 inherits into the import pipeline (the Preview judges rows
     through the same rules as a typed Transaction): an Expense row on a
     Contact Wallet is ready — consumption the contact paid for — while an
     Income row on one keeps its error."""

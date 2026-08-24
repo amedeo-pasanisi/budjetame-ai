@@ -80,7 +80,7 @@ export function TransactionsScreen({
   // to the open form with the exact field whose sentinel was picked, so
   // that field selects it. The target doubles as the open flag (null =
   // closed) and, together with the form's current type, drives the
-  // eligibility lock (ADR-0015): an Expense's 'wallet' field allows all
+  // eligibility lock (ADR-0017): an Expense's 'wallet' field allows all
   // four types — the modal can create a Contact Wallet to record
   // consumption it paid for — while an Income's 'wallet' field stays
   // Checking/Credit Card/Cash, and a Transfer's From/To
@@ -675,7 +675,7 @@ export function TransactionsScreen({
         <WalletModal
           allowedTypes={
             walletModalTarget.target === 'wallet'
-              ? // ADR-0015: an Expense may record consumption a Contact
+              ? // ADR-0017: an Expense may record consumption a Contact
                 // paid for — all four types; an Income never may.
                 walletModalTarget.type === 'expense'
                 ? undefined

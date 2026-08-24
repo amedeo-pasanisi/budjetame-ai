@@ -57,7 +57,7 @@ export function TypeSelector({
  * wrapper renders it always last and reverts the field on a sentinel pick;
  * the screen hosts the inner New wallet modal. An Expense may pick a
  * Contact Wallet — one Transaction records consumption the contact paid
- * for, the Balance moving toward zero or negative (ADR-0015) — while an
+ * for, the Balance moving toward zero or negative (ADR-0017) — while an
  * Income never may: money coming in from a contact is a Transfer, and a
  * gift is an Income on the user's own Wallet, so the Income picker still
  * filters Contact Wallets out. */

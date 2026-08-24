@@ -153,7 +153,7 @@ const frozenWallet: Wallet = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
-// A Contact Wallet (ADR-0015): an Expense may record consumption the
+// A Contact Wallet (ADR-0017): an Expense may record consumption the
 // contact paid for on it, so the Expense Wallet select lists it — but the
 // Income select never does, and inline creation from the Expense form must
 // allow the Contact type (from the Income form it must not).
@@ -1111,7 +1111,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     await screen.findByText(/Coffee/)
 
     // Expense (the default type): Marco is offered — an Expense on a
-    // Contact Wallet records consumption the contact paid for (ADR-0015) —
+    // Contact Wallet records consumption the contact paid for (ADR-0017) —
     // with the helper that says so.
     const dialog = await openCreateForm()
     expect(walletOptions(dialog)).toEqual([
@@ -1174,7 +1174,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     // Only ineligible wallets for an Income: a Frozen one and a Contact
     // one. The sentinel is the only row, so a wallet can still be created
     // inline. The Expense form, by contrast, may record on the Contact
-    // Wallet (ADR-0015).
+    // Wallet (ADR-0017).
     fetchWalletsMock.mockResolvedValue([frozenWallet, marcoWallet])
     render(<Harness />)
     await screen.findByText(/Coffee/)
@@ -1189,7 +1189,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
 
-    // Expense: Contact Wallets belong in the modal too (ADR-0015).
+    // Expense: Contact Wallets belong in the modal too (ADR-0017).
     const dialog = await openCreateForm()
     const walletSelect = within(dialog).getByLabelText('Wallet')
     expect(walletSelect).toHaveValue('1')

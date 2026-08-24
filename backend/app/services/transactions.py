@@ -5,7 +5,7 @@ Transfers reference Source and Destination Wallets that must differ, never
 carry a Category, and never change Net Worth; Cash negativity is allowed but
 warned (the indicator is computed at the HTTP layer from the derived Balance);
 Contact Wallets move money via Transfers and may be the Wallet of an Expense
-(consumption the contact paid for, ADR-0015); Incomes never touch them; a
+(consumption the contact paid for, ADR-0017); Incomes never touch them; a
 Category attaches only to Transactions of its Type; Opening Balance
 Transactions are created by the Wallet lifecycle and are read-only here. An
 Expense may optionally link one Recurring Cost (issue #57) and an Income may Recurring
@@ -153,7 +153,7 @@ def _check_create_rules(
         )
     wallet = owned_or_raise(session, Wallet, account_id, wallet_id)
     _ensure_wallet_writable(wallet)
-    # ADR-0015: an Expense on a Contact Wallet records consumption the
+    # ADR-0017: an Expense on a Contact Wallet records consumption the
     # contact paid for (the Balance moves toward zero or negative); Incomes
     # never touch Contact Wallets — money coming in from a contact is a
     # Transfer, and a gift is an Income on the user's own Wallet.

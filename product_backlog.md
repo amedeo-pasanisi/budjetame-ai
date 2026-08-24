@@ -150,7 +150,7 @@
   * I can create an Expense whose Wallet is a Contact Wallet; the contact's balance decreases (positive shrinks, negative grows) and Net Worth drops on the same day.
   * The Expense feeds category stats and the Budget like any other Expense.
   * Incomes on Contact Wallets stay forbidden: they still fail with the Transfers-only error.
-  * Repaying the debt is a Transfer from my wallet to the contact and never changes Net Worth (ADR-0015).
+  * Repaying the debt is a Transfer from my wallet to the contact and never changes Net Worth (ADR-0017).
 
 ---
 
