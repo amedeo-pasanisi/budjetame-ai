@@ -582,6 +582,76 @@ async def test_a_negative_month_floors_the_daily_allowance_at_zero(
         delete_account(database_url, account_id)
 
 
+# --- Skipped Occurrences never count (ADR-0016) ---------------------------
+
+async def test_a_skipped_cost_occurrence_never_counts_in_monthly_spendable(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Monthly Spendable counts Occurrences by due date, paid or not — but
+    a Skipped Occurrence never counts (ADR-0016): the user does not have to
+    pay it, so the Budget must not pretend the money leaves. Skipping this
+    month's Occurrence restores the month exactly."""
+    email = "budget-skip-cost@budjetame.dev"
+    account_id = insert_foreign_account(database_url, email)
+    try:
+        token = await _login(client, email=email, password="whatever")
+        await _create_wallet(client, token, "Skip Cost Wallet")
+        # One Occurrence due this month: k=0 on the 1st, due the 1st.
+        cost = await _create_recurring_cost(
+            client,
+            token,
+            name="Skip Cost Rent",
+            amount="500.00",
+            start_date=_first_day_of_current_month(),
+        )
+        after_create = await _budget(client, token)
+        assert after_create["monthly_spendable"] == "-500.00"
+
+        response = await client.post(
+            f"/recurring-costs/{cost}/skip-toggle", headers=_auth(token)
+        )
+        assert response.status_code == 200
+        assert response.json()["backlog_count"] == 0
+
+        after_skip = await _budget(client, token)
+        assert after_skip["monthly_spendable"] == "0.00"
+        assert after_skip["daily_allowance"] == "0.00"
+        assert after_skip["spendable_today"] == "0.00"
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_a_skipped_income_occurrence_never_counts_in_monthly_spendable(
+    client: AsyncClient, database_url: str
+) -> None:
+    """The income mirror: an income the user will not receive never fills
+    the month. Skipping this month's Occurrence drops the Monthly Spendable
+    by the full amount."""
+    email = "budget-skip-income@budjetame.dev"
+    account_id = insert_foreign_account(database_url, email)
+    try:
+        token = await _login(client, email=email, password="whatever")
+        await _create_wallet(client, token, "Skip Income Wallet")
+        income = await _create_recurring_income(
+            client, token, name="Skip Income Salary", amount="3000.00"
+        )
+        after_create = await _budget(client, token)
+        assert after_create["monthly_spendable"] == "3000.00"
+
+        response = await client.post(
+            f"/recurring-incomes/{income}/skip-toggle", headers=_auth(token)
+        )
+        assert response.status_code == 200
+        assert response.json()["backlog_count"] == 0
+
+        after_skip = await _budget(client, token)
+        assert after_skip["monthly_spendable"] == "0.00"
+        assert after_skip["daily_allowance"] == "0.00"
+        assert after_skip["spendable_today"] == "0.00"
+    finally:
+        delete_account(database_url, account_id)
+
+
 # --- retroactive recompute: edits and deletes reshape the month -----------
 
 async def test_editing_a_recurring_definition_recomputes_the_month(

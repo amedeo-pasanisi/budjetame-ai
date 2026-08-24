@@ -37,6 +37,7 @@ vi.mock('./api', async () => {
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
     deleteRecurringIncome: vi.fn(),
+    toggleSkipRecurringIncome: vi.fn(),
   }
 })
 
@@ -45,6 +46,7 @@ import {
   createRecurringIncome,
   deleteRecurringIncome,
   fetchRecurringIncomes,
+  toggleSkipRecurringIncome,
   updateRecurringIncome,
 } from './api'
 
@@ -65,6 +67,7 @@ const incomes: RecurringIncome[] = [
     next_unpaid_occurrence_date: '2026-09-27',
     backlog_count: 0,
     overdue: false,
+    next_skip_action: 'skip',
     created_at: createdAt,
   },
   {
@@ -80,6 +83,7 @@ const incomes: RecurringIncome[] = [
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 3,
     overdue: true,
+    next_skip_action: 'skip',
     created_at: createdAt,
   },
   {
@@ -95,6 +99,7 @@ const incomes: RecurringIncome[] = [
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
     overdue: false,
+    next_skip_action: 'unskip',
     created_at: createdAt,
   },
 ]
@@ -103,6 +108,7 @@ const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 const createRecurringIncomeMock = vi.mocked(createRecurringIncome)
 const updateRecurringIncomeMock = vi.mocked(updateRecurringIncome)
 const deleteRecurringIncomeMock = vi.mocked(deleteRecurringIncome)
+const toggleSkipRecurringIncomeMock = vi.mocked(toggleSkipRecurringIncome)
 
 beforeEach(() => {
   fetchRecurringIncomesMock.mockResolvedValue(incomes)
@@ -169,6 +175,7 @@ describe('RecurringIncomesScreen create flow', () => {
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
       overdue: true,
+      next_skip_action: 'skip',
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)
@@ -299,6 +306,75 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
   })
 })
 
+describe('RecurringIncomesScreen skip button', () => {
+  it('renders Skip or Un-skip per the API state, and keeps the card clickable', async () => {
+    render(<RecurringIncomesScreen />)
+    await screen.findByText('Rent from Marco')
+
+    // Salary and Marco have an unskipped next occurrence: Skip. Bonus has
+    // nothing left to skip: Un-skip.
+    expect(screen.getAllByRole('button', { name: 'Skip' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Un-skip' })).toBeInTheDocument()
+    // The card itself still opens the edit modal.
+    const rows = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+    fireEvent.click(rows.find((row) => row.textContent?.includes('Salary')) as HTMLElement)
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit recurring income' }),
+    ).toBeInTheDocument()
+  })
+
+  it('skips the next occurrence and swaps in the returned state', async () => {
+    toggleSkipRecurringIncomeMock.mockResolvedValue({
+      ...incomes[1],
+      backlog_count: 0,
+      overdue: false,
+      next_skip_action: 'unskip',
+    })
+    render(<RecurringIncomesScreen />)
+    await screen.findByText('Rent from Marco')
+
+    const skipButtons = screen.getAllByRole('button', { name: 'Skip' })
+    fireEvent.click(
+      skipButtons.find(
+        (button) => button.closest('li')?.textContent?.includes('Rent from Marco'),
+      ) as HTMLElement,
+    )
+
+    await waitFor(() =>
+      expect(toggleSkipRecurringIncomeMock).toHaveBeenCalledWith('', 2),
+    )
+    // The returned state re-renders the card: no badge, no Overdue mark,
+    // the button now reads Un-skip (Marco joins Bonus), and the summary
+    // re-totals.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Un-skip' })).toHaveLength(2)
+    })
+    const marco = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+      .find((row) => row.textContent?.includes('Rent from Marco'))
+    expect(marco?.textContent).not.toContain('unpaid')
+    expect(marco?.textContent).not.toContain('Overdue')
+    expect(
+      screen.getByText('0 incomes overdue · 0 unpaid occurrences'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the error message when the toggle fails', async () => {
+    toggleSkipRecurringIncomeMock.mockRejectedValue(new Error('down'))
+    render(<RecurringIncomesScreen />)
+    await screen.findByText('Rent from Marco')
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Skip' })[0])
+
+    expect(
+      await screen.findByText('Could not update your recurring incomes.'),
+    ).toBeInTheDocument()
+  })
+})
+
 describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => {
   /** The row buttons, in screen order — the badge and the Overdue mark live
    * inside them. */
@@ -396,6 +472,7 @@ describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => 
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
       overdue: true,
+      next_skip_action: 'skip',
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)

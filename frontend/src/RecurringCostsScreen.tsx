@@ -4,6 +4,7 @@ import {
   TOKEN_KEY,
   fetchRecurringCosts,
   formatEuros,
+  toggleSkipRecurringCost,
   type RecurringCost,
 } from './api'
 import { RecurringCostModal } from './RecurringCostModal'
@@ -28,6 +29,9 @@ export function RecurringCostsScreen() {
   const [costs, setCosts] = useState<RecurringCost[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalDraft | null>(null)
+  // The cost whose Skip/Un-skip button is in flight — the button disables
+  // itself so a double tap cannot flip the state twice (skip then un-skip).
+  const [togglingId, setTogglingId] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -67,6 +71,28 @@ export function RecurringCostsScreen() {
       current === null ? current : current.filter((cost) => cost.id !== costId),
     )
     closeModal()
+  }
+
+  // The Skip/Un-skip button (ADR-0016): the backend flips the oldest Unpaid
+  // Occurrence and returns the refreshed definition — the card swaps it in,
+  // so the badge, the Overdue mark, and the next due date re-render from the
+  // response.
+  const handleToggleSkip = (cost: RecurringCost) => {
+    setTogglingId(cost.id)
+    toggleSkipRecurringCost(token, cost.id)
+      .then((toggled) => {
+        setCosts((current) =>
+          current === null
+            ? [toggled]
+            : sortByNextDue(
+                current.map((existing) =>
+                  existing.id === toggled.id ? toggled : existing,
+                ),
+              ),
+        )
+      })
+      .catch(() => setLoadError('Could not update your recurring costs.'))
+      .finally(() => setTogglingId(null))
   }
 
   // The summary line (issue #58): totals over the loaded costs. Only shown
@@ -109,11 +135,11 @@ export function RecurringCostsScreen() {
       ) : (
         <ul className="mt-4 space-y-2">
           {costs.map((cost) => (
-            <li key={cost.id}>
+            <li key={cost.id} className="flex items-stretch gap-2">
               <button
                 type="button"
                 onClick={() => setModal({ kind: 'edit', cost })}
-                className="flex w-full items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
+                className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
               >
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-slate-900">
@@ -139,6 +165,14 @@ export function RecurringCostsScreen() {
                     </span>
                   )}
                 </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleSkip(cost)}
+                disabled={togglingId === cost.id}
+                className="shrink-0 self-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+              >
+                {cost.next_skip_action === 'unskip' ? 'Un-skip' : 'Skip'}
               </button>
             </li>
           ))}

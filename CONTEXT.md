@@ -41,11 +41,11 @@ A definition of an income expected to repeat at a fixed interval (every N days, 
 _Avoid_: recurring earning, paycheck, salary entry
 
 **Occurrence**:
-One derived due instance of a Recurring Cost or Recurring Income, computed from its start date plus k×interval (an unset start date defaults to the creation date). Each Occurrence is either Paid — exactly one linked Transaction of the matching type (an Expense for a Cost, an Income for a Recurring Income) covers it — or Unpaid. Its due date is its own date, unless the definition's optional override (day-of-month for months, month+day for years) shifts it.
+One derived due instance of a Recurring Cost or Recurring Income, computed from its start date plus k×interval (an unset start date defaults to the creation date). Each Occurrence is either Paid — exactly one linked Transaction of the matching type (an Expense for a Cost, an Income for a Recurring Income) covers it — Unpaid, or Skipped: the user marked it as not applying, so it never enters the Backlog, never counts toward Monthly Spendable, and a link can never cover it. Un-skipping restores it to Unpaid. Its due date is its own date, unless the definition's optional override (day-of-month for months, month+day for years) shifts it.
 _Avoid_: instance, cycle, due event
 
 **Backlog**:
-A Recurring Cost's or Recurring Income's Unpaid Occurrences whose due date is today or earlier — the "N unpaid" badge on the Recurring screen. A definition with a Backlog shows Overdue.
+A Recurring Cost's or Recurring Income's Unpaid, un-Skipped Occurrences whose due date is today or earlier — the "N unpaid" badge on the Recurring screen. A definition with a Backlog shows Overdue.
 _Avoid_: arrears, overdue list
 
 **Budget**:
@@ -53,7 +53,7 @@ The per-month spending frame that answers "how much can I spend today": each day
 _Avoid_: allowance, daily budget, pocket money
 
 **Monthly Spendable**:
-A month's Budget total: the sum of the Recurring Income Occurrences due in that month minus the sum of the Recurring Cost Occurrences due in it, counted by due date whether paid or not. When negative, the Daily Allowance floors at 0.
+A month's Budget total: the sum of the Recurring Income Occurrences due in that month minus the sum of the Recurring Cost Occurrences due in it, counted by due date whether paid or not — Skipped ones never count. When negative, the Daily Allowance floors at 0.
 _Avoid_: monthly available, free money, disposable income
 
 **Daily Allowance**:
@@ -141,12 +141,13 @@ _Avoid_: backup, dump, statement
 - Searching the ledger matches Transactions whose Description contains the needle, case-insensitively (accents must match exactly), combined with any other filters.
 - Transaction dates are stored as UTC timestamps; months and years for reporting are bucketed in Europe/Rome, the app's single fixed timezone.
 - Recurring Costs and Recurring Incomes carry no Wallet and no Category: the Wallet and Category of a linked Transaction are chosen at Transaction creation time.
-- An Expense links to at most one Recurring Cost; linking pays exactly one Occurrence, the oldest Unpaid one, pinned at link time and never reassigned by later date edits. Unlinking or deleting the Expense frees the Occurrence. An Income links to at most one Recurring Income under the same contract.
+- An Expense links to at most one Recurring Cost; linking pays exactly one Occurrence, the oldest Unpaid one — never a Skipped one; un-skipping comes first — pinned at link time and never reassigned by later date edits. Unlinking or deleting the Expense frees the Occurrence. An Income links to at most one Recurring Income under the same contract.
 - Recurring Cost names are unique per Account, case-insensitively; Recurring Income names are unique the same way.
-- Deleting a Recurring Cost severs the links: linked Expenses remain as ordinary Expenses. Deleting a Recurring Income severs the links: linked Incomes remain as ordinary Incomes.
+- Deleting a Recurring Cost severs the links and drops its skips: linked Expenses remain as ordinary Expenses. Deleting a Recurring Income severs the links and drops its skips: linked Incomes remain as ordinary Incomes.
+- A skip is anchored to its Occurrence's period — the month for a monthly definition, the year for a yearly one, the date itself for daily and weekly ones — and travels with the Occurrence: editing the definition never drops it, and changing the interval unit maps the period along (a skipped month becomes its year, a skipped year becomes its month). A skip whose period holds no Occurrence lies dormant; only un-skipping removes it.
 - Occurrences and Backlog are always derived from the definition; editing interval or start date reshapes only the derived future.
 - The Budget is always derived, never stored: editing a Recurring definition, a Transaction, or a link recomputes Monthly Spendable, Daily Allowance, and Spendable Today retroactively from the 1st of the month.
-- Monthly Spendable counts Occurrences by due date, paid or not; Expenses linked to a Recurring Cost never drain Spendable Today, and one-off Incomes never fill it.
+- Monthly Spendable counts Occurrences by due date, paid or not — Skipped ones never count; Expenses linked to a Recurring Cost never drain Spendable Today, and one-off Incomes never fill it.
 - Each month's Budget starts fresh at 0; Spendable Today may go negative within the month and is displayed as 0 until future accruals repay it.
 - Imports never set the link.
 - An Export never carries the link either: an exported row has no Recurring link and no Place — coordinates only — and Opening Balance Transactions are not exported.

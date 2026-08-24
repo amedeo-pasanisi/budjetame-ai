@@ -42,8 +42,9 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
     due date (override applied, clamping included — the pure recurrence
     module owns that math), the next Unpaid Occurrence date (issue #61):
     the one a new linked Income would pay, what the transaction form's
-    picker shows — and the Backlog (issue #62): Unpaid Occurrences due
-    today or earlier in Europe/Rome, with the Overdue flag."""
+    picker shows — the Backlog (issue #62): Unpaid Occurrences due today or
+    earlier in Europe/Rome, with the Overdue flag — and `next_skip_action`,
+    what the Skip/Un-skip button reads (ADR-0016)."""
     backlog = recurring_service.backlog_count_for(session, income)
     return RecurringIncomeOut(
         id=income.id,
@@ -54,12 +55,13 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
         start_date=income.start_date.isoformat() if income.start_date is not None else None,
         due_day=income.due_day,
         due_month=income.due_month,
-        next_due_date=recurring_service.next_due_date_for(income).isoformat(),
+        next_due_date=recurring_service.next_due_date_for(session, income).isoformat(),
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, income
         ).isoformat(),
         backlog_count=backlog,
         overdue=backlog > 0,
+        next_skip_action=recurring_service.next_skip_action(session, income),
         created_at=income.created_at,
     )
 
@@ -112,6 +114,21 @@ def create_recurring_income(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringIncomeNameTaken, IntegrityError) as cause:
         _name_conflict(session, cause)
+    return _income_out(session, income)
+
+
+@router.post("/{income_id}/skip-toggle", response_model=RecurringIncomeOut)
+def toggle_recurring_income_skip(
+    income_id: int,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> RecurringIncomeOut:
+    """The Skip/Un-skip button (ADR-0016), mirroring the cost side: skip
+    the oldest Unpaid, un-Skipped Occurrence; once the whole Backlog is
+    excused, un-skip the oldest Skipped one instead. The response is the
+    refreshed definition with its derived state."""
+    income = _owned_income_or_403(session, account, income_id)
+    income = recurring_service.toggle_skip(session, income)
     return _income_out(session, income)
 
 

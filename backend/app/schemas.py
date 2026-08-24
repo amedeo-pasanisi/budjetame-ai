@@ -640,8 +640,11 @@ class RecurringCostOut(BaseModel):
     #58): Unpaid Occurrences whose due date is today or earlier in
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
     pins, never stored; `overdue` is true exactly when the Backlog is
-    non-empty. `start_date` is the stored value — null when unset, meaning
-    the creation date."""
+    non-empty. `next_skip_action` is what the Skip/Un-skip button reads
+    (ADR-0016): "skip" when the oldest Unpaid Occurrence is unskipped,
+    "unskip" when it is already Skipped — nothing is left to skip, so the
+    press restores it. `start_date` is the stored value — null when unset,
+    meaning the creation date."""
 
     id: int
     name: str
@@ -655,6 +658,7 @@ class RecurringCostOut(BaseModel):
     next_unpaid_occurrence_date: str
     backlog_count: int
     overdue: bool
+    next_skip_action: Literal["skip", "unskip"]
     created_at: datetime
 
     @field_validator("amount")
@@ -741,7 +745,10 @@ class RecurringIncomeOut(BaseModel):
     #62): Unpaid Occurrences whose due date is today or earlier in
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
     pins, never stored; `overdue` is true exactly when the Backlog is
-    non-empty. `start_date` is the stored value — null when unset, meaning
+    non-empty. `next_skip_action` is what the Skip/Un-skip button reads
+    (ADR-0016), mirroring the cost side: "skip" when the oldest Unpaid
+    Occurrence is unskipped, "unskip" when it is already Skipped.
+    `start_date` is the stored value — null when unset, meaning
     the creation date."""
 
     id: int
@@ -756,6 +763,7 @@ class RecurringIncomeOut(BaseModel):
     next_unpaid_occurrence_date: str
     backlog_count: int
     overdue: bool
+    next_skip_action: Literal["skip", "unskip"]
     created_at: datetime
 
     @field_validator("amount")

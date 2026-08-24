@@ -246,7 +246,8 @@ const rentCost: RecurringCost = {
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
   overdue: false,
-  created_at: '2026-08-01T10:00:00Z',
+  next_skip_action: 'skip',
+  created_at: '2026-08-01T10:00:00Z'
 }
 
 // The Recurring Income mirror (issue #73): same shape, income side.
@@ -263,7 +264,8 @@ const salaryIncome: RecurringIncome = {
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
   overdue: false,
-  created_at: '2026-08-01T10:00:00Z',
+  next_skip_action: 'skip',
+  created_at: '2026-08-01T10:00:00Z'
 }
 
 const page1: TransactionPage = { items: [coffee], next_cursor: 'c1' }

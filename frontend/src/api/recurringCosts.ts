@@ -29,6 +29,9 @@ export type RecurringCost = {
   backlog_count: number
   /** True exactly when the Backlog is non-empty — the Overdue mark. */
   overdue: boolean
+  /** What the Skip/Un-skip button reads (ADR-0016): "skip" when the oldest
+   * Unpaid Occurrence is unskipped, "unskip" when it is already Skipped. */
+  next_skip_action: 'skip' | 'unskip'
   created_at: string
 }
 
@@ -102,4 +105,19 @@ export async function deleteRecurringCost(token: string, costId: number): Promis
     token,
     errorMessage: 'Could not delete recurring cost',
   })
+}
+
+export async function toggleSkipRecurringCost(
+  token: string,
+  costId: number,
+): Promise<RecurringCost> {
+  // The Skip/Un-skip button (ADR-0016): the backend flips the oldest Unpaid
+  // Occurrence (skip it, or un-skip it when everything is excused) and
+  // returns the refreshed definition with its derived state.
+  const response = await request(`/recurring-costs/${costId}/skip-toggle`, {
+    method: 'POST',
+    token,
+    errorMessage: 'Could not update recurring cost',
+  })
+  return (await response.json()) as RecurringCost
 }

@@ -31,6 +31,10 @@ export type RecurringIncome = {
   backlog_count: number
   /** True exactly when the Backlog is non-empty — the Overdue mark. */
   overdue: boolean
+  /** What the Skip/Un-skip button reads (ADR-0016), mirroring the Costs
+   * side: "skip" when the oldest Unpaid Occurrence is unskipped, "unskip"
+   * when it is already Skipped. */
+  next_skip_action: 'skip' | 'unskip'
   created_at: string
 }
 
@@ -104,4 +108,18 @@ export async function deleteRecurringIncome(token: string, incomeId: number): Pr
     token,
     errorMessage: 'Could not delete recurring income',
   })
+}
+
+export async function toggleSkipRecurringIncome(
+  token: string,
+  incomeId: number,
+): Promise<RecurringIncome> {
+  // The Skip/Un-skip button (ADR-0016): the backend flips the oldest Unpaid
+  // Occurrence and returns the refreshed definition with its derived state.
+  const response = await request(`/recurring-incomes/${incomeId}/skip-toggle`, {
+    method: 'POST',
+    token,
+    errorMessage: 'Could not update recurring income',
+  })
+  return (await response.json()) as RecurringIncome
 }

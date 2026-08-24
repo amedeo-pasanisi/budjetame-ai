@@ -75,6 +75,7 @@ export {
   createRecurringCost,
   deleteRecurringCost,
   fetchRecurringCosts,
+  toggleSkipRecurringCost,
   updateRecurringCost,
 } from './recurringCosts'
 
@@ -84,5 +85,6 @@ export {
   createRecurringIncome,
   deleteRecurringIncome,
   fetchRecurringIncomes,
+  toggleSkipRecurringIncome,
   updateRecurringIncome,
 } from './recurringIncomes'

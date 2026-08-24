@@ -26,10 +26,11 @@ from app.models import (
     Category,
     RecurringCost,
     RecurringIncome,
+    RecurringSkip,
     Transaction,
     TransactionType,
 )
-from app.recurrence import occurrences_in_window, rome_day_of, rome_today
+from app.recurrence import occurrences_in_window, period_of, rome_day_of, rome_today
 
 from app.services.wallets import wallet_balances
 
@@ -204,25 +205,48 @@ def _occurrence_totals(
     for income in session.scalars(
         select(RecurringIncome).where(RecurringIncome.account_id == account_id)
     ).all():
-        income_total += _due_amount(income, first_day, last_day)
+        income_total += _due_amount(session, income, first_day, last_day)
     for cost in session.scalars(
         select(RecurringCost).where(RecurringCost.account_id == account_id)
     ).all():
-        cost_total += _due_amount(cost, first_day, last_day)
+        cost_total += _due_amount(session, cost, first_day, last_day)
     return income_total, cost_total
 
 
 def _due_amount(
-    definition: RecurringCost | RecurringIncome, first_day: date, last_day: date
+    session: Session,
+    definition: RecurringCost | RecurringIncome,
+    first_day: date,
+    last_day: date,
 ) -> Decimal:
     """One definition's contribution to the Monthly Spendable: its amount
     per Occurrence due inside the window (an unset start date defaults to
-    the creation date, ADR-0010)."""
+    the creation date, ADR-0010). A Skipped Occurrence never counts
+    (ADR-0016): the user does not have to pay it, so the Budget must not
+    pretend the money leaves (or arrives).
+
+    The stored skip dates map through the current unit's period shape
+    (`period_of`), so a skip travels with its Occurrence across definition
+    edits — the Budget re-derives on every read, exactly like every other
+    input (ADR-0001)."""
     start = (
         definition.start_date
         if definition.start_date is not None
         else rome_day_of(definition.created_at)
     )
+    if isinstance(definition, RecurringCost):
+        stored = session.scalars(
+            select(RecurringSkip.occurrence_date).where(
+                RecurringSkip.recurring_cost_id == definition.id
+            )
+        ).all()
+    else:
+        stored = session.scalars(
+            select(RecurringSkip.occurrence_date).where(
+                RecurringSkip.recurring_income_id == definition.id
+            )
+        ).all()
+    skipped = {period_of(value, definition.interval_unit) for value in stored}
     due_dates = occurrences_in_window(
         start,
         definition.interval_value,
@@ -231,6 +255,7 @@ def _due_amount(
         definition.due_month,
         first_day,
         last_day,
+        skipped,
     )
     return definition.amount * Decimal(len(due_dates))
 

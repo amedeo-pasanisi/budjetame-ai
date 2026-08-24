@@ -24,6 +24,12 @@ _MONTH_UNITS = {"months"}
 _YEAR_UNITS = {"years"}
 _UNITS = _DAY_UNITS | _MONTH_UNITS | _YEAR_UNITS
 
+# The skip anchor (ADR-0016): the Occurrence's own date for day/week
+# intervals, (year, month) for month intervals, the year for year
+# intervals. One period names at most one Occurrence of a sequence (the
+# interval is at least one unit).
+Period = date | tuple[int, int] | int
+
 
 def rome_today() -> date:
     """The calendar day in Europe/Rome right now (CONTEXT.md: the app's
@@ -84,6 +90,29 @@ def occurrence_date(start: date, n: int, unit: str, k: int) -> date:
     raise ValueError(f"unknown interval unit: {unit!r}")
 
 
+def period_of(occurrence: date, unit: str) -> Period:
+    """The skip period of one Occurrence under a unit (ADR-0016): the date
+    itself for day and week intervals, (year, month) for month intervals,
+    the year for year intervals. Occurrences are one per period per unit
+    (the interval is at least one unit), so a period names at most one
+    Occurrence of a given sequence.
+
+    A skip is stored as the Occurrence's own date at skip time; its
+    effective period under the *current* unit is this function of that
+    date — which is what makes the skip travel with the Occurrence when
+    the definition is edited: a skipped month becomes its year when the
+    interval changes to years, a skipped year becomes the month of the
+    skipped Occurrence when it changes to months.
+    """
+    if unit in _DAY_UNITS:
+        return occurrence
+    if unit in _MONTH_UNITS:
+        return (occurrence.year, occurrence.month)
+    if unit in _YEAR_UNITS:
+        return occurrence.year
+    raise ValueError(f"unknown interval unit: {unit!r}")
+
+
 def due_date_for(
     occurrence: date, unit: str, due_day: int | None, due_month: int | None
 ) -> date:
@@ -136,6 +165,7 @@ def next_due_date(
     due_day: int | None,
     due_month: int | None,
     today: date,
+    skipped: set[Period],
 ) -> date:
     """The next due date: the due date of the first Occurrence whose due
     date is `today` or later (an Occurrence due today is not yet a Backlog
@@ -145,7 +175,9 @@ def next_due_date(
     interval estimate and walks forward while the due date is still behind
     today, or back when the estimate overshot (the override can only pull a
     due date within its own month/year, so the estimate is off by at most a
-    few steps).
+    few steps). An Occurrence whose period is in `skipped` (ADR-0016) is
+    not due: the walk steps past it, and a dormant skip (a period holding
+    no Occurrence of the current sequence) never blocks anything.
     """
     k = _elapsed_intervals(start, n, unit, today)
     while True:
@@ -155,10 +187,15 @@ def next_due_date(
                 due_date_for(occurrence_date(start, n, unit, k - 1), unit, due_day, due_month)
                 < today
             ):
-                return due
+                break
             k -= 1
         else:
             k += 1
+    while period_of(occurrence_date(start, n, unit, k), unit) in skipped:
+        k += 1
+    return due_date_for(
+        occurrence_date(start, n, unit, k), unit, due_day, due_month
+    )
 
 
 def occurrences_in_window(
@@ -169,6 +206,7 @@ def occurrences_in_window(
     due_month: int | None,
     window_start: date,
     window_end: date,
+    skipped: set[Period],
 ) -> list[date]:
     """The due dates of every Occurrence of the definition that fall inside
     the window `[window_start, window_end]`, both edges included, strictly
@@ -176,7 +214,9 @@ def occurrences_in_window(
     where they find one boundary, this walks the whole span, so the Budget
     can sum one definition's amount per returned date (issue #64). Overrides
     and the 29–31 clamping apply per Occurrence exactly as in
-    `due_date_for`.
+    `due_date_for`. An Occurrence whose period is in `skipped` (ADR-0016)
+    never enters the window — the Budget must not count a skipped
+    Occurrence's amount.
 
     Due dates are strictly increasing in k, so the walk starts at the
     interval estimate and only ever advances — at most a few steps before
@@ -189,15 +229,15 @@ def occurrences_in_window(
     k = _elapsed_intervals(start, n, unit, window_start)
     dues: list[date] = []
     while True:
-        due = due_date_for(
-            occurrence_date(start, n, unit, k), unit, due_day, due_month
-        )
+        occurrence = occurrence_date(start, n, unit, k)
+        due = due_date_for(occurrence, unit, due_day, due_month)
         if due < window_start:
             k += 1
             continue
         if due > window_end:
             return dues
-        dues.append(due)
+        if period_of(occurrence, unit) not in skipped:
+            dues.append(due)
         k += 1
 
 
@@ -209,6 +249,7 @@ def backlog_count(
     due_month: int | None,
     today: date,
     paid: set[date],
+    skipped: set[Period],
 ) -> int:
     """The Backlog (issue #58): how many of the cost's Occurrences are
     Unpaid and due `today` or earlier in Europe/Rome — the "N unpaid"
@@ -216,7 +257,10 @@ def backlog_count(
     (the stored pins, issue #57): an Occurrence is Unpaid exactly when its
     own date is not in it, so an Occurrence a link covers is never counted
     back in, no matter how the definition (interval, start date) was edited
-    since the pin was stored.
+    since the pin was stored. `skipped` is the set of periods (ADR-0016)
+    whose Occurrence the user excused: a Skipped Occurrence never counts,
+    and a dormant skip (a period holding no Occurrence) never enters the
+    count.
 
     The override can pull a due date ahead of its Occurrence (the 15th
     occurrence due the 1st) or behind it, so the boundary walk mirrors
@@ -242,4 +286,5 @@ def backlog_count(
         1
         for i in range(k + 1)
         if occurrence_date(start, n, unit, i) not in paid
+        and period_of(occurrence_date(start, n, unit, i), unit) not in skipped
     )

@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -172,6 +173,44 @@ class Transaction(Base):
     recurring_income_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_incomes.id", ondelete="SET NULL"), index=True
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RecurringSkip(Base):
+    """One skipped Occurrence of a Recurring Cost or Recurring Income
+    (ADR-0016): the user marked the Occurrence as not applying, so it never
+    enters the Backlog, never counts toward Monthly Spendable, and a link
+    can never pay it — un-skipping comes first. `occurrence_date` is the
+    skipped Occurrence's own date at skip time; its effective period under
+    the definition's current interval unit — the date for day/week
+    intervals, (year, month) for months, the year for years
+    (app.recurrence.period_of) — is what travels with the Occurrence when
+    the definition is edited: a skipped month becomes its year when the
+    interval turns yearly, a skipped year becomes its month when it turns
+    monthly, and a period holding no Occurrence lies dormant. Exactly one
+    of the two definition FKs is set (the CHECK enforces it, mirroring the
+    Transaction link columns); deleting a definition cascades its skips
+    away (ON DELETE CASCADE). Un-skipping deletes the row.
+    """
+
+    __tablename__ = "recurring_skips"
+    __table_args__ = (
+        CheckConstraint(
+            "num_nonnulls(recurring_cost_id, recurring_income_id) = 1",
+            name="ck_recurring_skips_one_definition",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurring_cost_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_costs.id", ondelete="CASCADE"), index=True
+    )
+    recurring_income_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_incomes.id", ondelete="CASCADE"), index=True
+    )
+    occurrence_date: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

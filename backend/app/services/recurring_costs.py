@@ -8,23 +8,30 @@ an optional due-date override whose shape follows the interval unit
 Occurrences and the next due date are derived, never stored — the pure
 recurrence module (app.recurrence) owns that math. Deleting a Recurring Cost
 is a hard delete; linked Expenses (issue #57) are severed by the FK's ON
-DELETE SET NULL. The paid state also lives here: `paid_occurrence_dates` is
-the set of Occurrences the cost's links cover and `oldest_unpaid_occurrence`
-the one a new link pays (the oldest Unpaid, future Occurrences included —
-paying ahead) — what the transaction form's picker shows as
-`next_unpaid_occurrence_date` in the API view.
+DELETE SET NULL and the definition's skips cascade away (ADR-0016). The paid
+state also lives here: `paid_occurrence_dates` is the set of Occurrences the
+cost's links cover and `oldest_unpaid_occurrence` the one a new link pays
+(the oldest Unpaid, future Occurrences included — paying ahead) — what the
+transaction form's picker shows as `next_unpaid_occurrence_date` in the API
+view. The skipped state (ADR-0016) lives in recurring_skips: `skipped_periods`
+maps the stored Occurrence dates through the current unit's period shape,
+`toggle_skip` flips the oldest Unpaid Occurrence (the Skip/Un-skip button),
+and every derived read excludes Skipped Occurrences.
 """
 
 from datetime import date
+from typing import Literal
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import IntervalUnit, RecurringCost, Transaction
+from app.models import IntervalUnit, RecurringCost, RecurringSkip, Transaction
 from app.recurrence import (
+    Period,
     backlog_count,
     next_due_date,
     occurrence_date,
+    period_of,
     rome_day_of,
     rome_today,
 )
@@ -153,11 +160,98 @@ def delete_recurring_cost(session: Session, cost: RecurringCost) -> None:
     session.commit()
 
 
-def next_due_date_for(cost: RecurringCost) -> date:
+def skipped_periods(
+    session: Session, cost_id: int, unit: str
+) -> set[Period]:
+    """The periods (ADR-0016) of the cost's skipped Occurrences under the
+    current unit: each stored Occurrence date mapped through `period_of` —
+    the month for month intervals, the year for year intervals, the date
+    itself for day/week. That mapping is what makes a skip travel with its
+    Occurrence when the definition is edited: changing the interval unit
+    re-shapes the periods of the stored dates, so a skipped month becomes
+    its year and a skipped year becomes its month; a period that holds no
+    Occurrence of the current sequence simply never matches (dormant).
+    """
+    stored = session.scalars(
+        select(RecurringSkip.occurrence_date).where(
+            RecurringSkip.recurring_cost_id == cost_id
+        )
+    ).all()
+    return {period_of(value, unit) for value in stored}
+
+
+def oldest_unpinned_occurrence(session: Session, cost: RecurringCost) -> date:
+    """The oldest Occurrence no linked Expense covers — Skipped or not
+    (ADR-0016): the Skip/Un-skip button's target, the front of the queue.
+    The link walk (`oldest_unpaid_occurrence`) steps over Skipped ones; the
+    button must not, or un-skipping would be unreachable. The sequence is
+    infinite and the paid set finite, so the walk always terminates.
+    """
+    paid = paid_occurrence_dates(session, cost.id)
+    start = (
+        cost.start_date
+        if cost.start_date is not None
+        else rome_day_of(cost.created_at)
+    )
+    k = 0
+    while True:
+        occurrence = occurrence_date(
+            start, cost.interval_value, cost.interval_unit, k
+        )
+        if occurrence not in paid:
+            return occurrence
+        k += 1
+
+
+def toggle_skip(session: Session, cost: RecurringCost) -> RecurringCost:
+    """The Skip/Un-skip button (ADR-0016). When the whole Backlog is
+    excused, it un-skips the oldest Skipped Occurrence; otherwise it skips
+    the oldest Unpaid, un-Skipped Occurrence — the same one a link would
+    pay, so the badge ticks down oldest-first, one press per Occurrence.
+    Only Unpaid Occurrences are ever skipped (the walk never targets a
+    link's pin). A skip stores the Occurrence's own date; un-skipping
+    deletes the row whose period covers the target. The response is the
+    refreshed definition: every derived read re-derives from the stored
+    skips."""
+    if next_skip_action(session, cost) == "unskip":
+        target = oldest_unpinned_occurrence(session, cost)
+        target_period = period_of(target, cost.interval_unit)
+        rows = session.scalars(
+            select(RecurringSkip).where(RecurringSkip.recurring_cost_id == cost.id)
+        ).all()
+        for row in rows:
+            if period_of(row.occurrence_date, cost.interval_unit) == target_period:
+                session.delete(row)
+                break
+    else:
+        target = oldest_unpaid_occurrence(session, cost)
+        session.add(RecurringSkip(recurring_cost_id=cost.id, occurrence_date=target))
+    session.commit()
+    session.refresh(cost)
+    return cost
+
+
+def next_skip_action(session: Session, cost: RecurringCost) -> Literal["skip", "unskip"]:
+    """What the Skip/Un-skip button reads (ADR-0016): "unskip" exactly
+    when the whole Backlog is excused — no Unpaid, un-Skipped Occurrence is
+    due — and the oldest Unpaid Occurrence (the front of the queue) is the
+    Skipped one; then the press restores it. Otherwise "skip": there is
+    still an Unpaid, un-Skipped Occurrence to excuse — the button clears
+    the Backlog oldest-first, and only resolves the Skipped ones once the
+    whole Backlog is excused (Q17's queue discipline)."""
+    if backlog_count_for(session, cost) > 0:
+        return "skip"
+    target = oldest_unpinned_occurrence(session, cost)
+    skipped = skipped_periods(session, cost.id, cost.interval_unit)
+    return "unskip" if period_of(target, cost.interval_unit) in skipped else "skip"
+
+
+def next_due_date_for(session: Session, cost: RecurringCost) -> date:
     """The cost's next due date, derived on the fly (ADR-0010): the first
     Occurrence — from the start date (or the creation date when unset) plus
     the interval, clamped — whose due date (override applied) is today or
-    later in Europe/Rome."""
+    later in Europe/Rome. A Skipped Occurrence is not due: the walk steps
+    past it (ADR-0016)."""
     start = (
         cost.start_date
         if cost.start_date is not None
@@ -170,6 +264,7 @@ def next_due_date_for(cost: RecurringCost) -> date:
         cost.due_day,
         cost.due_month,
         rome_today(),
+        skipped_periods(session, cost.id, cost.interval_unit),
     )
 
 
@@ -195,9 +290,11 @@ def backlog_count_for(session: Session, cost: RecurringCost) -> int:
     """The cost's Backlog (issue #58): Unpaid Occurrences whose due date is
     today or earlier in Europe/Rome — the "N unpaid" badge, and the Overdue
     flag's source (a non-empty Backlog is Overdue). Unpaid means its own
-    date is not covered by a linked Expense: the pins are stored (issue
-    #57), so editing the interval or start date reshapes only the derived
-    future — an Occurrence a link covers is never counted back in."""
+    date is not covered by a linked Expense and its period is not skipped:
+    the pins are stored (issue #57) and the skips are stored (ADR-0016), so
+    editing the interval or start date reshapes only the derived future —
+    an Occurrence a link covers or the user excused is never counted back
+    in."""
     paid = paid_occurrence_dates(session, cost.id)
     start = (
         cost.start_date
@@ -212,6 +309,7 @@ def backlog_count_for(session: Session, cost: RecurringCost) -> int:
         cost.due_month,
         rome_today(),
         paid,
+        skipped_periods(session, cost.id, cost.interval_unit),
     )
 
 
@@ -223,20 +321,23 @@ def oldest_unpaid_occurrence(
 ) -> date:
     """The Occurrence a new link pays (issue #57): the oldest Unpaid one —
     the first of the derived sequence (from the start date, or the creation
-    date when unset, plus the interval) no linked Expense covers. Future
-    Occurrences are included when nothing earlier is Unpaid, so paying ahead
-    is natural; the sequence is infinite and the paid set finite, so the
-    walk always terminates. The pin is stored on the link at this moment and
-    never recomputed (ADR-0010)."""
+    date when unset, plus the interval) no linked Expense covers and whose
+    period is not skipped — a Skipped Occurrence is never paid (ADR-0016),
+    un-skipping comes first. Future Occurrences are included when nothing
+    earlier is Unpaid, so paying ahead is natural; the sequence is infinite
+    and the paid and skipped sets finite, so the walk always terminates.
+    The pin is stored on the link at this moment and never recomputed
+    (ADR-0010)."""
     paid = paid_occurrence_dates(session, cost.id, exclude_transaction_id=exclude_transaction_id)
     start = (
         cost.start_date
         if cost.start_date is not None
         else rome_day_of(cost.created_at)
     )
+    skipped = skipped_periods(session, cost.id, cost.interval_unit)
     k = 0
     while True:
         occurrence = occurrence_date(start, cost.interval_value, cost.interval_unit, k)
-        if occurrence not in paid:
+        if occurrence not in paid and period_of(occurrence, cost.interval_unit) not in skipped:
             return occurrence
         k += 1

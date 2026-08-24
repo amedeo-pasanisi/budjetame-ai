@@ -51,6 +51,7 @@ const income: RecurringIncome = {
   next_unpaid_occurrence_date: '2030-03-01',
   backlog_count: 0,
   overdue: false,
+  next_skip_action: 'skip',
   created_at: createdAt,
 }
 

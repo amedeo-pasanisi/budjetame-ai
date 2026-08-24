@@ -35,6 +35,7 @@ vi.mock('./api', async () => {
     createRecurringCost: vi.fn(),
     updateRecurringCost: vi.fn(),
     deleteRecurringCost: vi.fn(),
+    toggleSkipRecurringCost: vi.fn(),
   }
 })
 
@@ -43,6 +44,7 @@ import {
   createRecurringCost,
   deleteRecurringCost,
   fetchRecurringCosts,
+  toggleSkipRecurringCost,
   updateRecurringCost,
 } from './api'
 
@@ -63,6 +65,7 @@ const costs: RecurringCost[] = [
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 0,
     overdue: false,
+    next_skip_action: 'skip',
     created_at: createdAt,
   },
   {
@@ -78,6 +81,7 @@ const costs: RecurringCost[] = [
     next_unpaid_occurrence_date: '2026-08-20',
     backlog_count: 3,
     overdue: true,
+    next_skip_action: 'skip',
     created_at: createdAt,
   },
   {
@@ -93,6 +97,7 @@ const costs: RecurringCost[] = [
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
     overdue: false,
+    next_skip_action: 'unskip',
     created_at: createdAt,
   },
 ]
@@ -101,6 +106,7 @@ const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const createRecurringCostMock = vi.mocked(createRecurringCost)
 const updateRecurringCostMock = vi.mocked(updateRecurringCost)
 const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
+const toggleSkipRecurringCostMock = vi.mocked(toggleSkipRecurringCost)
 
 beforeEach(() => {
   fetchRecurringCostsMock.mockResolvedValue(costs)
@@ -167,6 +173,7 @@ describe('RecurringCostsScreen create flow', () => {
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
       overdue: true,
+      next_skip_action: 'skip',
       created_at: createdAt,
     })
     render(<RecurringCostsScreen />)
@@ -297,6 +304,69 @@ describe('RecurringCostsScreen edit and delete flows', () => {
   })
 })
 
+describe('RecurringCostsScreen skip button', () => {
+  it('renders Skip or Un-skip per the API state, and keeps the card clickable', async () => {
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    // Rent and Coffee have an unskipped next occurrence: Skip. Insurance
+    // has nothing left to skip: Un-skip.
+    expect(screen.getAllByRole('button', { name: 'Skip' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Un-skip' })).toBeInTheDocument()
+    // The card itself still opens the edit modal.
+    const rows = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+    fireEvent.click(rows.find((row) => row.textContent?.includes('Rent')) as HTMLElement)
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit recurring cost' }),
+    ).toBeInTheDocument()
+  })
+
+  it('skips the next occurrence and swaps in the returned state', async () => {
+    toggleSkipRecurringCostMock.mockResolvedValue({
+      ...costs[1],
+      backlog_count: 0,
+      overdue: false,
+      next_skip_action: 'unskip',
+    })
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    const skipButtons = screen.getAllByRole('button', { name: 'Skip' })
+    fireEvent.click(skipButtons.find((button) => button.closest('li')?.textContent?.includes('Coffee')) as HTMLElement)
+
+    await waitFor(() => expect(toggleSkipRecurringCostMock).toHaveBeenCalledWith('', 2))
+    // The returned state re-renders the card: no badge, no Overdue mark,
+    // the button now reads Un-skip (Coffee joins Insurance), and the
+    // summary re-totals.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Un-skip' })).toHaveLength(2)
+    })
+    const coffee = screen
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('rounded-2xl'))
+      .find((row) => row.textContent?.includes('Coffee'))
+    expect(coffee?.textContent).not.toContain('unpaid')
+    expect(coffee?.textContent).not.toContain('Overdue')
+    expect(
+      screen.getByText('0 costs overdue · 0 unpaid occurrences'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the error message when the toggle fails', async () => {
+    toggleSkipRecurringCostMock.mockRejectedValue(new Error('down'))
+    render(<RecurringCostsScreen />)
+    await screen.findByText('Coffee')
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Skip' })[0])
+
+    expect(
+      await screen.findByText('Could not update your recurring costs.'),
+    ).toBeInTheDocument()
+  })
+})
+
 describe('RecurringCostsScreen backlog, Overdue, and the summary line', () => {
   /** The row buttons, in screen order — the badge and the Overdue mark live
    * inside them. */
@@ -392,6 +462,7 @@ describe('RecurringCostsScreen backlog, Overdue, and the summary line', () => {
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
       overdue: true,
+      next_skip_action: 'skip',
       created_at: createdAt,
     })
     render(<RecurringCostsScreen />)
