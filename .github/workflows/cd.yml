@@ -10,6 +10,10 @@ env:
   # Branch → environment: main=prod, stage=stage, dev=dev.
   # Computed from github context so job-level keys can use it too.
   ENV: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
+  # Hostname(s) Caddy serves, per environment: prod gets the apex + www
+  # (www redirects to the apex), dev/stage get their subdomain. Written into
+  # .env and used by the health check below.
+  DOMAIN: ${{ github.ref_name == 'main' && 'budjetame.it, www.budjetame.it' || format('{0}.budjetame.it', github.ref_name) }}
   # Each environment runs exactly one architecture: prod is ARM64
   # (A1.Flex), stage/dev are AMD64 (E2.1.Micro). Only that platform is
   # built — a multi-arch build would put the other half under QEMU
@@ -73,6 +77,7 @@ jobs:
         run: |
           cat > .env <<'EOF'
           ENV=${{ env.ENV }}
+          DOMAIN=${{ env.DOMAIN }}
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           BUDJETAME_JWT_SECRET=${{ secrets.BUDJETAME_JWT_SECRET }}
           BUDJETAME_SEED_ACCOUNT_EMAIL=${{ secrets.BUDJETAME_SEED_ACCOUNT_EMAIL }}
@@ -91,9 +96,10 @@ jobs:
            sudo docker compose -f compose.deploy.yaml -p budjetame-ai up -d'
       - name: Health check
         run: |
+          DOMAIN_PRIMARY="${DOMAIN%%,*}"
           for i in $(seq 1 24); do
-            if curl -fsS --max-time 10 "http://${{ secrets.VM_HOST }}/api/health" | grep -q '"ok"'; then
-              echo "healthy: ${{ env.ENV }} at http://${{ secrets.VM_HOST }}"
+            if curl -fsS --max-time 10 "https://$DOMAIN_PRIMARY/api/health" | grep -q '"ok"'; then
+              echo "healthy: ${{ env.ENV }} at https://$DOMAIN_PRIMARY"
               exit 0
             fi
             sleep 5

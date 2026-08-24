@@ -1,0 +1,38 @@
+# Budjetame — single origin in production: Caddy serves the built SPA and
+# forwards /api/* to the backend container, stripping the prefix (the same
+# contract as the Vite dev proxy). The browser never talks to the backend
+# directly, so there is no CORS.
+#
+# Caddy obtains and renews the TLS certificate itself (Let's Encrypt) and
+# redirects plain HTTP to HTTPS automatically. The site address comes from
+# the DOMAIN environment variable, set per environment in .env:
+#   prod:   "budjetame.it, www.budjetame.it"   (www redirects to the apex)
+#   dev:    "dev.budjetame.it"
+#   stage:  "stage.budjetame.it"
+# The www redirect below is a no-op on dev/stage — that hostname exists only
+# in prod's DOMAIN value and in DNS. The bare-IP URLs are retired: Caddy
+# only answers for DOMAIN, so the IPs return nothing.
+#
+# Optional: set ACME_EMAIL in the container env to receive Let's Encrypt
+# expiry notices at a real mailbox.
+
+{
+	email {$ACME_EMAIL:admin@budjetame.it}
+}
+
+{$DOMAIN} {
+	@www host www.budjetame.it
+	redir @www https://budjetame.it{uri} permanent
+
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy backend:8000
+	}
+
+	# SPA fallback: unknown paths serve index.html (client-side routing).
+	handle {
+		root * /usr/share/caddy
+		try_files {path} /index.html
+		file_server
+	}
+}

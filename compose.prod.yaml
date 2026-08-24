@@ -1,4 +1,4 @@
-# Production deployment — db + backend + nginx (see docs/deploy-oracle.md).
+# Production deployment — db + backend + Caddy (see docs/deploy-oracle.md).
 # Secrets come from .env (copy .env.example); the provisioning wizard
 # (scripts/oracle-provision.sh) fills that in for you.
 # Run: docker compose -f compose.prod.yaml up -d --build
@@ -34,7 +34,10 @@ services:
     build: ./frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "80:80"   # HTTP → HTTPS redirect + ACME challenges
+      - "443:443" # HTTPS (Caddy terminates TLS, Let's Encrypt)
+    environment:
+      DOMAIN: ${DOMAIN:?set in .env}
     depends_on:
       - backend
 

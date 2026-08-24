@@ -307,7 +307,7 @@ say "Internet gateway created."
 RT=$(run_oci $OCI_PY rt-create "$VCN" "$IGW")
 say "Route table (0.0.0.0/0 → gateway) created."
 SL=$(run_oci $OCI_PY sl-create "$VCN")
-say "Security list (SSH + HTTP ingress) created."
+say "Security list (SSH + HTTP + HTTPS ingress) created."
 SUBNET=$(run_oci $OCI_PY subnet-create "$VCN" "$RT" "$SL")
 say "Subnet created."
 
@@ -365,11 +365,13 @@ BUDJETAME_JWT_SECRET=$(_existing BUDJETAME_JWT_SECRET || true)
 [[ -n "$BUDJETAME_JWT_SECRET" ]] || BUDJETAME_JWT_SECRET=$(gen_secret)
 ask BUDJETAME_SEED_ACCOUNT_EMAIL "Seed account email (your Budjetame login):"
 ask_secret BUDJETAME_SEED_ACCOUNT_PASSWORD "Seed account password (your Budjetame login):"
+ask DOMAIN "Site hostname for this VM (e.g. dev.budjetame.it — its DNS A record must point at this VM before first boot):"
 warn "The Account is seeded ONCE, at first boot, from these values — check before deploying."
 write_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
 write_env BUDJETAME_JWT_SECRET "$BUDJETAME_JWT_SECRET"
 write_env BUDJETAME_SEED_ACCOUNT_EMAIL "$BUDJETAME_SEED_ACCOUNT_EMAIL"
 write_env BUDJETAME_SEED_ACCOUNT_PASSWORD "$BUDJETAME_SEED_ACCOUNT_PASSWORD"
+write_env DOMAIN "$DOMAIN"
 
 # ── Stage 7: deploy ──────────────────────────────────────────────────────────
 stage "Deploy" 6
@@ -384,14 +386,18 @@ say "Building images and starting the stack (2–4 min on 4 ARM cores)…"
 ssh -i "$KEY_PATH" "ubuntu@$VM_IP" "cd ~/budjetame-ai && docker compose -f compose.prod.yaml up -d --build"
 say "Waiting for the backend to come up…"
 for _ in $(seq 1 24); do
-  if ssh -i "$KEY_PATH" "ubuntu@$VM_IP" "curl -fsS http://localhost/api/health" 2>/dev/null | grep -q '"ok"'; then
+  if ssh -i "$KEY_PATH" "ubuntu@$VM_IP" "curl -fsSk --resolve '$DOMAIN:443:127.0.0.1' 'https://$DOMAIN/api/health'" 2>/dev/null | grep -q '"ok"'; then
     break
   fi
   sleep 5
   warn "backend not healthy yet…"
 done
-say "Budjetame is live at:  http://$VM_IP"
-say "Log in with your seed email + password. (Plain HTTP for now — see docs/deploy-oracle.md for TLS.)"
+if [[ -n "$DOMAIN" ]]; then
+  say "Budjetame is live at:  https://$DOMAIN"
+  say "Log in with your seed email + password. TLS is automatic (Caddy + Let's Encrypt)."
+else
+  say "Budjetame is live at:  http://$VM_IP — set DOMAIN in .env and point its DNS A record at $VM_IP to enable HTTPS."
+fi
 note "Still stuck? ssh -i $KEY_PATH ubuntu@$VM_IP 'cd budjetame-ai && docker compose -f compose.prod.yaml logs -f'"
 
 finish

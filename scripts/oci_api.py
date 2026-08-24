@@ -20,7 +20,8 @@ Usage:
     scripts/oci_api.py vcn-create                     # VCN OCID
     scripts/oci_api.py igw-create <vcn>               # internet gateway OCID
     scripts/oci_api.py rt-create <vcn> <igw>          # route table OCID (0.0.0.0/0 -> igw)
-    scripts/oci_api.py sl-create <vcn>                # security list OCID (ingress 22, 80)
+    scripts/oci_api.py sl-create <vcn>                # security list OCID (ingress 22, 80, 443)
+    scripts/oci_api.py sl-add-https <sl>              # open HTTPS ingress (443) on an existing security list
     scripts/oci_api.py subnet-create <vcn> <rt> <sl>  # subnet OCID (10.0.0.0/24)
     scripts/oci_api.py instance-launch <subnet> <ad> <image> <ssh-pubkey-file>
     scripts/oci_api.py image-list-x86                  # Ubuntu 24.04 x86_64 image OCID (E2.1.Micro)
@@ -316,6 +317,35 @@ def instance_public_ip(cfg: dict, private_key, instance: str, dry_run: bool = Fa
     sys.exit("error: instance has no public IP yet")
 
 
+def https_ingress_rule() -> dict:
+    return {"protocol": "6", "source": "0.0.0.0/0",
+            "tcpOptions": {"destinationPortRange": {"min": 443, "max": 443}}}
+
+
+def sl_add_https(cfg: dict, private_key, sl: str, dry_run: bool = False) -> None:
+    """Open HTTPS ingress (443) on an existing security list. Idempotent.
+
+    OCI's security-list update PUT replaces the whole rule set, so we GET the
+    current list and re-send it with the 443 rule appended.
+    """
+    data = call(cfg, private_key, "GET", f"/20160918/securityLists/{sl}", dry_run=dry_run)
+    rules = data.get("ingressSecurityRules", [])
+    for rule in rules:
+        tcp = rule.get("tcpOptions") or {}
+        ports = tcp.get("destinationPortRange") or {}
+        if (rule.get("protocol") == "6" and ports.get("min") == 443
+                and ports.get("max") == 443):
+            print(f"HTTPS ingress (443) already open on security list {sl[-8:]}.")
+            return
+    call(cfg, private_key, "PUT", f"/20160918/securityLists/{sl}",
+         body={"compartmentId": data["compartmentId"],
+               "displayName": data.get("displayName", "budjetame-sl"),
+               "ingressSecurityRules": rules + [https_ingress_rule()],
+               "egressSecurityRules": data.get("egressSecurityRules", [])},
+         dry_run=dry_run)
+    print(f"HTTPS ingress (443) opened on security list {sl[-8:]}.")
+
+
 def selftest() -> None:
     """RSA round-trip with a throwaway key — proves the crypto chain without a network."""
     pub, priv = rsa.newkeys(2048)
@@ -374,6 +404,7 @@ def main() -> None:
                      "tcpOptions": {"destinationPortRange": {"min": 22, "max": 22}}},
                     {"protocol": "6", "source": "0.0.0.0/0",
                      "tcpOptions": {"destinationPortRange": {"min": 80, "max": 80}}},
+                    https_ingress_rule(),
                 ],
                 "egressSecurityRules": [{"protocol": "all", "destination": "0.0.0.0/0"}]},
                args.dry_run)
@@ -386,6 +417,8 @@ def main() -> None:
     elif args.command == "instance-launch":
         instance_launch(cfg, private_key, args.args[0], args.args[1], args.args[2],
                         args.args[3], args.dry_run)
+    elif args.command == "sl-add-https":
+        sl_add_https(cfg, private_key, args.args[0], args.dry_run)
     elif args.command == "instance-wait":
         instance_wait(cfg, private_key, args.args[0], args.dry_run)
     elif args.command == "instance-public-ip":

@@ -59,6 +59,29 @@ does, for review and for when you want to do it manually.
 - Postgres is only reachable on the Docker internal network; nothing is
   published except nginx on port 80.
 
+## Domain & TLS
+
+One domain serves all three environments (ADR-0017, ADR-0018):
+
+| Environment | Hostname | DNS A record |
+|---|---|---|
+| prod | `budjetame.it` (+ `www`, redirects to the apex) | 89.168.30.119 |
+| stage | `stage.budjetame.it` | 130.110.1.224 |
+| dev | `dev.budjetame.it` | 92.4.163.113 |
+
+- The domain is registered at Aruba (~€10/yr). DNS lives in Aruba's panel.
+- Caddy in the frontend image terminates TLS with Let's Encrypt certificates
+  (obtained and renewed automatically; `DOMAIN` env var per environment, set
+  in `.env` / GitHub environment secrets) and redirects HTTP → HTTPS.
+- The prod security list was updated with
+  `scripts/oci_api.py sl-add-https <SL>` (ingress 443); the wizard's
+  `sl-create` now opens 22, 80 and 443 for new VMs.
+- The bare-IP URLs are retired: Caddy only answers for `DOMAIN`, so the IPs
+  return nothing. Old bookmarks die with them — log in once at the new
+  address (the browser's stored login does not carry across origins).
+- dev/stage have no extra gate in front of the app — the Account login is
+  the only protection there (ADR-0018).
+
 ## One-time setup (manual record)
 
 The wizard (`scripts/oracle-provision.sh`) automates all of this except the
@@ -85,7 +108,7 @@ signup and one key upload; this is the record of what it does.
    request without sending.
 3. **Network** — the wizard creates, via the REST API: VCN `10.0.0.0/16`,
    internet gateway, route table (`0.0.0.0/0` → gateway), security list
-   (ingress TCP 22 and 80, egress all), subnet `10.0.0.0/24`.
+   (ingress TCP 22, 80 and 443, egress all), subnet `10.0.0.0/24`.
 4. **Instance** — the wizard launches `VM.Standard.A1.Flex` (4 OCPU / 24 GB,
    Always Free eligible) with the newest Canonical Ubuntu 24.04 aarch64 image
    and your SSH public key, waits for RUNNING, and captures the public IP.

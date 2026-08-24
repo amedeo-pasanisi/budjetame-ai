@@ -36,7 +36,10 @@ services:
     image: ghcr.io/amedeo-pasanisi/budjetame-ai/frontend:${ENV:?set in .env}
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "80:80"   # HTTP → HTTPS redirect + ACME challenges
+      - "443:443" # HTTPS (Caddy terminates TLS, Let's Encrypt)
+    environment:
+      DOMAIN: ${DOMAIN:?set in .env}
     depends_on:
       - backend
 
