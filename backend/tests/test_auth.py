@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.db import create_db_engine
-from app.google_auth import GoogleIdentity
+from app.google_auth import GoogleIdTokenVerifier, GoogleIdentity
 from app.main import create_app
 from app.models import Account
 
@@ -318,6 +318,16 @@ async def test_auth_config_exposes_the_google_client_id(
 
     assert response.status_code == 200
     assert response.json() == {"google_client_id": "test-client-id.apps.googleusercontent.com"}
+
+
+def test_real_verifier_rejects_a_malformed_token_without_raising() -> None:
+    """The one place the real (non-fake) verifier is exercised: a malformed
+    token must resolve to None, never to an exception — a 500 on the Google
+    button (the requests.Request wiring bug, issue #81) would regress this.
+    No network: the token dies at decode, before any cert fetch."""
+    verifier = GoogleIdTokenVerifier("test-client-id.apps.googleusercontent.com")
+
+    assert verifier.verify("not-a-real-token") is None
 
 
 async def test_delete_account_removes_the_account_and_its_data(client: AsyncClient) -> None:

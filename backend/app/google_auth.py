@@ -9,7 +9,7 @@ from typing import Protocol
 
 import google.auth.exceptions
 import google.oauth2.id_token
-import requests
+from google.auth.transport import requests as google_auth_requests
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class GoogleIdTokenVerifier:
             return None
         try:
             info = google.oauth2.id_token.verify_oauth2_token(
-                id_token, requests.Request(), audience=self._client_id
+                id_token, google_auth_requests.Request(), audience=self._client_id
             )
         except (ValueError, google.auth.exceptions.GoogleAuthError):
             return None
