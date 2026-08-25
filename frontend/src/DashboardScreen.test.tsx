@@ -230,11 +230,11 @@ describe('Dashboard Budget card', () => {
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
   })
 
-  it('ignores the reference-month selector — the card is current-month-only', async () => {
+  it('ignores the pie-month selector — the card is current-month-only', async () => {
     render(<DashboardScreen />)
     await screen.findByText('€49.80')
 
-    const monthInput = document.getElementById('dashboard-month') as HTMLInputElement
+    const monthInput = document.getElementById('pie-month') as HTMLInputElement
     fireEvent.change(monthInput, { target: { value: '2020-01' } })
 
     // The card keeps its data and the endpoint is not asked again.
@@ -273,6 +273,23 @@ describe('Dashboard category pie', () => {
     expect(fetchDashboardSummaryMock).toHaveBeenCalledTimes(1)
   })
 
+  it('has its own month selector inside the card and refetches the summary for the chosen month', async () => {
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses by Category/)
+    expect(fetchDashboardSummaryMock).toHaveBeenCalledWith('', currentMonth)
+
+    const monthInput = document.getElementById('pie-month') as HTMLInputElement
+    fireEvent.change(monthInput, { target: { value: '2020-01' } })
+
+    // The summary is asked again for the new month; the pie waits for it
+    // instead of showing the old month under the new title (US27).
+    expect(fetchDashboardSummaryMock).toHaveBeenCalledWith('', '2020-01')
+    expect(await screen.findByText(/Expenses by Category/)).toBeInTheDocument()
+    // Net Worth never depends on the month — balances are current — so it
+    // keeps rendering while the pie reloads.
+    expect(screen.getByText('€1000.00')).toBeInTheDocument()
+  })
+
   it('shows the empty state per side', async () => {
     fetchDashboardSummaryMock.mockImplementation(async (_token, month) => ({
       month: month ?? '',
@@ -292,7 +309,7 @@ describe('Dashboard category pie', () => {
 })
 
 describe('Dashboard trend', () => {
-  it('fetches the expense trend and renders its bars', async () => {
+  it('fetches the expense trend and shows the tapped month\'s total', async () => {
     fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
       from_month: fromMonth,
       to_month: toMonth,
@@ -301,8 +318,12 @@ describe('Dashboard trend', () => {
     render(<DashboardScreen />)
 
     expect(await screen.findByText(/Expenses Trend ·/)).toBeInTheDocument()
-    expect(screen.getByText('€42.00')).toBeInTheDocument()
     expect(fetchTrendMock).toHaveBeenCalledWith('', 'expense', trendFromMonth, currentMonth)
+
+    // The bars carry no always-on labels (they crowded the chart): the
+    // exact amount is read by tapping the column.
+    fireEvent.click(screen.getByRole('button', { name: /€42.00/ }))
+    expect(await screen.findByText(/€42.00/)).toBeInTheDocument()
   })
 
   it('toggles to the income trend and refetches with the new kind', async () => {
@@ -318,8 +339,26 @@ describe('Dashboard trend', () => {
     fireEvent.click(within(screen.getByRole('group', { name: 'Trend side' })).getByRole('button', { name: 'Incomes' }))
 
     expect(await screen.findByText(/Incomes Trend ·/)).toBeInTheDocument()
-    expect(screen.getByText('€77.00')).toBeInTheDocument()
     expect(fetchTrendMock).toHaveBeenCalledWith('', 'income', trendFromMonth, currentMonth)
+    // The income bar's total is read on tap, like the expense side's.
+    fireEvent.click(screen.getByRole('button', { name: /€77.00/ }))
+    expect(await screen.findByText(/€77.00/)).toBeInTheDocument()
+  })
+
+  it('tapping the same column again hides the readout', async () => {
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [{ month: '2026-03', amount: '42.00' }],
+    }))
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses Trend ·/)
+
+    const bar = screen.getByRole('button', { name: /€42.00/ })
+    fireEvent.click(bar)
+    expect(await screen.findByText(/€42.00/)).toBeInTheDocument()
+    fireEvent.click(bar)
+    await waitFor(() => expect(screen.queryByText(/€42.00/)).not.toBeInTheDocument())
   })
 
   it('shows an error state on a failed trend load', async () => {

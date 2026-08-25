@@ -15,6 +15,7 @@ import {
   type Trend,
   type TrendKind,
 } from './api'
+import { useDataVersion } from './api/dataVersion'
 import { todayInRome } from './transactions'
 
 /** The Dashboard: Net Worth, the Budget card for the current month, the
@@ -23,13 +24,16 @@ import { todayInRome } from './transactions'
  * and Incomes. All numbers come from the API — the frontend only renders
  * (spec decision #14): the charts' geometry and the month labels.
  *
- * The reference-month selector drives the month-scoped cards; the Budget
- * card always shows the current month (issue #66) and the trend card has
- * its own From/To range (US27, US28). */
+ * The pie card drives the summary fetch with its own month selector (like
+ * the trend card's From/To range); the Budget card always shows the
+ * current month (issue #66) and the trend card has its own range (US27,
+ * US28). */
 export function DashboardScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const currentMonth = todayInRome().slice(0, 7)
-  const [month, setMonth] = useState(currentMonth)
+  // The category pie's reference month: the selector lives inside the pie
+  // card (US27); Net Worth never depends on it — balances are current.
+  const [pieMonth, setPieMonth] = useState(currentMonth)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [budget, setBudget] = useState<BudgetView | null>(null)
@@ -45,6 +49,9 @@ export function DashboardScreen() {
   // trend must never be titled with the toggle's current side.
   const [trend, setTrend] = useState<{ kind: TrendKind; data: Trend } | null>(null)
   const [trendError, setTrendError] = useState<string | null>(null)
+  // The cache clock (ADR-0022): a write anywhere re-runs every fetch effect
+  // in the background, so a tab switched back to is never stale.
+  const dataVersion = useDataVersion()
 
   // Keep the trend range valid: picking From after To (or To before From)
   // swaps the two instead of letting a reversed range 422 the request — the
@@ -69,9 +76,10 @@ export function DashboardScreen() {
   useEffect(() => {
     let cancelled = false
     // A refetch that fails must not leave a stale error on screen: clear it
-    // before every load (a month change retries the summary).
+    // before every load (a pie-month change or a write elsewhere retries
+    // the summary).
     setLoadError(null)
-    fetchDashboardSummary(token, month)
+    fetchDashboardSummary(token, pieMonth)
       .then((data) => {
         if (!cancelled) setSummary(data)
       })
@@ -81,15 +89,16 @@ export function DashboardScreen() {
     return () => {
       cancelled = true
     }
-  }, [token, month])
+  }, [token, pieMonth, dataVersion])
 
   useEffect(() => {
     let cancelled = false
     // The Budget card always shows the current month (issue #66): unlike
     // the summary, the endpoint takes no month parameter and the card
-    // ignores the reference-month selector — so this effect depends on the
-    // token only, and a month change never refetches it. A failed load
-    // must never look like an empty Budget, so the error is its own state.
+    // ignores the pie card's month selector — so this effect depends on the
+    // token and the cache clock only, and a month change never refetches it.
+    // A failed load must never look like an empty Budget, so the error is
+    // its own state.
     setBudgetError(null)
     fetchBudget(token)
       .then((data) => {
@@ -165,21 +174,11 @@ export function DashboardScreen() {
 
       <BudgetCard budget={budget} error={budgetError} hasDefinitions={hasDefinitions} />
 
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-slate-700">Reference month</span>
-        <input
-          id="dashboard-month"
-          type="month"
-          value={month}
-          onChange={(event) => setMonth(event.target.value)}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
-        />
-      </div>
-
-      {/* While the new month's summary is in flight, the loaded data is still
-       * the previous month's — never title it with the new month (US27). */}
-      {summary.month === month ? (
-        <PieCard summary={summary} month={month} />
+      {/* While the new pie month's summary is in flight, the loaded data is
+       * still the previous month's — never title the pie with the new month
+       * (US27). Net Worth above never waits on it: balances are current. */}
+      {summary.month === pieMonth ? (
+        <PieCard summary={summary} month={pieMonth} onMonthChange={setPieMonth} />
       ) : (
         <p className="mt-4 text-sm text-slate-500">Loading…</p>
       )}
@@ -203,7 +202,7 @@ export function DashboardScreen() {
  * month — the big number, the "X per day · Y this month" explanation line,
  * and a small "you're X € over" note when the bucket is negative (the big
  * number then shows 0: future accruals repay the debt). It ignores the
- * reference-month selector and is hidden entirely when the account has no
+ * pie card's month selector and is hidden entirely when the account has no
  * Recurring definitions at all — a "0,00 € per day" card would be noise.
  * Everything is rendered from GET /dashboard/budget, no computation on the
  * client; loading and error states match the other Dashboard cards, and a
@@ -250,7 +249,15 @@ function BudgetCard({
   )
 }
 
-function PieCard({ summary, month }: { summary: DashboardSummary; month: string }) {
+function PieCard({
+  summary,
+  month,
+  onMonthChange,
+}: {
+  summary: DashboardSummary
+  month: string
+  onMonthChange: (month: string) => void
+}) {
   const [kind, setKind] = useState<TrendKind>('expense')
   const slices = kind === 'expense' ? summary.expenses_by_category : summary.incomes_by_category
   const total = slices.reduce(
@@ -266,6 +273,21 @@ function PieCard({ summary, month }: { summary: DashboardSummary; month: string 
           {monthLabel(month)} · {kind === 'expense' ? 'Expenses' : 'Incomes'} by Category
         </p>
         <KindToggle kind={kind} onKindChange={setKind} label="Pie side" />
+      </div>
+
+      {/* The card's own month selector, like the trend card's From/To range
+       * (US27): changing it refetches the summary for that month. */}
+      <div className="mt-3">
+        <label htmlFor="pie-month" className="block text-sm font-medium text-slate-700">
+          Month
+        </label>
+        <input
+          id="pie-month"
+          type="month"
+          value={month}
+          onChange={(event) => onMonthChange(event.target.value)}
+          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+        />
       </div>
 
       {slices.length === 0 ? (
@@ -503,11 +525,17 @@ function TrendCard({
   )
 }
 
-/** A dependency-free SVG bar chart: one bar per month, scaled to the tallest,
- * with the amount above each bar and a Y-axis (gridlines + € labels) so the
- * euro magnitude is readable at a glance (T12 AC: X months, Y totals).
- * Wide ranges scroll horizontally so every month stays readable. */
+/** A dependency-free SVG bar chart: one bar per month, scaled to the
+ * tallest, with a Y-axis (gridlines + € labels) so the euro magnitude is
+ * readable at a glance (T12 AC: X months, Y totals). Wide ranges scroll
+ * horizontally so every month stays readable.
+ *
+ * The bars carry no labels: an always-on amount above every column was
+ * wider than its column on a phone, so neighbouring labels collided. The
+ * exact amount is read on demand — tap (or keyboard-activate) a column and
+ * the readout above the chart shows the month and its total. */
 function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }) {
+  const [selected, setSelected] = useState<number | null>(null)
   const values = months.map((bucket) => Number.parseFloat(bucket.amount))
   const max = Math.max(...values, 1)
   const barWidth = 22
@@ -519,75 +547,100 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
   const plotHeight = height - topPad - labelHeight
   const plotWidth = months.length * (barWidth + gap)
   const gridlines = [0, 0.25, 0.5, 0.75, 1]
+  const selectedBucket = selected !== null ? months[selected] : null
 
   return (
-    <svg
-      viewBox={`0 0 ${leftPad + gap + plotWidth} ${height}`}
-      style={{ minWidth: `${leftPad + months.length * 40}px` }}
-      className="block"
-      role="img"
-      aria-label={`Monthly ${kind === 'expense' ? 'expenses' : 'incomes'} trend`}
-    >
-      {gridlines.map((frac) => {
-        const y = topPad + plotHeight * (1 - frac)
-        return (
-          <g key={frac}>
-            <line
-              x1={leftPad}
-              x2={leftPad + plotWidth}
-              y1={y}
-              y2={y}
-              className="stroke-slate-200"
-              strokeDasharray="3 3"
-            />
-            <text
-              x={leftPad - 4}
-              y={y + 3}
-              textAnchor="end"
-              className="fill-slate-400 text-[8px]"
-            >
-              {frac === 0 ? '0' : `€${Math.round(max * frac)}`}
-            </text>
-          </g>
-        )
-      })}
-      {months.map((bucket, index) => {
-        const value = Number.parseFloat(bucket.amount)
-        const barHeight = (value / max) * plotHeight
-        const x = leftPad + gap + index * (barWidth + gap)
-        const y = topPad + plotHeight - barHeight
-        return (
-          <g key={bucket.month}>
-            {value > 0 && (
+    <>
+      {selectedBucket !== null && (
+        <p className="mb-2 text-sm font-medium text-slate-900" aria-live="polite">
+          {monthLabel(selectedBucket.month)} · {formatEuros(selectedBucket.amount)}
+        </p>
+      )}
+      <svg
+        viewBox={`0 0 ${leftPad + gap + plotWidth} ${height}`}
+        style={{ minWidth: `${leftPad + months.length * 40}px` }}
+        className="block"
+        role="img"
+        aria-label={`Monthly ${kind === 'expense' ? 'expenses' : 'incomes'} trend`}
+      >
+        {gridlines.map((frac) => {
+          const y = topPad + plotHeight * (1 - frac)
+          return (
+            <g key={frac}>
+              <line
+                x1={leftPad}
+                x2={leftPad + plotWidth}
+                y1={y}
+                y2={y}
+                className="stroke-slate-200"
+                strokeDasharray="3 3"
+              />
+              <text
+                x={leftPad - 4}
+                y={y + 3}
+                textAnchor="end"
+                className="fill-slate-400 text-[8px]"
+              >
+                {frac === 0 ? '0' : `€${Math.round(max * frac)}`}
+              </text>
+            </g>
+          )
+        })}
+        {months.map((bucket, index) => {
+          const value = Number.parseFloat(bucket.amount)
+          const barHeight = (value / max) * plotHeight
+          const x = leftPad + gap + index * (barWidth + gap)
+          const y = topPad + plotHeight - barHeight
+          return (
+            <g key={bucket.month}>
+              {/* The tap target is the whole column — the bar itself is only
+               * 22px wide — and it doubles as the keyboard access. */}
+              <rect
+                x={x}
+                y={topPad}
+                width={barWidth + gap}
+                height={plotHeight}
+                fill="transparent"
+                role="button"
+                tabIndex={0}
+                aria-label={`${monthLabel(bucket.month)}: ${formatEuros(bucket.amount)}`}
+                aria-pressed={selected === index}
+                className="cursor-pointer"
+                onClick={() => setSelected(selected === index ? null : index)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelected(selected === index ? null : index)
+                  }
+                }}
+              />
+              <rect
+                x={x}
+                y={y}
+                width={barWidth}
+                height={Math.max(barHeight, value > 0 ? 2 : 0)}
+                rx={3}
+                className={
+                  selected === index
+                    ? 'fill-indigo-700'
+                    : value > 0
+                      ? 'fill-indigo-600'
+                      : 'fill-slate-200'
+                }
+              />
               <text
                 x={x + barWidth / 2}
-                y={y - 5}
+                y={height - 5}
                 textAnchor="middle"
-                className="fill-slate-600 text-[9px]"
+                className="fill-slate-500 text-[9px]"
               >
-                {formatEuros(bucket.amount)}
+                {shortMonthLabel(bucket.month)}
               </text>
-            )}
-            <rect
-              x={x}
-              y={y}
-              width={barWidth}
-              height={Math.max(barHeight, value > 0 ? 2 : 0)}
-              rx={3}
-              className={value > 0 ? 'fill-indigo-600' : 'fill-slate-200'}
-            />
-            <text
-              x={x + barWidth / 2}
-              y={height - 5}
-              textAnchor="middle"
-              className="fill-slate-500 text-[9px]"
-            >
-              {shortMonthLabel(bucket.month)}
-            </text>
-          </g>
-        )
-      })}
-    </svg>
+            </g>
+          )
+        })}
+      </svg>
+    </>
   )
 }
 

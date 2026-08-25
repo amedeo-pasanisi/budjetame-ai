@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { TOKEN_KEY, fetchCategories, type Category, type CategoryType } from './api'
+import { useDataVersion } from './api/dataVersion'
 import { CategoryModal } from './CategoryModal'
 
 const TYPE_LABELS: Record<CategoryType, string> = {
@@ -30,6 +31,9 @@ export function CategoriesScreen() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [modal, setModal] = useState<ModalDraft | null>(null)
+  // The cache clock (ADR-0022): a write anywhere re-fetches this list in
+  // the background, so the tab is never stale when switched back to.
+  const dataVersion = useDataVersion()
 
   useEffect(() => {
     let cancelled = false
@@ -43,7 +47,7 @@ export function CategoriesScreen() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, dataVersion])
 
   // Create and edit share one save path: upsert the saved Category and close
   // the modal.

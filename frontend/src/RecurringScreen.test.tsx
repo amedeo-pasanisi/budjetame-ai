@@ -1,8 +1,8 @@
 /** Recurring screen toggle (issue #60): the Recurring tab offers Costs |
  * Incomes — default Costs — and the last side is remembered for the app
- * session, surviving the screen unmounting on a tab switch (reset on app
- * load). The Costs side renders exactly as before; the Incomes side mirrors
- * it. The API client is mocked; both sides' loads are stubbed. */
+ * session, surviving tab switches (reset on app load). The Costs side
+ * renders exactly as before; the Incomes side mirrors it. The API client is
+ * mocked; both sides' loads are stubbed. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 

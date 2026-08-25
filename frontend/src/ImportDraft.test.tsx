@@ -7,9 +7,10 @@
  * The shell is rendered and driven like a user would (click tabs, pick a
  * file, read, toggle rows, confirm); the API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { AppShell } from './App'
+import { bumpDataVersion } from './api/dataVersion'
 import type { ImportPreview, Transaction, Wallet } from './api'
 
 vi.mock('./api', () => ({
@@ -441,10 +442,13 @@ const draftRows = [
 ]
 
 describe('on-resume re-check (issue #76)', () => {
-  /** Lands on the preview, leaves the import tab, and returns to it. */
+  /** Lands on the preview, leaves the import tab, and returns to it — with
+   * a write in the other tab in between: keep-alive tabs never remount, so
+   * the re-check fires on the write clock instead (ADR-0022). */
   async function resume(view: ReturnType<typeof renderShell>) {
     await openPreview(view)
     fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    act(() => bumpDataVersion())
     fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
   }
 
@@ -526,6 +530,7 @@ describe('on-resume re-check (issue #76)', () => {
     // hand-verified row keeps its status and selection, as do the file's own
     // ready and duplicate rows.
     fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    act(() => bumpDataVersion())
     fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
 
     expect(await screen.findByRole('button', { name: 'Import 3 rows' })).toBeInTheDocument()
@@ -605,6 +610,7 @@ describe('on-resume re-check (issue #76)', () => {
     await screen.findByRole('button', { name: 'Import 1 row' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    act(() => bumpDataVersion())
     fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
 
     // Only the sendable problem row traveled — as a target, and in a rows
@@ -676,6 +682,7 @@ describe('on-resume re-check (issue #76)', () => {
     await screen.findByText("Unknown wallet 'Unknown'")
 
     fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    act(() => bumpDataVersion())
     fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
 
     // The batch carried the edited values, and the flip judged them.

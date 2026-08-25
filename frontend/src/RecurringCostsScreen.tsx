@@ -7,6 +7,7 @@ import {
   toggleSkipRecurringCost,
   type RecurringCost,
 } from './api'
+import { useDataVersion } from './api/dataVersion'
 import { RecurringCostModal } from './RecurringCostModal'
 import { intervalText, sortByNextDue } from './recurringCosts'
 
@@ -32,6 +33,9 @@ export function RecurringCostsScreen() {
   // The cost whose Skip/Un-skip button is in flight — the button disables
   // itself so a double tap cannot flip the state twice (skip then un-skip).
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  // The cache clock (ADR-0022): a write anywhere re-fetches this list in
+  // the background, so the tab is never stale when switched back to.
+  const dataVersion = useDataVersion()
 
   useEffect(() => {
     let cancelled = false
@@ -46,7 +50,7 @@ export function RecurringCostsScreen() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, dataVersion])
 
   const closeModal = () => {
     setModal(null)

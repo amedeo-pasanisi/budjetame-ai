@@ -7,6 +7,7 @@ import {
   toggleSkipRecurringIncome,
   type RecurringIncome,
 } from './api'
+import { useDataVersion } from './api/dataVersion'
 import { RecurringIncomeModal } from './RecurringIncomeModal'
 import { intervalText, sortByNextDue } from './recurringIncomes'
 
@@ -34,6 +35,9 @@ export function RecurringIncomesScreen() {
   // The income whose Skip/Un-skip button is in flight — the button disables
   // itself so a double tap cannot flip the state twice (skip then un-skip).
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  // The cache clock (ADR-0022): a write anywhere re-fetches this list in
+  // the background, so the tab is never stale when switched back to.
+  const dataVersion = useDataVersion()
 
   useEffect(() => {
     let cancelled = false
@@ -48,7 +52,7 @@ export function RecurringIncomesScreen() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, dataVersion])
 
   const closeModal = () => {
     setModal(null)

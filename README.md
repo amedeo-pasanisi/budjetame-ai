@@ -95,4 +95,8 @@ manual record.
 - All data is scoped to the single Account; foreign data gets a 403.
 - Balances are derived from Transaction history, never stored.
 - Deleted Wallets are frozen (read-only archives), never hard-deleted.
+- Tabs keep-alive once visited and revalidate in the background: any
+  successful write bumps a client-side cache clock that every mounted tab
+  watches, so switching tabs never waits on a fetch and never shows stale
+  data (ADR-0022).
 - See `CONTEXT.md` for the domain glossary and `docs/adr/` for decisions.

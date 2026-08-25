@@ -7,6 +7,7 @@ import {
   type ImportRow,
   type Wallet,
 } from './api'
+import { useDataVersion } from './api/dataVersion'
 import type { ImportDraftController } from './importDraft'
 import { ImportRowModal } from './ImportRowModal'
 import { CategoryModal } from './CategoryModal'
@@ -75,20 +76,29 @@ export function ImportScreen({
     prefillName: string
   } | null>(null)
   const [categoryToSelect, setCategoryToSelect] = useState<string | null>(null)
+  // The cache clock (ADR-0022): its bumps drive the re-check below.
+  const dataVersion = useDataVersion()
   const draft = controller.draft
-  // The on-resume re-check (issue #76): a tab switch unmounts this screen,
-  // so a fresh mount with a live Preview re-validates every problem row
-  // against the Account's current Wallets and Categories — entities created
-  // elsewhere while the draft was open flip the rows that waited on them.
-  // A mount without a Preview (a fresh pick, or the done phase) re-checks
-  // nothing.
+  // The on-resume re-check (issue #76): with keep-alive tabs (ADR-0022)
+  // this screen never remounts on a tab switch, so the trigger is a write
+  // anywhere — the dataVersion bump — instead of a fresh mount. While a
+  // live Preview is open, every bump re-validates every problem row
+  // against the Account's current Wallets and Categories: entities created
+  // in another tab flip the rows that waited on them. The import's own
+  // computation endpoints (preview, row validation, batch re-validation)
+  // never bump, so editing rows does not re-trigger it; inline Wallet/
+  // Category creation re-validates twice (the explicit revalidateMatching
+  // below plus this), harmlessly — both batch calls converge on the same
+  // verdicts. A mount without a Preview (a fresh pick, or the done phase)
+  // re-checks nothing.
   useEffect(() => {
     if (draft?.phase === 'preview') {
       void controller.recheckProblems()
     }
-    // Mount-only: the resume, not every render.
+    // The write clock only: the draft itself is read here, and a draft
+    // change must not re-run the re-check (edits re-validate their own row).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [dataVersion])
   if (draft === null) return null
   const { phase, file, preview, selected, error, busy, imported, createdWithWarning, pickCount } =
     draft

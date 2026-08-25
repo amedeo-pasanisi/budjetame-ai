@@ -8,6 +8,7 @@ import {
   type Wallet,
   type WalletType,
 } from './api'
+import { useDataVersion } from './api/dataVersion'
 import { WalletModal } from './WalletModal'
 
 const TYPE_LABELS: Record<WalletType, string> = {
@@ -48,6 +49,9 @@ export function WalletsScreen() {
   const [modal, setModal] = useState<ModalDraft | null>(null)
   const [frozenExpanded, setFrozenExpanded] = useState(false)
   const [unfreezeError, setUnfreezeError] = useState<string | null>(null)
+  // The cache clock (ADR-0022): a write anywhere re-fetches this list in
+  // the background, so the tab is never stale when switched back to.
+  const dataVersion = useDataVersion()
 
   useEffect(() => {
     let cancelled = false
@@ -62,7 +66,7 @@ export function WalletsScreen() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, dataVersion])
 
   // Create and edit share one save path: upsert the saved Wallet and close
   // the modal.

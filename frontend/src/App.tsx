@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
-import { useImportDraft } from './importDraft'
+import { useImportDraft, type ImportDraftController } from './importDraft'
 import { LoginForm } from './LoginForm'
 import { RecurringScreen } from './RecurringScreen'
 import { ResetPassword } from './ResetPassword'
@@ -147,22 +147,41 @@ export function AppShell({
   onDeleteAccount: () => Promise<void>
 }) {
   const [tab, setTab] = useState<Tab>('dashboard')
+  // Tab keep-alive (ADR-0022): a tab mounts on its first visit and stays
+  // mounted afterwards, hidden with the `hidden` attribute — switching back
+  // renders instantly from the data already loaded. Writes anywhere bump
+  // the data version (transport.ts), so every mounted tab re-fetches in the
+  // background; nothing is stale when the user returns.
+  const [visited, setVisited] = useState<Partial<Record<Tab, boolean>>>({
+    dashboard: true,
+  })
+
+  /** Switch tabs, lazily mounting the target and hiding the previous ones. */
+  const activate = (tab: Tab) => {
+    // A hidden panel keeps its DOM — focus included: blur the active element
+    // so the focus ring and the soft keyboard don't linger on the tab that
+    // was left behind.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    setTab(tab)
+    setVisited((current) => (current[tab] ? current : { ...current, [tab]: true }))
+  }
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   // The Import Draft lives here, not in the Transactions screen, so it
-  // survives the screen unmounting on a tab switch (issue #43).
+  // survives tab switches (issue #43) — under keep-alive the screen never
+  // unmounts, and the shell-owned draft is what it was from the start.
   const importState = useImportDraft()
 
   // Swipe between tabs (issue #51): one step per gesture, clamped at the
   // ends. The gesture evaluator only ever asks for a direction, never a
   // target tab, so tab state stays a plain value in the shell.
   const handleTabSwipe = (direction: 1 | -1) => {
-    setTab((current) => {
-      const next = TAB_ORDER.indexOf(current) + direction
-      if (next < 0 || next >= TAB_ORDER.length) {
-        return current
-      }
-      return TAB_ORDER[next]
-    })
+    const next = TAB_ORDER.indexOf(tab) + direction
+    if (next >= 0 && next < TAB_ORDER.length) {
+      activate(TAB_ORDER[next])
+    }
   }
   const swipeHandlers = useTabSwipe(handleTabSwipe)
 
@@ -202,33 +221,33 @@ export function AppShell({
       )}
 
       <main className="mx-auto mt-6 max-w-sm" {...swipeHandlers}>
-        {tab === 'dashboard' && <DashboardScreen />}
-        {tab === 'wallets' && <WalletsScreen />}
-        {tab === 'transactions' && <TransactionsScreen importState={importState} />}
-        {tab === 'categories' && <CategoriesScreen />}
-        {tab === 'recurring' && <RecurringScreen />}
+        {TAB_ORDER.filter((candidate) => visited[candidate]).map((candidate) => (
+          <div key={candidate} data-tab={candidate} hidden={candidate !== tab}>
+            {tabContent(candidate, importState)}
+          </div>
+        ))}
       </main>
 
       {/* Five tabs (issue #56 added Recurring): one bottom row on a phone,
        * full-width, five equal columns. */}
       <nav className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white">
         <div className="mx-auto grid max-w-sm grid-cols-5 gap-0.5 px-2 py-1.5">
-          <TabButton active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
+          <TabButton active={tab === 'dashboard'} onClick={() => activate('dashboard')}>
             Dashboard
           </TabButton>
-          <TabButton active={tab === 'wallets'} onClick={() => setTab('wallets')}>
+          <TabButton active={tab === 'wallets'} onClick={() => activate('wallets')}>
             Wallets
           </TabButton>
           <TabButton
             active={tab === 'transactions'}
-            onClick={() => setTab('transactions')}
+            onClick={() => activate('transactions')}
           >
             Transactions
           </TabButton>
-          <TabButton active={tab === 'categories'} onClick={() => setTab('categories')}>
+          <TabButton active={tab === 'categories'} onClick={() => activate('categories')}>
             Categories
           </TabButton>
-          <TabButton active={tab === 'recurring'} onClick={() => setTab('recurring')}>
+          <TabButton active={tab === 'recurring'} onClick={() => activate('recurring')}>
             Recurring
           </TabButton>
         </div>
@@ -257,6 +276,24 @@ function TabButton({
       {children}
     </button>
   )
+}
+
+/** The screen each tab renders, inside its keep-alive panel (ADR-0022): the
+ * panel mounts the screen on the tab's first visit and hides it — `hidden`
+ * attribute, not unmount — while another tab is active. */
+function tabContent(tab: Tab, importState: ImportDraftController): ReactNode {
+  switch (tab) {
+    case 'dashboard':
+      return <DashboardScreen />
+    case 'wallets':
+      return <WalletsScreen />
+    case 'transactions':
+      return <TransactionsScreen importState={importState} />
+    case 'categories':
+      return <CategoriesScreen />
+    case 'recurring':
+      return <RecurringScreen />
+  }
 }
 
 export default App

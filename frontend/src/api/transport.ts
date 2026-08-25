@@ -5,7 +5,19 @@
  * wire format.
  */
 
+import { bumpDataVersion } from './dataVersion'
+
 const API_BASE = '/api'
+
+/** Read-only endpoints that still speak POST — the import pipeline's
+ * computations (ADR-0022): they write nothing, so they must not bump the
+ * cache clock. Every other successful non-GET changes the Account's data
+ * and does bump. */
+const READ_ONLY_POSTS = new Set([
+  '/import/preview',
+  '/import/validate-row',
+  '/import/revalidate-rows',
+])
 
 export const TOKEN_KEY = 'budjetame.token'
 
@@ -75,8 +87,9 @@ export async function request(path: string, options: RequestOptions): Promise<Re
   const headers: Record<string, string> = {}
   if (options.token !== undefined) headers.Authorization = `Bearer ${options.token}`
   if (options.json !== undefined) headers['Content-Type'] = 'application/json'
+  const method = options.method ?? 'GET'
   const response = await fetch(`${API_BASE}${path}`, {
-    method: options.method ?? 'GET',
+    method,
     headers,
     body: options.json !== undefined ? JSON.stringify(options.json) : options.formData,
   })
@@ -88,6 +101,12 @@ export async function request(path: string, options: RequestOptions): Promise<Re
       response.status,
       detail,
     )
+  }
+  // A successful write changed the Account's data: bump the cache clock so
+  // every mounted tab re-fetches in the background (ADR-0022). Reads and
+  // the import pipeline's computation endpoints never bump.
+  if (method !== 'GET' && !READ_ONLY_POSTS.has(path)) {
+    bumpDataVersion()
   }
   return response
 }

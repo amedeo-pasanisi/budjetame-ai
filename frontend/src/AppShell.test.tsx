@@ -5,9 +5,10 @@
  * and desktop mouse behavior are unchanged. The API client is mocked;
  * gestures are fired as real touch events, never via internal state. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { AppShell } from './App'
+import { bumpDataVersion } from './api/dataVersion'
 
 vi.mock('./api', async () => {
   // The real display helpers stay live (formatting is part of the screens'
@@ -104,6 +105,15 @@ const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
+/** The keep-alive panel wrapping the tab that contains `text` (ADR-0022):
+ * a visited tab's panel stays mounted and is hidden with the `hidden`
+ * attribute while another tab is active. */
+function panelOf(text: string): HTMLElement {
+  const panel = screen.getByText(text).closest('[data-tab]')
+  expect(panel).not.toBeNull()
+  return panel as HTMLElement
+}
+
 /** The one piece of each screen that identifies the active tab. */
 async function expectTab(tab: Tab) {
   if (tab === 'dashboard') await screen.findByText('Net Worth')
@@ -184,7 +194,11 @@ describe('AppShell swipe navigation', () => {
     await expectTab('categories')
     swipe(main, { x: 400, y: 200 }, { x: 280, y: 205 })
     await expectTab('recurring')
-    expect(screen.queryByText('Net Worth')).not.toBeInTheDocument()
+    // The Dashboard panel stays mounted (tab keep-alive, ADR-0022) —
+    // hidden, not unmounted.
+    expect(screen.getByText('Net Worth')).toBeInTheDocument()
+    expect(panelOf('Net Worth')).toHaveAttribute('hidden')
+    expect(panelOf('New recurring cost')).not.toHaveAttribute('hidden')
   })
 
   it('a left-to-right swipe opens the previous tab', async () => {
@@ -208,7 +222,7 @@ describe('AppShell swipe navigation', () => {
     await expectTab('recurring')
     swipe(screen.getByRole('main'), { x: 400, y: 200 }, { x: 280, y: 205 })
     expect(screen.getByRole('button', { name: 'New recurring cost' })).toBeInTheDocument()
-    expect(screen.queryByText('Net Worth')).not.toBeInTheDocument()
+    expect(panelOf('Net Worth')).toHaveAttribute('hidden')
   })
 
   it('a mostly-vertical gesture never changes the tab', async () => {
@@ -334,5 +348,45 @@ describe('AppShell settings (issue #84)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument()
+  })
+})
+
+describe('AppShell tab keep-alive (ADR-0022)', () => {
+  it('keeps a visited tab mounted and does not refetch on a revisit', async () => {
+    await renderShell()
+    // Lazy mount: a tab is not mounted until its first visit.
+    expect(screen.queryByRole('button', { name: 'New wallet' })).not.toBeInTheDocument()
+    expect(fetchWalletsMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    expect(fetchWalletsMock).toHaveBeenCalledTimes(1)
+    expect(panelOf('New wallet')).not.toHaveAttribute('hidden')
+    expect(panelOf('Net Worth')).toHaveAttribute('hidden')
+
+    // Away and back: the panel is still mounted, no new fetch — the tab
+    // switch renders instantly from the loaded data.
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    await expectTab('dashboard')
+    expect(panelOf('New wallet')).toHaveAttribute('hidden')
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    expect(fetchWalletsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches a mounted tab in the background when a write bumps the data version', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    const callsBefore = fetchWalletsMock.mock.calls.length
+
+    // A write elsewhere — the transport bumps the cache clock on every
+    // successful write (ADR-0022) — refetches the mounted Wallets tab in
+    // the background, hidden or not.
+    act(() => bumpDataVersion())
+
+    await waitFor(() =>
+      expect(fetchWalletsMock.mock.calls.length).toBe(callsBefore + 1),
+    )
   })
 })

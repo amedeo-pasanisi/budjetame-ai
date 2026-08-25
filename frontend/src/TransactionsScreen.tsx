@@ -18,6 +18,7 @@ import {
   type TransactionFilters,
   type Wallet,
 } from './api'
+import { useDataVersion, getDataVersion } from './api/dataVersion'
 import { CategoryModal } from './CategoryModal'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
@@ -36,10 +37,10 @@ type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
 
 /** The merged ledger (issue #33): the History tab's filters live in a
  * collapsible bar (closed by default) over the paged all-transactions list.
- * Any filter change refetches the first page with it applied; the bar and
- * its values reset when the screen unmounts (tab switch). The Import Draft
- * (issue #43) is NOT screen state: it arrives from the app shell, so it
- * survives this screen unmounting on a tab switch. */
+ * Any filter change refetches the first page with it applied; the bar, its
+ * values, and the search persist across tab switches (the tab keeps-alive,
+ * ADR-0022). The Import Draft (issue #43) is NOT screen state: it arrives
+ * from the app shell, so it survives even a real unmount. */
 export function TransactionsScreen({
   importState,
 }: {
@@ -124,7 +125,8 @@ export function TransactionsScreen({
 
   // Search (issue #54, ADR-0009): the input updates instantly; the request
   // needle is trimmed and debounced ~300ms, then refetches the first page
-  // like any filter. It lives in the screen, so leaving the tab resets it.
+  // like any filter. It lives in the screen, so it survives tab switches
+  // (keep-alive, ADR-0022) and resets only on app load.
   const [search, setSearch] = useState('')
   const [searchNeedle, setSearchNeedle] = useState('')
 
@@ -159,11 +161,23 @@ export function TransactionsScreen({
   // that happens must not append its pre-reset rows.
   const generation = useRef(0)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
+  // The cache clock (ADR-0022) and the version the last write's explicit
+  // reload() covered: the effect below skips a reload when this screen's
+  // own write already reloaded explicitly (save/delete/import-done), so
+  // one write never fetches the ledger twice. Filter and search changes
+  // always reload — the version did not change then.
+  const dataVersion = useDataVersion()
+  const lastWriteReloadVersion = useRef(-1)
+  // The version the effect last saw, so a bump is told apart from a filter
+  // change (which re-runs the effect through `reload`'s identity).
+  const lastSeenVersion = useRef(-1)
 
   const reload = useCallback(() => {
+    // The bump is synchronous inside the awaited write, so this records the
+    // fresh version — the effect then knows this write is already covered.
+    lastWriteReloadVersion.current = getDataVersion()
     generation.current += 1
     setLoadError(null)
-    setSavedWarning(null)
     const active = requestFilters()
     // Frozen Wallets are included (issue #33): the Wallet filter lists them
     // and their rows stay viewable but read-only.
@@ -197,8 +211,18 @@ export function TransactionsScreen({
       .catch(() => {})
   }, [token, requestFilters])
 
-  // Any filter change refetches with it applied and resets to the first page.
-  useEffect(reload, [reload])
+  // Any filter change — or a write anywhere (dataVersion bump, ADR-0022) —
+  // refetches with it applied and resets to the first page. A bump that
+  // this screen's own explicit reload() already covered is skipped.
+  useEffect(() => {
+    if (dataVersion !== lastSeenVersion.current) {
+      lastSeenVersion.current = dataVersion
+      if (lastWriteReloadVersion.current === dataVersion) {
+        return
+      }
+    }
+    reload()
+  }, [reload, dataVersion])
 
   const loadMore = () => {
     if (nextCursor === null || loadingMore) {
@@ -359,20 +383,17 @@ export function TransactionsScreen({
 
   const handleSaved = (transaction: Transaction) => {
     closeForm()
+    // The dataVersion effect also reloads after this render (ADR-0022); the
+    // banner must survive that background reload, so reload never clears it
+    // — each write sets or clears it itself ("last write wins").
     reload()
-    // Set after reload(): reload clears the banner, and the last write in the
-    // batch wins — so the warning renders above the reloaded list.
-    if (transaction.warning) {
-      setSavedWarning('Saved — this made a Cash wallet negative.')
-    }
+    setSavedWarning(transaction.warning ? 'Saved — this made a Cash wallet negative.' : null)
   }
 
   const handleDeleted = (warning: boolean) => {
     closeForm()
     reload()
-    if (warning) {
-      setSavedWarning('Deleted — this made a Cash wallet negative.')
-    }
+    setSavedWarning(warning ? 'Deleted — this made a Cash wallet negative.' : null)
   }
 
   // Export (US 7.3): the ledger exactly as the filters show it — every
