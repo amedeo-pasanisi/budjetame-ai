@@ -61,7 +61,7 @@ does, for review and for when you want to do it manually.
 
 ## Domain & TLS
 
-One domain serves all three environments (ADR-0017, ADR-0018):
+One domain serves all three environments (ADR-0018, ADR-0019):
 
 | Environment | Hostname | DNS A record |
 |---|---|---|
@@ -80,7 +80,7 @@ One domain serves all three environments (ADR-0017, ADR-0018):
   return nothing. Old bookmarks die with them — log in once at the new
   address (the browser's stored login does not carry across origins).
 - dev/stage have no extra gate in front of the app — the Account login is
-  the only protection there (ADR-0018).
+  the only protection there (ADR-0019).
 
 ## One-time setup (manual record)
 
