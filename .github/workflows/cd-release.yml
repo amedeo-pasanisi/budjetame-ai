@@ -1,30 +1,39 @@
-name: CD (dev)
+name: CD (release → stage)
+
+# A v* tag is a release candidate. Cutting one builds the exact artifact
+# prod will run — same version tag, both platforms — and deploys it to
+# stage. Deploying to prod is a separate, human-triggered workflow
+# (cd-prod.yml), so stage is the hard gate: prod never sees an artifact
+# stage hasn't run.
+#
+# If stage fails, fix on main and force-move the tag to the fixed commit
+# (git tag -f vX.Y.Z <sha> && git push --force origin vX.Y.Z) — nothing has
+# reached prod yet, so re-tagging is safe.
 
 on:
   push:
-    branches: [dev]
+    tags: ['v*']
 
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/amedeo-pasanisi/budjetame-ai
-  # dev is an iteration environment: a floating image tag, rebuilt on every
-  # push. Releases (stage/prod) instead build version-tagged images — see
-  # cd-release.yml and cd-prod.yml.
-  ENV: dev
-  # Hostname Caddy serves, written into .env and used by the health check.
-  DOMAIN: dev.budjetame.de
-  # dev runs on the free AMD64 E2.1.Micro — only that platform is built
-  # (a multi-arch build would put the other half under QEMU emulation,
-  # where the frontend's npm/tsc/vite toolchain grinds for hours).
-  PLATFORMS: linux/amd64
+  # The version tag IS the image tag: stage and prod both pull the same
+  # ghcr.io/.../backend:vX.Y.Z manifest — the exact artifact stage verified.
+  ENV: ${{ github.ref_name }}
+  DOMAIN: stage.budjetame.de
 
 concurrency:
-  group: cd-dev
+  group: cd-release-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build images
+  # Each platform is built natively on its own runner (no QEMU emulation —
+  # the frontend's npm/tsc/vite toolchain grinds for hours under it) and
+  # pushed under a platform-suffixed tag. Pushing both platforms to the
+  # same tag concurrently would race the manifest merge, so the `manifest`
+  # job below assembles the combined :vX.Y.Z tag afterwards.
+  build-amd64:
+    name: Build linux/amd64
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,15 +50,15 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./backend
-          platforms: ${{ env.PLATFORMS }}
-          tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}-amd64
           push: true
       - name: Build and push frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
-          platforms: ${{ env.PLATFORMS }}
-          tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}-amd64
           push: true
           # Google Maps picker (issue #27): the key never touches the repo;
           # CI reads the GOOGLE_MAPS_API_KEY secret. Empty key → Leaflet.
@@ -57,11 +66,68 @@ jobs:
             VITE_MAP_PROVIDER=google
             VITE_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
 
-  deploy:
-    name: Deploy
-    needs: build
+  build-arm64:
+    name: Build linux/arm64
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          platforms: linux/arm64
+          tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}-arm64
+          push: true
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          platforms: linux/arm64
+          tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}-arm64
+          push: true
+          build-args: |
+            VITE_MAP_PROVIDER=google
+            VITE_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
+
+  manifest:
+    name: Assemble multi-arch manifest
+    needs: [build-amd64, build-arm64]
     runs-on: ubuntu-latest
-    environment: dev
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create :vX.Y.Z manifest from both platform builds
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }} \
+            ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}-amd64 \
+            ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}-arm64
+          docker buildx imagetools create \
+            -t ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }} \
+            ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}-amd64 \
+            ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}-arm64
+
+  deploy-stage:
+    name: Deploy to stage
+    needs: manifest
+    runs-on: ubuntu-latest
+    environment: stage
     steps:
       - uses: actions/checkout@v4
       - name: Set up SSH

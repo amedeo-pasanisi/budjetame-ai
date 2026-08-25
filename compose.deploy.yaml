@@ -1,6 +1,8 @@
-# CI/CD deployment compose — images come from GHCR, built by the CD pipeline
-# (.github/workflows/cd.yml). The workflow writes .env from GitHub environment
-# secrets, then runs:
+# CI/CD deployment compose — images come from GHCR, built by the CD
+# workflows (.github/workflows/cd-*.yml). dev gets a floating `:dev` tag on
+# every push; releases get a version tag (:vX.Y.Z) built by cd-release.yml
+# and promoted to prod by hand via cd-prod.yml. The workflow writes .env
+# from GitHub environment secrets, then runs:
 #   docker compose -f compose.deploy.yaml -p budjetame-ai pull && up -d
 # The project name matches the original prod stack so upgrades swap in place
 # and the db_data volume (all your data) carries over.

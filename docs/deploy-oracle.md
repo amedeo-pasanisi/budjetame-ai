@@ -12,21 +12,51 @@ Three Always-Free environments, driven by GitHub Actions:
 
 - **CI** (`.github/workflows/ci.yml`): on every push/PR — frontend lint +
   build + vitest; backend mypy + pytest (testcontainers).
-- **CD** (`.github/workflows/cd.yml`): on push to `dev`/`stage`/`main` —
-  builds backend + frontend images for exactly the environment's
-  architecture (linux/amd64 for dev/stage on the AMD64 runner,
-  linux/arm64 for prod on GitHub's free ARM64 runner — no QEMU emulation,
-  which makes JS toolchain builds grind for hours), pushes them to GHCR
-  tagged `backend:dev|stage|prod`, then SSHes to the environment's VM and
-  runs `docker compose -f compose.deploy.yaml -p budjetame-ai up -d`
-  (`compose.deploy.yaml` pulls the GHCR images; the project name matches the
-  original prod stack so the `db_data` volume — all data — carries over).
+- **CD — dev** (`.github/workflows/cd.yml`): on push to the `dev` branch —
+  builds `backend:dev`/`frontend:dev` (linux/amd64, on the AMD64 runner),
+  pushes them to GHCR, then SSHes to the dev VM and runs
+  `docker compose -f compose.deploy.yaml -p budjetame-ai up -d`. Fast
+  iteration; a floating tag, rebuilt on every push.
+- **CD — release** (`.github/workflows/cd-release.yml`): on a `v*` tag —
+  the release candidate. Builds the exact artifact prod will run: both
+  platforms, each natively (linux/amd64 on the AMD64 runner, linux/arm64
+  on GitHub's free ARM64 runner — no QEMU emulation, which makes JS
+  toolchain builds grind for hours), pushed as platform-suffixed tags and
+  assembled by `buildx imagetools create` into one `:vX.Y.Z` manifest, then
+  deploys that manifest to the **stage** VM. Stage is the hard gate: prod
+  can only ever run an artifact stage has run.
+- **CD — prod** (`.github/workflows/cd-prod.yml`): **manual only** — a
+  human runs it from the Actions UI and picks the tag. A gate step refuses
+  tags whose images don't exist (i.e. tags that never went through
+  cd-release.yml), then deploys the same `:vX.Y.Z` manifest to the prod VM
+  (ARM pulls the arm64 image from the manifest automatically). The project
+  name matches the original prod stack, so the `db_data` volume — all
+  data — carries over on every deploy.
 - Secrets live in GitHub **environments** (`dev`/`stage`/`prod`): VM host,
   deploy SSH key, Postgres password, JWT secret, seed login. The deploy SSH
   public key is in `~/.ssh/authorized_keys` on each VM; the private key is
   only in GitHub.
 - VMs are provisioned by `scripts/oracle-provision.sh` + `scripts/oci_api.py`
   (pure-Python OCI client; the official oci-cli cannot install on Termux).
+  `scripts/oci_api.py instance-list` lists the VMs;
+  `instance-terminate <ocid>` tears one down (compute slot *and* boot
+  volume — Always Free storage is freed too).
+
+### Release ritual
+
+1. **Ride on dev** — merge to `dev`, watch the dev deploy, use the app at
+   `dev.budjetame.de`. Dev is where problems surface, not stage.
+2. **Cut the tag** — `git tag -a vX.Y.Z` on a green `main` commit and push
+   it. `cd-release.yml` builds both platforms and deploys `vX.Y.Z` to
+   stage automatically.
+3. **Verify on stage** — log in at `stage.budjetame.de` and exercise the
+   release. If it fails: fix on `main`, then force-move the tag
+   (`git tag -f vX.Y.Z <fixed-sha> && git push --force origin vX.Y.Z`) —
+   nothing has reached prod, so re-tagging is safe.
+4. **Promote** — in the Actions UI, run **CD (prod)** and enter the tag.
+   The gate refuses tags stage never built.
+5. **Rollback** — run **CD (prod)** again with the previous tag; compose
+   pulls the older images and `db_data` carries over.
 
 
 A single ARM VM running the whole app in Docker — free forever (4 OCPU / 24 GB

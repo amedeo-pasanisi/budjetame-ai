@@ -1,67 +1,62 @@
-name: CD (dev)
+name: CD (prod)
+
+# The only way prod is deployed: a human clicks "Run workflow" and picks the
+# release tag. The gate step refuses tags whose images don't exist — i.e.
+# tags that never went through cd-release.yml (the tag → stage pipeline) —
+# so prod can only run an artifact stage has already run.
+#
+# Rollback: run this workflow again with the previous tag — compose just
+# pulls the older images and the db_data volume carries over.
 
 on:
-  push:
-    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to deploy (vX.Y.Z — must have been verified on stage)'
+        required: true
 
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/amedeo-pasanisi/budjetame-ai
-  # dev is an iteration environment: a floating image tag, rebuilt on every
-  # push. Releases (stage/prod) instead build version-tagged images — see
-  # cd-release.yml and cd-prod.yml.
-  ENV: dev
-  # Hostname Caddy serves, written into .env and used by the health check.
-  DOMAIN: dev.budjetame.de
-  # dev runs on the free AMD64 E2.1.Micro — only that platform is built
-  # (a multi-arch build would put the other half under QEMU emulation,
-  # where the frontend's npm/tsc/vite toolchain grinds for hours).
-  PLATFORMS: linux/amd64
+  ENV: ${{ inputs.tag }}
+  DOMAIN: budjetame.de, www.budjetame.de
 
 concurrency:
-  group: cd-dev
-  cancel-in-progress: true
+  group: cd-prod
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build images
+  gate:
+    name: Verify tag went through stage
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Validate tag format
+        run: |
+          if ! [[ "${{ env.ENV }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: '${{ env.ENV }}' is not a vX.Y.Z tag" >&2
+            exit 1
+          fi
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push backend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          platforms: ${{ env.PLATFORMS }}
-          tags: ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
-          push: true
-      - name: Build and push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          platforms: ${{ env.PLATFORMS }}
-          tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
-          push: true
-          # Google Maps picker (issue #27): the key never touches the repo;
-          # CI reads the GOOGLE_MAPS_API_KEY secret. Empty key → Leaflet.
-          build-args: |
-            VITE_MAP_PROVIDER=google
-            VITE_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
+      - name: Check the release manifest exists
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }} \
+            ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
+          echo "ok: ${{ env.ENV }} was built by cd-release.yml — stage ran this artifact"
 
-  deploy:
-    name: Deploy
-    needs: build
+  deploy-prod:
+    name: Deploy to prod
+    needs: gate
     runs-on: ubuntu-latest
-    environment: dev
+    environment: prod
     steps:
       - uses: actions/checkout@v4
       - name: Set up SSH
@@ -89,7 +84,7 @@ jobs:
           BUDJETAME_SMTP_FROM=${{ secrets.BUDJETAME_SMTP_FROM }}
           BUDJETAME_SMTP_TLS=${{ secrets.BUDJETAME_SMTP_TLS }}
           EOF
-          # Reset links must point at the public SPA.
+          # Reset links must point at the public SPA (prod: the apex).
           DOMAIN_VALUE="${{ env.DOMAIN }}"
           printf 'BUDJETAME_PUBLIC_BASE_URL=https://%s\n' "${DOMAIN_VALUE%%,*}" >> .env
           scp -i ~/.ssh/deploy_key .env compose.deploy.yaml ubuntu@${{ secrets.VM_HOST }}:~/

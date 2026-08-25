@@ -28,6 +28,8 @@ Usage:
     scripts/oci_api.py micro-launch <subnet> <ad> <image> <ssh-pubkey-file> <name>  # E2.1.Micro
     scripts/oci_api.py instance-wait <instance>       # poll until RUNNING
     scripts/oci_api.py instance-public-ip <instance>  # public IP
+    scripts/oci_api.py instance-list                   # displayName, shape, state, OCID
+    scripts/oci_api.py instance-terminate <instance>  # delete instance + its boot volume
     scripts/oci_api.py --dry-run <command> ...        # print the signed request, don't send
 """
 
@@ -317,6 +319,32 @@ def instance_public_ip(cfg: dict, private_key, instance: str, dry_run: bool = Fa
     sys.exit("error: instance has no public IP yet")
 
 
+def instance_list(cfg: dict, private_key, dry_run: bool = False) -> None:
+    """List all instances in the tenancy's root compartment, one line each:
+    displayName, lifecycleState, shape, OCID (tab-separated)."""
+    data = call(cfg, private_key, "GET", "/20160918/instances",
+                params={"compartmentId": cfg["tenancy"]}, dry_run=dry_run)
+    if dry_run:
+        return
+    for inst in sorted(data, key=lambda i: i.get("displayName", "")):
+        print("\t".join([
+            inst.get("displayName", "?"),
+            inst.get("lifecycleState", "?"),
+            inst.get("shape", "?"),
+            inst["id"],
+        ]))
+
+
+def instance_terminate(cfg: dict, private_key, instance: str, dry_run: bool = False) -> None:
+    """Terminate an instance and delete its boot volume (preserveBootVolume
+    defaults to false in the API — we make it explicit so the Always Free
+    storage is freed too, not just the compute slot)."""
+    call(cfg, private_key, "DELETE", f"/20160918/instances/{instance}",
+         params={"preserveBootVolume": "false"}, dry_run=dry_run)
+    if not dry_run:
+        print(f"terminating {instance}")
+
+
 def https_ingress_rule() -> dict:
     return {"protocol": "6", "source": "0.0.0.0/0",
             "tcpOptions": {"destinationPortRange": {"min": 443, "max": 443}}}
@@ -423,6 +451,10 @@ def main() -> None:
         instance_wait(cfg, private_key, args.args[0], args.dry_run)
     elif args.command == "instance-public-ip":
         instance_public_ip(cfg, private_key, args.args[0], args.dry_run)
+    elif args.command == "instance-list":
+        instance_list(cfg, private_key, args.dry_run)
+    elif args.command == "instance-terminate":
+        instance_terminate(cfg, private_key, args.args[0], args.dry_run)
     else:
         sys.exit(f"error: unknown command '{args.command}'")
 

@@ -89,7 +89,9 @@ Free, always-on hosting on **Oracle Cloud Always Free** (a single ARM VM running
 the whole stack in Docker): run `scripts/oracle-provision.sh` — it walks you
 through the Oracle signup, creates the VM, and deploys. See
 [`docs/deploy-oracle.md`](docs/deploy-oracle.md) for what it does and the
-manual record.
+manual record. Releases: cut a `v*` tag → it builds and deploys to stage;
+after verifying, run the **CD (prod)** workflow at that tag — stage is the
+hard gate, prod never runs an artifact stage hasn't (ADR-0023).
 
 ## Project conventions
 
