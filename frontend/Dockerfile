@@ -6,6 +6,11 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# Map provider (issue #27): baked at build time. CI passes the Google key as
+# a build arg (GOOGLE_MAPS_API_KEY secret); local builds read frontend/.env.
+ARG VITE_MAP_PROVIDER=leaflet
+ARG VITE_GOOGLE_MAPS_API_KEY=
+ENV VITE_MAP_PROVIDER=$VITE_MAP_PROVIDER VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
 RUN npm run build
 
 FROM caddy:2-alpine

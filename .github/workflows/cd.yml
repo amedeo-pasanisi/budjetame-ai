@@ -57,6 +57,11 @@ jobs:
           platforms: ${{ env.PLATFORMS }}
           tags: ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
           push: true
+          # Google Maps picker (issue #27): the key never touches the repo;
+          # CI reads the GOOGLE_MAPS_API_KEY secret. Empty key → Leaflet.
+          build-args: |
+            VITE_MAP_PROVIDER=google
+            VITE_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
 
   deploy:
     name: Deploy

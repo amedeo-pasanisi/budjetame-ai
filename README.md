@@ -52,7 +52,9 @@ The Transaction-form map picker defaults to the free Leaflet/OpenStreetMap map
 place search instead, run `frontend/scripts/google-maps-wizard.sh` — it walks
 you through the one-time Google Cloud setup (billing account + API key) and
 writes `frontend/.env` (`VITE_MAP_PROVIDER=google` + the key). See
-`frontend/.env.example` for the variables.
+`frontend/.env.example` for the variables. CI builds bake the provider from
+the `GOOGLE_MAPS_API_KEY` repo secret (set once via `gh secret set
+GOOGLE_MAPS_API_KEY`); the key never lands in the repo.
 
 Multi-user sign-in needs two one-time setups, each walked through by a wizard:
 
