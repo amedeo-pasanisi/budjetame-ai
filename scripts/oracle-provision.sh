@@ -365,7 +365,7 @@ BUDJETAME_JWT_SECRET=$(_existing BUDJETAME_JWT_SECRET || true)
 [[ -n "$BUDJETAME_JWT_SECRET" ]] || BUDJETAME_JWT_SECRET=$(gen_secret)
 ask BUDJETAME_SEED_ACCOUNT_EMAIL "Seed account email (your Budjetame login):"
 ask_secret BUDJETAME_SEED_ACCOUNT_PASSWORD "Seed account password (your Budjetame login):"
-ask DOMAIN "Site hostname for this VM (e.g. dev.budjetame.it — its DNS A record must point at this VM before first boot):"
+ask DOMAIN "Site hostname for this VM (e.g. dev.budjetame.de — its DNS A record must point at this VM before first boot):"
 warn "The Account is seeded ONCE, at first boot, from these values — check before deploying."
 write_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
 write_env BUDJETAME_JWT_SECRET "$BUDJETAME_JWT_SECRET"

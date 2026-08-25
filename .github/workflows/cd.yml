@@ -13,7 +13,7 @@ env:
   # Hostname(s) Caddy serves, per environment: prod gets the apex + www
   # (www redirects to the apex), dev/stage get their subdomain. Written into
   # .env and used by the health check below.
-  DOMAIN: ${{ github.ref_name == 'main' && 'budjetame.it, www.budjetame.it' || format('{0}.budjetame.it', github.ref_name) }}
+  DOMAIN: ${{ github.ref_name == 'main' && 'budjetame.de, www.budjetame.de' || format('{0}.budjetame.de', github.ref_name) }}
   # Each environment runs exactly one architecture: prod is ARM64
   # (A1.Flex), stage/dev are AMD64 (E2.1.Micro). Only that platform is
   # built — a multi-arch build would put the other half under QEMU

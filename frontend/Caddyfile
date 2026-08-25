@@ -6,9 +6,9 @@
 # Caddy obtains and renews the TLS certificate itself (Let's Encrypt) and
 # redirects plain HTTP to HTTPS automatically. The site address comes from
 # the DOMAIN environment variable, set per environment in .env:
-#   prod:   "budjetame.it, www.budjetame.it"   (www redirects to the apex)
-#   dev:    "dev.budjetame.it"
-#   stage:  "stage.budjetame.it"
+#   prod:   "budjetame.de, www.budjetame.de"   (www redirects to the apex)
+#   dev:    "dev.budjetame.de"
+#   stage:  "stage.budjetame.de"
 # The www redirect below is a no-op on dev/stage — that hostname exists only
 # in prod's DOMAIN value and in DNS. The bare-IP URLs are retired: Caddy
 # only answers for DOMAIN, so the IPs return nothing.
@@ -17,12 +17,12 @@
 # expiry notices at a real mailbox.
 
 {
-	email {$ACME_EMAIL:admin@budjetame.it}
+	email {$ACME_EMAIL:admin@budjetame.de}
 }
 
 {$DOMAIN} {
-	@www host www.budjetame.it
-	redir @www https://budjetame.it{uri} permanent
+	@www host www.budjetame.de
+	redir @www https://budjetame.de{uri} permanent
 
 	handle /api/* {
 		uri strip_prefix /api

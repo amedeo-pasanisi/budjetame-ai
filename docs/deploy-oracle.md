@@ -65,9 +65,9 @@ One domain serves all three environments (ADR-0018, ADR-0019):
 
 | Environment | Hostname | DNS A record |
 |---|---|---|
-| prod | `budjetame.it` (+ `www`, redirects to the apex) | 89.168.30.119 |
-| stage | `stage.budjetame.it` | 130.110.1.224 |
-| dev | `dev.budjetame.it` | 92.4.163.113 |
+| prod | `budjetame.de` (+ `www`, redirects to the apex) | 89.168.30.119 |
+| stage | `stage.budjetame.de` | 130.110.1.224 |
+| dev | `dev.budjetame.de` | 92.4.163.113 |
 
 - The domain is registered at Aruba (~€10/yr). DNS lives in Aruba's panel.
 - Caddy in the frontend image terminates TLS with Let's Encrypt certificates
