@@ -4,11 +4,14 @@
 
 Three Always-Free environments, driven by GitHub Actions:
 
-| Branch | Environment | VM | URL |
+| Trigger | Environment | VM | URL |
 |---|---|---|---|
-| `main` | **prod** | A1.Flex 4 OCPU/24 GB (ARM) | http://89.168.30.119 |
-| `stage` | **stage** | E2.1.Micro 1 GB (AMD) | http://130.110.1.224 |
-| `dev` | **dev** | E2.1.Micro 1 GB (AMD) | http://92.4.163.113 |
+| push to `dev` branch | **dev** | E2.1.Micro 1 GB (AMD) | https://dev.budjetame.de |
+| `v*` tag (release candidate) | **stage** | E2.1.Micro 1 GB (AMD) | https://stage.budjetame.de |
+| manual **CD (prod)** run at a tag | **prod** | A1.Flex 4 OCPU/24 GB (ARM) | https://budjetame.de |
+
+Pushing to `main` deploys nothing (CI only); releases are cut from `main`
+commits as tags.
 
 - **CI** (`.github/workflows/ci.yml`): on every push/PR — frontend lint +
   build + vitest; backend mypy + pytest (testcontainers).
@@ -44,8 +47,8 @@ Three Always-Free environments, driven by GitHub Actions:
 
 ### Release ritual
 
-1. **Ride on dev** — merge to `dev`, watch the dev deploy, use the app at
-   `dev.budjetame.de`. Dev is where problems surface, not stage.
+1. **Ride on dev** — do the work on the `dev` branch; every push previews
+   on `dev.budjetame.de`. Dev is where problems surface, not stage.
 2. **Cut the tag** — `git tag -a vX.Y.Z` on a green `main` commit and push
    it. `cd-release.yml` builds both platforms and deploys `vX.Y.Z` to
    stage automatically.
