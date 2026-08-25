@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 
-import { TOKEN_KEY, fetchCurrentAccount, googleSignIn, login, register, type Account } from './api'
+import { TOKEN_KEY, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
 import { RecurringScreen } from './RecurringScreen'
+import { ResetPassword } from './ResetPassword'
 import { Screen } from './Screen'
 import { useTabSwipe } from './tabSwipe'
 import { TransactionsScreen } from './TransactionsScreen'
@@ -32,6 +33,10 @@ function App() {
     localStorage.getItem(TOKEN_KEY) !== null ? { kind: 'checking' } : { kind: 'signedOut' },
   )
   const [authCheckVersion, setAuthCheckVersion] = useState(0)
+  // The reset link's token, when the app was opened from /reset-password?token=...
+  const [resetToken, setResetToken] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('token'),
+  )
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY)
@@ -72,6 +77,19 @@ function App() {
     }
   }
 
+  const handleForgotPassword = async (email: string): Promise<void> => {
+    await requestPasswordReset(email)
+  }
+
+  const handleResetPassword = async (token: string, newPassword: string): Promise<void> => {
+    await resetPassword(token, newPassword)
+  }
+
+  const clearResetToken = () => {
+    setResetToken(null)
+    window.history.replaceState(null, '', window.location.pathname)
+  }
+
   /** Store the bearer token and re-check /auth/me, which flips the screen
    * to the app shell. Shared by every sign-in door (issue #81). */
   const signInWith = async (tokenPromise: Promise<string>): Promise<void> => {
@@ -89,7 +107,17 @@ function App() {
     return <CheckingScreen />
   }
   if (auth.kind === 'signedOut') {
-    return <LoginForm onLogin={handleLogin} onSignUp={handleSignUp} onGoogleSignIn={handleGoogleSignIn} />
+    if (resetToken !== null) {
+      return <ResetPassword token={resetToken} onReset={handleResetPassword} onDone={clearResetToken} />
+    }
+    return (
+      <LoginForm
+        onLogin={handleLogin}
+        onSignUp={handleSignUp}
+        onGoogleSignIn={handleGoogleSignIn}
+        onForgotPassword={handleForgotPassword}
+      />
+    )
   }
   return <AppShell email={auth.account.email} onSignOut={handleSignOut} />
 }

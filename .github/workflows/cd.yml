@@ -83,7 +83,16 @@ jobs:
           BUDJETAME_SEED_ACCOUNT_EMAIL=${{ secrets.BUDJETAME_SEED_ACCOUNT_EMAIL }}
           BUDJETAME_SEED_ACCOUNT_PASSWORD=${{ secrets.BUDJETAME_SEED_ACCOUNT_PASSWORD }}
           BUDJETAME_GOOGLE_OAUTH_CLIENT_ID=${{ secrets.BUDJETAME_GOOGLE_OAUTH_CLIENT_ID }}
+          BUDJETAME_SMTP_HOST=${{ secrets.BUDJETAME_SMTP_HOST }}
+          BUDJETAME_SMTP_PORT=${{ secrets.BUDJETAME_SMTP_PORT }}
+          BUDJETAME_SMTP_USER=${{ secrets.BUDJETAME_SMTP_USER }}
+          BUDJETAME_SMTP_PASSWORD=${{ secrets.BUDJETAME_SMTP_PASSWORD }}
+          BUDJETAME_SMTP_FROM=${{ secrets.BUDJETAME_SMTP_FROM }}
+          BUDJETAME_SMTP_TLS=${{ secrets.BUDJETAME_SMTP_TLS }}
           EOF
+          # Reset links must point at the public SPA (prod: https://budjetame.de).
+          DOMAIN_VALUE="${{ env.DOMAIN }}"
+          printf 'BUDJETAME_PUBLIC_BASE_URL=https://%s\n' "${DOMAIN_VALUE%%,*}" >> .env
           scp -i ~/.ssh/deploy_key .env compose.deploy.yaml ubuntu@${{ secrets.VM_HOST }}:~/
       - name: Install Docker if missing
         run: >

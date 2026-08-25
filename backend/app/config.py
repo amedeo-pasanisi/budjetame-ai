@@ -15,6 +15,18 @@ class Settings(BaseSettings):
     # the browser); empty disables the Google button.
     google_oauth_client_id: str = ""
 
+    # Email (issue #83): password-reset links. An empty smtp_host means dev
+    # posture — the email is logged, never sent.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "budjetame@localhost"
+    smtp_tls: bool = True
+    password_reset_expire_minutes: int = 30
+    # Where the SPA lives; reset links point at it (prod: https://budjetame.de).
+    public_base_url: str = "http://localhost:5173"
+
     # The single Account seeded at setup (override in production)
     seed_account_email: str = "admin@budjetame.dev"
     seed_account_password: str = "budjetame-dev-password"

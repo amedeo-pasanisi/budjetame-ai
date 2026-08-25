@@ -50,6 +50,27 @@ export async function googleSignIn(idToken: string): Promise<string> {
   return body.access_token
 }
 
+/** Request a password-reset link (issue #83): always succeeds — the backend
+ * answers 204 for unknown emails too, so this can't probe which emails have
+ * Accounts. */
+export async function requestPasswordReset(email: string): Promise<void> {
+  await request('/auth/forgot-password', {
+    method: 'POST',
+    json: { email },
+    errorMessage: 'Could not send the reset link',
+  })
+}
+
+/** Set a new password with the token from the emailed link (issue #83). A
+ * 400 means the link is invalid, expired, or already used. */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  await request('/auth/reset-password', {
+    method: 'POST',
+    json: { token, new_password: newPassword },
+    errorMessage: 'Could not reset the password',
+  })
+}
+
 export async function fetchCurrentAccount(token: string): Promise<Account> {
   const response = await request('/auth/me', {
     token,

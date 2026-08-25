@@ -54,6 +54,13 @@ you through the one-time Google Cloud setup (billing account + API key) and
 writes `frontend/.env` (`VITE_MAP_PROVIDER=google` + the key). See
 `frontend/.env.example` for the variables.
 
+Multi-user sign-in needs two one-time setups, each walked through by a wizard:
+
+- Google sign-in: `scripts/google-oauth-wizard.sh` (creates the OAuth client
+  in the same Google Cloud project, writes `backend/.env` + GitHub secrets).
+- Password-reset email: `scripts/smtp-wizard.sh` (SMTP app password from your
+  mail provider, written the same way).
+
 ## Tests
 
 ```bash

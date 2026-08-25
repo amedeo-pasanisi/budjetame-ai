@@ -1,20 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.deps import bearer_scheme, get_google_verifier, get_session
+from app.deps import bearer_scheme, get_google_verifier, get_mailer, get_session
 from app.google_auth import GoogleVerifier
-from app.models import Account
+from app.mailer import EmailMessage, Mailer
+from app.models import Account, PasswordResetToken
 from app.schemas import (
     AccountOut,
     AuthConfigOut,
+    ForgotPasswordRequest,
     GoogleSignInRequest,
     LoginRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenResponse,
 )
-from app.security import create_access_token, decode_access_token, hash_password, verify_password
+from app.security import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    hash_reset_token,
+    new_reset_token,
+    verify_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -96,6 +108,76 @@ def google_sign_in(
         session.add(account)
         session.commit()
     return TokenResponse(access_token=create_access_token(account.id))
+
+
+@router.post("/forgot-password", status_code=204)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+    mailer: Mailer = Depends(get_mailer),
+) -> Response:
+    """Request a password-reset link (issue #83). Always succeeds — an
+    unknown email must be indistinguishable from a known one, so the endpoint
+    cannot be used to probe which emails have Accounts."""
+    account = session.scalar(
+        select(Account).where(Account.email == payload.email.lower())
+    )
+    if account is not None:
+        token = new_reset_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=request.app.state.password_reset_expire_minutes
+        )
+        session.add(
+            PasswordResetToken(
+                account_id=account.id,
+                token_hash=hash_reset_token(token),
+                expires_at=expires_at,
+            )
+        )
+        session.commit()
+        link = f"{request.app.state.public_base_url}/reset-password?token={token}"
+        mailer.send(
+            EmailMessage(
+                to=account.email,
+                subject="Reset your Budjetame password",
+                body=(
+                    "Someone asked to reset your Budjetame password. "
+                    f"Click this link to choose a new one:\n\n{link}\n\n"
+                    "The link works once and expires after "
+                    f"{request.app.state.password_reset_expire_minutes} minutes.\n"
+                    "If you didn't ask for this, ignore the email."
+                ),
+            )
+        )
+    return Response(status_code=204)
+
+
+@router.post("/reset-password", status_code=204)
+def reset_password(
+    payload: ResetPasswordRequest, session: Session = Depends(get_session)
+) -> Response:
+    """Set a new password with a reset token (issue #83). The token is
+    consumed before the password is applied — a used, expired, or forged
+    token is a 400 with a friendly detail."""
+    row = session.scalar(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hash_reset_token(payload.token)
+        )
+    )
+    if row is None or row.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=400, detail="This reset link is invalid or has expired"
+        )
+    account = session.get(Account, row.account_id)
+    if account is None:
+        raise HTTPException(
+            status_code=400, detail="This reset link is invalid or has expired"
+        )
+    session.delete(row)  # single-use: consumed before applying
+    account.password_hash = hash_password(payload.new_password)
+    session.commit()
+    return Response(status_code=204)
 
 
 @router.get("/me", response_model=AccountOut)

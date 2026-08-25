@@ -38,6 +38,20 @@ class AuthConfigOut(BaseModel):
     google_client_id: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    """A request for a password-reset link (issue #83)."""
+
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """A password-reset submission: the token from the emailed link plus the
+    new password."""
+
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

@@ -77,6 +77,24 @@ class Account(Base):
     )
 
 
+class PasswordResetToken(Base):
+    """One issued password-reset link (issue #83): only the sha256 of the raw
+    token is stored, expiry is enforced at use, and consuming the token
+    deletes the row — single-use by construction."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Wallet(Base):
     """A money-holder of one of four types. Its balance is never stored (ADR-0001)."""
 

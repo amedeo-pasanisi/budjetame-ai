@@ -30,6 +30,15 @@ services:
       BUDJETAME_SEED_ACCOUNT_PASSWORD: ${BUDJETAME_SEED_ACCOUNT_PASSWORD:?set in .env}
       # Optional (issue #81): empty disables the Google button.
       BUDJETAME_GOOGLE_OAUTH_CLIENT_ID: ${BUDJETAME_GOOGLE_OAUTH_CLIENT_ID:-}
+      # Email (issue #83): empty smtp_host = dev posture (reset emails are
+      # logged, not sent). public_base_url is computed by the CD workflow.
+      BUDJETAME_SMTP_HOST: ${BUDJETAME_SMTP_HOST:-}
+      BUDJETAME_SMTP_PORT: ${BUDJETAME_SMTP_PORT:-}
+      BUDJETAME_SMTP_USER: ${BUDJETAME_SMTP_USER:-}
+      BUDJETAME_SMTP_PASSWORD: ${BUDJETAME_SMTP_PASSWORD:-}
+      BUDJETAME_SMTP_FROM: ${BUDJETAME_SMTP_FROM:-}
+      BUDJETAME_SMTP_TLS: ${BUDJETAME_SMTP_TLS:-}
+      BUDJETAME_PUBLIC_BASE_URL: ${BUDJETAME_PUBLIC_BASE_URL:?set in .env}
     depends_on:
       db:
         condition: service_healthy

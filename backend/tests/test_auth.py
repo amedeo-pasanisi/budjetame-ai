@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.db import create_db_engine
 from app.google_auth import GoogleIdentity
@@ -54,29 +54,29 @@ async def test_login_rejects_a_malformed_email(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_seeded_account_exists_exactly_once_with_a_hashed_password(
+async def test_seeded_account_exists_with_a_hashed_password(
     client: AsyncClient, database_url: str
 ) -> None:
-    """US4: the seeded Account exists exactly once and its password is stored
-    only as a bcrypt hash, never as the plaintext.
+    """US4: the seeded Account exists and its password is stored only as a
+    bcrypt hash, never as the plaintext. (With multi-user, ADR-0020, other
+    Accounts may exist — the seed's own properties are what this locks, not
+    a global count.)
 
-    This is the suite's single deliberate exception to the "assert only on API
-    responses and observable state" rule (issue #19): no API path exposes the
-    stored hash, so the HTTP seam cannot distinguish hashed storage from
-    plaintext storage — and US4 must be locked. That the hash *verifies* (the
-    seed password logs in) is already locked through the seam by
-    `test_login_issues_a_bearer_token_for_seeded_credentials`; only the
-    not-plaintext property needs this database read.
+    This is the suite's single deliberate exception to the "assert only on
+    API responses and observable state" rule (issue #19): no API path
+    exposes the stored hash, so the HTTP seam cannot distinguish hashed
+    storage from plaintext storage — and US4 must be locked. That the hash
+    *verifies* (the seed password logs in) is already locked through the
+    seam by `test_login_issues_a_bearer_token_for_seeded_credentials`; only
+    the not-plaintext property needs this database read.
     """
     engine = create_db_engine(database_url)
     with engine.connect() as conn:
-        count = conn.execute(select(func.count()).select_from(Account)).scalar_one()
         stored = conn.execute(
             select(Account.password_hash).where(Account.email == SEED_EMAIL)
         ).scalar_one()
 
     engine.dispose()
-    assert count == 1
     assert stored != SEED_PASSWORD
     assert bcrypt.checkpw(SEED_PASSWORD.encode(), stored.encode())
 

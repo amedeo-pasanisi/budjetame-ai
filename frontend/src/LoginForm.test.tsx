@@ -25,10 +25,17 @@ const renderForm = (
     onLogin: (email: string, password: string) => Promise<void>
     onSignUp: (email: string, password: string) => Promise<void>
     onGoogleSignIn: (idToken: string) => Promise<void>
+    onForgotPassword: (email: string) => Promise<void>
   }> = {},
 ) =>
   render(
-    <LoginForm onLogin={noop} onSignUp={noop} onGoogleSignIn={noop} {...overrides} />,
+    <LoginForm
+      onLogin={noop}
+      onSignUp={noop}
+      onGoogleSignIn={noop}
+      onForgotPassword={noop}
+      {...overrides}
+    />,
   )
 
 describe('LoginForm sign-up mode (issue #82)', () => {
@@ -126,5 +133,41 @@ describe('LoginForm Google sign-in (issue #81)', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
 
     expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument()
+  })
+})
+
+describe('LoginForm forgot-password (issue #83)', () => {
+  it('offers the reset link in sign-in mode and opens the email-only view', () => {
+    renderForm()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset it' }))
+
+    expect(screen.getByRole('button', { name: 'Send reset link' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Google' })).not.toBeInTheDocument()
+  })
+
+  it('submits the email and shows the check-your-inbox state', async () => {
+    const onForgotPassword = vi.fn().mockResolvedValue(undefined)
+    renderForm({ onForgotPassword })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset it' }))
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'lost@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send reset link' }))
+
+    await waitFor(() =>
+      expect(onForgotPassword).toHaveBeenCalledWith('lost@example.com'),
+    )
+    expect(screen.getByText(/Check your inbox/)).toBeInTheDocument()
+  })
+
+  it('returns to sign-in from the forgot view', () => {
+    renderForm()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset it' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toBeInTheDocument()
   })
 })

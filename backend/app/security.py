@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
 
 import bcrypt
 import jwt
@@ -39,3 +41,14 @@ def decode_access_token(token: str) -> int | None:
     if not isinstance(sub, str) or not sub.isdigit():
         return None
     return int(sub)
+
+
+def new_reset_token() -> str:
+    """A fresh password-reset token for an email link (issue #83)."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_reset_token(token: str) -> str:
+    """The stored form of a reset token: only the sha256 is persisted, so a
+    database leak cannot be replayed."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

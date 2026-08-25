@@ -8,6 +8,7 @@ from app.dashboard import router as dashboard_router
 from app.db import check_connection, create_db_engine
 from app.google_auth import GoogleIdTokenVerifier, GoogleVerifier
 from app.imports import router as imports_router
+from app.mailer import LoggingMailer, Mailer, SmtpMailer
 from app.recurring_costs import router as recurring_costs_router
 from app.recurring_incomes import router as recurring_incomes_router
 from app.seed import seed_account
@@ -22,10 +23,14 @@ def create_app(
     seed_password: str | None = None,
     google_client_id: str | None = None,
     google_verifier: GoogleVerifier | None = None,
+    mailer: Mailer | None = None,
+    password_reset_expire_minutes: int | None = None,
+    public_base_url: str | None = None,
 ) -> FastAPI:
     """Build the application. `database_url` and the seed credentials override
-    settings for tests; `google_client_id` and `google_verifier` do the same
-    for the Google sign-in seam (issue #81)."""
+    settings for tests; `google_client_id`/`google_verifier` override the
+    Google sign-in seam (issue #81) and `mailer`/`password_reset_expire_minutes`
+    the password-reset seam (issue #83)."""
     app = FastAPI(title="Budjetame API", version="0.1.0")
     engine = create_db_engine(database_url or settings.database_url)
     app.state.sessionmaker = sessionmaker(bind=engine, expire_on_commit=False)
@@ -34,6 +39,24 @@ def create_app(
         google_client_id if google_client_id is not None else settings.google_oauth_client_id
     )
     app.state.google_verifier = google_verifier or GoogleIdTokenVerifier(app.state.google_client_id)
+    app.state.mailer = mailer or (
+        SmtpMailer(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            user=settings.smtp_user,
+            password=settings.smtp_password,
+            sender=settings.smtp_from,
+            tls=settings.smtp_tls,
+        )
+        if settings.smtp_host
+        else LoggingMailer()
+    )
+    app.state.password_reset_expire_minutes = (
+        password_reset_expire_minutes
+        if password_reset_expire_minutes is not None
+        else settings.password_reset_expire_minutes
+    )
+    app.state.public_base_url = public_base_url or settings.public_base_url
 
     seed_account(
         app.state.sessionmaker,
