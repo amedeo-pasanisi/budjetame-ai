@@ -180,6 +180,19 @@ def reset_password(
     return Response(status_code=204)
 
 
+@router.delete("/me", status_code=204)
+def delete_me(
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Delete the signed-in Account and everything scoped to it (issue #84):
+    the schema cascades every owned row (ondelete=CASCADE), and the JWT dies
+    with the Account — a deleted Account's token and credentials stop working."""
+    session.delete(account)
+    session.commit()
+    return Response(status_code=204)
+
+
 @router.get("/me", response_model=AccountOut)
 def me(account: Account = Depends(get_current_account)) -> Account:
     return account

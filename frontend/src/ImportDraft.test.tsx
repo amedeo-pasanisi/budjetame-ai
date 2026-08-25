@@ -231,7 +231,7 @@ afterEach(() => {
 })
 
 function renderShell() {
-  return render(<AppShell email="user@example.com" onSignOut={vi.fn()} />)
+  return render(<AppShell email="user@example.com" onSignOut={vi.fn()} onDeleteAccount={vi.fn()} />)
 }
 
 /** From the Transactions tab: taps Import, picks a file, reads it, and lands

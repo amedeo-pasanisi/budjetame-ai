@@ -118,7 +118,7 @@ async function expectTab(tab: Tab) {
 }
 
 async function renderShell() {
-  render(<AppShell email="demo@budjetame.example" onSignOut={vi.fn()} />)
+  render(<AppShell email="demo@budjetame.example" onSignOut={vi.fn()} onDeleteAccount={vi.fn()} />)
   await expectTab('dashboard')
 }
 

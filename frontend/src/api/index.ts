@@ -7,6 +7,7 @@ export { formatEuros, formatSignedEuros } from './format'
 
 export {
   type Account,
+  deleteAccount,
   fetchAuthConfig,
   fetchCurrentAccount,
   googleSignIn,

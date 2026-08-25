@@ -318,3 +318,59 @@ async def test_auth_config_exposes_the_google_client_id(
 
     assert response.status_code == 200
     assert response.json() == {"google_client_id": "test-client-id.apps.googleusercontent.com"}
+
+
+async def test_delete_account_removes_the_account_and_its_data(client: AsyncClient) -> None:
+    """Deleting an Account (issue #84) removes it and everything scoped to
+    it. The wallet with an Opening Balance exercises the cascade: if any
+    owned row lacked ondelete=CASCADE, the delete would fail — the 204 is
+    the cascade proof through the seam."""
+    register = await client.post(
+        "/auth/register", json={"email": "gone@example.com", "password": "hunter2-hunter2"}
+    )
+    headers = {"Authorization": f"Bearer {register.json()['access_token']}"}
+    wallet = await client.post(
+        "/wallets",
+        headers=headers,
+        json={"name": "Cash", "type": "cash", "opening_balance": "50.00"},
+    )
+    assert wallet.status_code == 201
+
+    response = await client.delete("/auth/me", headers=headers)
+
+    assert response.status_code == 204
+    me = await client.get("/auth/me", headers=headers)
+    assert me.status_code == 401
+    login = await client.post(
+        "/auth/login", json={"email": "gone@example.com", "password": "hunter2-hunter2"}
+    )
+    assert login.status_code == 401
+
+
+async def test_delete_account_requires_authentication(client: AsyncClient) -> None:
+    response = await client.delete("/auth/me")
+
+    assert response.status_code == 401
+
+
+async def test_delete_account_leaves_other_accounts_untouched(client: AsyncClient) -> None:
+    """ADR-0020: one Account's deletion never touches another's data."""
+    seed_login = await client.post(
+        "/auth/login", json={"email": SEED_EMAIL, "password": SEED_PASSWORD}
+    )
+    seed_token = seed_login.json()["access_token"]
+    await client.post(
+        "/wallets",
+        headers={"Authorization": f"Bearer {seed_token}"},
+        json={"name": "Seed wallet", "type": "checking"},
+    )
+
+    register = await client.post(
+        "/auth/register", json={"email": "leaver@example.com", "password": "hunter2-hunter2"}
+    )
+    leaver_headers = {"Authorization": f"Bearer {register.json()['access_token']}"}
+    assert (await client.delete("/auth/me", headers=leaver_headers)).status_code == 204
+
+    wallets = await client.get("/wallets", headers={"Authorization": f"Bearer {seed_token}"})
+    assert wallets.status_code == 200
+    assert [wallet["name"] for wallet in wallets.json()] == ["Seed wallet"]

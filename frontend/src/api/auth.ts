@@ -71,6 +71,16 @@ export async function resetPassword(token: string, newPassword: string): Promise
   })
 }
 
+/** Delete the signed-in Account and all its data (issue #84). The token
+ * dies with it — the app signs out immediately after. */
+export async function deleteAccount(token: string): Promise<void> {
+  await request('/auth/me', {
+    method: 'DELETE',
+    token,
+    errorMessage: 'Could not delete the Account',
+  })
+}
+
 export async function fetchCurrentAccount(token: string): Promise<Account> {
   const response = await request('/auth/me', {
     token,

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { TOKEN_KEY, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
+import { TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
+import { DeleteAccountButton } from './DeleteAccountButton'
 import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
 import { RecurringScreen } from './RecurringScreen'
@@ -103,6 +104,12 @@ function App() {
     setAuth({ kind: 'signedOut' })
   }
 
+  const handleDeleteAccount = async (): Promise<void> => {
+    await deleteAccount(localStorage.getItem(TOKEN_KEY) ?? '')
+    // The Account is gone; the shell's onDeleted (= handleSignOut) clears the
+    // dead token and returns to the auth screen (issue #84).
+  }
+
   if (auth.kind === 'checking') {
     return <CheckingScreen />
   }
@@ -119,7 +126,7 @@ function App() {
       />
     )
   }
-  return <AppShell email={auth.account.email} onSignOut={handleSignOut} />
+  return <AppShell email={auth.account.email} onSignOut={handleSignOut} onDeleteAccount={handleDeleteAccount} />
 }
 
 function CheckingScreen() {
@@ -133,9 +140,11 @@ function CheckingScreen() {
 export function AppShell({
   email,
   onSignOut,
+  onDeleteAccount,
 }: {
   email: string
   onSignOut: () => void
+  onDeleteAccount: () => Promise<void>
 }) {
   const [tab, setTab] = useState<Tab>('dashboard')
   // The Import Draft lives here, not in the Transactions screen, so it
@@ -179,6 +188,8 @@ export function AppShell({
         {tab === 'categories' && <CategoriesScreen />}
         {tab === 'recurring' && <RecurringScreen />}
       </main>
+
+      <DeleteAccountButton onDelete={onDeleteAccount} onDeleted={onSignOut} />
 
       {/* Five tabs (issue #56 added Recurring): one bottom row on a phone,
        * full-width, five equal columns. */}
