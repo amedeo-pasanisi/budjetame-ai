@@ -24,6 +24,20 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8)
 
 
+class GoogleSignInRequest(BaseModel):
+    """The Google ID token (JWT) the frontend received from Google Identity
+    Services (issue #81)."""
+
+    id_token: str = Field(min_length=1)
+
+
+class AuthConfigOut(BaseModel):
+    """Public sign-in options for the auth screen: the Google client id, or
+    empty when Google sign-in is not configured."""
+
+    google_client_id: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

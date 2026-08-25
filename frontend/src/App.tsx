@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { TOKEN_KEY, fetchCurrentAccount, login, register, type Account } from './api'
+import { TOKEN_KEY, fetchCurrentAccount, googleSignIn, login, register, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft } from './importDraft'
@@ -56,13 +56,26 @@ function App() {
   }, [authCheckVersion])
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
-    const token = await login(email, password)
-    localStorage.setItem(TOKEN_KEY, token)
-    setAuthCheckVersion((count) => count + 1)
+    await signInWith(login(email, password))
   }
 
   const handleSignUp = async (email: string, password: string): Promise<void> => {
-    const token = await register(email, password)
+    await signInWith(register(email, password))
+  }
+
+  const handleGoogleSignIn = async (idToken: string): Promise<void> => {
+    try {
+      await signInWith(googleSignIn(idToken))
+    } catch {
+      // A rejected Google token (clock skew, wrong origin) leaves the user
+      // on the auth screen; the password form remains the fallback.
+    }
+  }
+
+  /** Store the bearer token and re-check /auth/me, which flips the screen
+   * to the app shell. Shared by every sign-in door (issue #81). */
+  const signInWith = async (tokenPromise: Promise<string>): Promise<void> => {
+    const token = await tokenPromise
     localStorage.setItem(TOKEN_KEY, token)
     setAuthCheckVersion((count) => count + 1)
   }
@@ -76,7 +89,7 @@ function App() {
     return <CheckingScreen />
   }
   if (auth.kind === 'signedOut') {
-    return <LoginForm onLogin={handleLogin} onSignUp={handleSignUp} />
+    return <LoginForm onLogin={handleLogin} onSignUp={handleSignUp} onGoogleSignIn={handleGoogleSignIn} />
   }
   return <AppShell email={auth.account.email} onSignOut={handleSignOut} />
 }

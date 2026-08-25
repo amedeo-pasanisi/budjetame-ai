@@ -1,16 +1,39 @@
 /** Auth screen sign-up mode (issue #82): the sign-in/sign-up toggle, the
  * mode's labels and password rules, and the error mapping (409 duplicate
  * Account, 422 validation). The API client is injected through the
- * onLogin/onSignUp props; the real ApiError class carries the statuses. */
+ * onLogin/onSignUp props; the real ApiError class carries the statuses. The
+ * Google button is a separate component (issue #81) — mocked here as a bare
+ * button so this file tests the auth screen's own wiring. */
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { ApiError } from './api'
 import { LoginForm } from './LoginForm'
 
+vi.mock('./GoogleButton', () => ({
+  GoogleButton: ({ onIdToken }: { onIdToken: (token: string) => void }) => (
+    <button type="button" onClick={() => onIdToken('stub-token')}>
+      Google
+    </button>
+  ),
+}))
+
+const noop = vi.fn().mockResolvedValue(undefined)
+
+const renderForm = (
+  overrides: Partial<{
+    onLogin: (email: string, password: string) => Promise<void>
+    onSignUp: (email: string, password: string) => Promise<void>
+    onGoogleSignIn: (idToken: string) => Promise<void>
+  }> = {},
+) =>
+  render(
+    <LoginForm onLogin={noop} onSignUp={noop} onGoogleSignIn={noop} {...overrides} />,
+  )
+
 describe('LoginForm sign-up mode (issue #82)', () => {
   it('starts in sign-in mode and toggles to sign-up and back', () => {
-    render(<LoginForm onLogin={vi.fn()} onSignUp={vi.fn()} />)
+    renderForm()
 
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
 
@@ -26,7 +49,7 @@ describe('LoginForm sign-up mode (issue #82)', () => {
 
   it('submits the sign-up form with the typed credentials', async () => {
     const onSignUp = vi.fn().mockResolvedValue(undefined)
-    render(<LoginForm onLogin={vi.fn()} onSignUp={onSignUp} />)
+    renderForm({ onSignUp })
 
     fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.com' } })
@@ -39,7 +62,7 @@ describe('LoginForm sign-up mode (issue #82)', () => {
   })
 
   it('enforces the 8-character password rule on the sign-up form', () => {
-    render(<LoginForm onLogin={vi.fn()} onSignUp={vi.fn()} />)
+    renderForm()
 
     fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
 
@@ -51,7 +74,7 @@ describe('LoginForm sign-up mode (issue #82)', () => {
     const onSignUp = vi
       .fn()
       .mockRejectedValue(new ApiError('Conflict', 409, 'An Account with this email already exists'))
-    render(<LoginForm onLogin={vi.fn()} onSignUp={onSignUp} />)
+    renderForm({ onSignUp })
 
     fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'dup@example.com' } })
@@ -65,7 +88,7 @@ describe('LoginForm sign-up mode (issue #82)', () => {
 
   it('shows a validation message on a 422 from the backend', async () => {
     const onSignUp = vi.fn().mockRejectedValue(new ApiError('Unprocessable', 422))
-    render(<LoginForm onLogin={vi.fn()} onSignUp={onSignUp} />)
+    renderForm({ onSignUp })
 
     fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'x@example.com' } })
@@ -77,12 +100,31 @@ describe('LoginForm sign-up mode (issue #82)', () => {
 
   it('sign-in mode still submits through onLogin', async () => {
     const onLogin = vi.fn().mockResolvedValue(undefined)
-    render(<LoginForm onLogin={onLogin} onSignUp={vi.fn()} />)
+    renderForm({ onLogin })
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@example.com' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2-hunter2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     await waitFor(() => expect(onLogin).toHaveBeenCalledWith('a@example.com', 'hunter2-hunter2'))
+  })
+})
+
+describe('LoginForm Google sign-in (issue #81)', () => {
+  it('shows the Google button in sign-in mode and hands the token through', async () => {
+    const onGoogleSignIn = vi.fn().mockResolvedValue(undefined)
+    renderForm({ onGoogleSignIn })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Google' }))
+
+    await waitFor(() => expect(onGoogleSignIn).toHaveBeenCalledWith('stub-token'))
+  })
+
+  it('shows the Google button in sign-up mode too', () => {
+    renderForm()
+
+    fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
+
+    expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument()
   })
 })

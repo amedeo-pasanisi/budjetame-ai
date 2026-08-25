@@ -28,6 +28,8 @@ services:
       BUDJETAME_JWT_SECRET: ${BUDJETAME_JWT_SECRET:?set in .env}
       BUDJETAME_SEED_ACCOUNT_EMAIL: ${BUDJETAME_SEED_ACCOUNT_EMAIL:?set in .env}
       BUDJETAME_SEED_ACCOUNT_PASSWORD: ${BUDJETAME_SEED_ACCOUNT_PASSWORD:?set in .env}
+      # Optional (issue #81): empty disables the Google button.
+      BUDJETAME_GOOGLE_OAUTH_CLIENT_ID: ${BUDJETAME_GOOGLE_OAUTH_CLIENT_ID:-}
     depends_on:
       db:
         condition: service_healthy

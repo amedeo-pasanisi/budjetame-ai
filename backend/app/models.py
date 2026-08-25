@@ -63,13 +63,15 @@ class IntervalUnit(str, enum.Enum):
 
 
 class Account(Base):
-    """The single login identity, seeded at setup. There is no registration path."""
+    """A person's login identity and personal data space (ADR-0020): created
+    by email+password registration or by a first Google sign-in (issue #81,
+    nullable password_hash). Every other table scopes to it."""
 
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

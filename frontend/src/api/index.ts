@@ -5,7 +5,7 @@
 export { ApiError, TOKEN_KEY, apiErrorMessage } from './transport'
 export { formatEuros, formatSignedEuros } from './format'
 
-export { type Account, fetchCurrentAccount, login, register } from './auth'
+export { type Account, fetchAuthConfig, fetchCurrentAccount, googleSignIn, login, register } from './auth'
 
 export {
   type Wallet,

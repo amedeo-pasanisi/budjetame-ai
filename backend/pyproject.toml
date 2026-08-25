@@ -1,13 +1,14 @@
 [project]
 name = "budjetame-backend"
 version = "0.1.0"
-description = "Backend for Budjetame, a single-user personal finance app"
+description = "Backend for Budjetame, a personal finance app"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
     "bcrypt>=4.2",
     "email-validator>=2.2",
     "fastapi[standard]>=0.115",
+    "google-auth>=2.36",
     "openpyxl>=3.1",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",

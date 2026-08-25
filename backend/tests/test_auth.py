@@ -5,10 +5,15 @@ state" rule, documented in that test (issue #19).
 """
 
 import bcrypt
-from httpx import AsyncClient
+from collections.abc import AsyncIterator
+
+import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.db import create_db_engine
+from app.google_auth import GoogleIdentity
+from app.main import create_app
 from app.models import Account
 
 from conftest import SEED_EMAIL, SEED_PASSWORD
@@ -182,3 +187,134 @@ async def test_me_returns_the_authenticated_account(client: AsyncClient) -> None
     body = response.json()
     assert body["email"] == SEED_EMAIL
     assert isinstance(body["id"], int)
+
+
+class FakeGoogleVerifier:
+    """The verifier seam's fake: the test sets `identity` to decide what a
+    sign-in resolves to (or None for an invalid token)."""
+
+    def __init__(self) -> None:
+        self.identity: GoogleIdentity | None = None
+
+    def verify(self, id_token: str) -> GoogleIdentity | None:
+        return self.identity
+
+
+@pytest.fixture
+async def google_client(database_url: str) -> AsyncIterator[tuple[AsyncClient, FakeGoogleVerifier]]:
+    """The app with a fake Google verifier and a known client id, so Google
+    sign-in tests never touch Google (issue #81)."""
+    verifier = FakeGoogleVerifier()
+    app = create_app(
+        database_url,
+        seed_email=SEED_EMAIL,
+        seed_password=SEED_PASSWORD,
+        google_verifier=verifier,
+        google_client_id="test-client-id.apps.googleusercontent.com",
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield async_client, verifier
+    app.state.engine.dispose()
+
+
+async def test_google_sign_in_auto_provisions_a_new_account(
+    google_client: tuple[AsyncClient, FakeGoogleVerifier],
+) -> None:
+    """ADR-0020: a first Google sign-in creates the Account on the spot — no
+    registration form, no password (the nullable password_hash, issue #81)."""
+    client, verifier = google_client
+    verifier.identity = GoogleIdentity(email="gmail.user@gmail.com", email_verified=True)
+
+    response = await client.post("/auth/google", json={"id_token": "a-google-token"})
+
+    assert response.status_code == 200
+    token = response.json()["access_token"]
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["email"] == "gmail.user@gmail.com"
+
+
+async def test_google_sign_in_links_to_an_existing_account(
+    google_client: tuple[AsyncClient, FakeGoogleVerifier],
+) -> None:
+    """ADR-0021: the verified email is the identity key — Google sign-in with
+    an email that already has a password Account enters that Account; both
+    doors keep working."""
+    client, verifier = google_client
+    registered = await client.post(
+        "/auth/register", json={"email": "same@example.com", "password": "hunter2-hunter2"}
+    )
+    registered_id = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {registered.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    verifier.identity = GoogleIdentity(email="same@example.com", email_verified=True)
+    google = await client.post("/auth/google", json={"id_token": "a-google-token"})
+
+    assert google.status_code == 200
+    linked_id = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {google.json()['access_token']}"}
+        )
+    ).json()["id"]
+    assert linked_id == registered_id
+
+    password_login = await client.post(
+        "/auth/login", json={"email": "same@example.com", "password": "hunter2-hunter2"}
+    )
+    assert password_login.status_code == 200
+
+
+async def test_google_sign_in_rejects_an_unverified_email(
+    google_client: tuple[AsyncClient, FakeGoogleVerifier],
+) -> None:
+    """A token whose email Google has not verified is rejected: the email is
+    the identity key (ADR-0021), so it must be proven."""
+    client, verifier = google_client
+    verifier.identity = GoogleIdentity(email="unverified@gmail.com", email_verified=False)
+
+    response = await client.post("/auth/google", json={"id_token": "a-google-token"})
+
+    assert response.status_code == 401
+
+
+async def test_google_sign_in_rejects_an_invalid_token(
+    google_client: tuple[AsyncClient, FakeGoogleVerifier],
+) -> None:
+    client, verifier = google_client
+    verifier.identity = None
+
+    response = await client.post("/auth/google", json={"id_token": "forged-token"})
+
+    assert response.status_code == 401
+
+
+async def test_google_only_account_cannot_sign_in_with_a_password(
+    google_client: tuple[AsyncClient, FakeGoogleVerifier],
+) -> None:
+    """A Google-provisioned Account has no password: any password fails (the
+    nullable hash signs in through Google only, issue #81)."""
+    client, verifier = google_client
+    verifier.identity = GoogleIdentity(email="passless@gmail.com", email_verified=True)
+    assert (await client.post("/auth/google", json={"id_token": "t"})).status_code == 200
+
+    response = await client.post(
+        "/auth/login", json={"email": "passless@gmail.com", "password": "anything"}
+    )
+    assert response.status_code == 401
+
+
+async def test_auth_config_exposes_the_google_client_id(
+    google_client: tuple[AsyncClient, FakeGoogleVerifier],
+) -> None:
+    """The public sign-in options: the client id is public (it ships to the
+    browser anyway) and empty means no Google button (issue #81)."""
+    client, _ = google_client
+
+    response = await client.get("/auth/config")
+
+    assert response.status_code == 200
+    assert response.json() == {"google_client_id": "test-client-id.apps.googleusercontent.com"}

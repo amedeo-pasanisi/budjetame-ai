@@ -6,6 +6,7 @@ from app.categories import router as categories_router
 from app.config import settings
 from app.dashboard import router as dashboard_router
 from app.db import check_connection, create_db_engine
+from app.google_auth import GoogleIdTokenVerifier, GoogleVerifier
 from app.imports import router as imports_router
 from app.recurring_costs import router as recurring_costs_router
 from app.recurring_incomes import router as recurring_incomes_router
@@ -19,12 +20,20 @@ def create_app(
     *,
     seed_email: str | None = None,
     seed_password: str | None = None,
+    google_client_id: str | None = None,
+    google_verifier: GoogleVerifier | None = None,
 ) -> FastAPI:
-    """Build the application. `database_url` and seed credentials override settings for tests."""
+    """Build the application. `database_url` and the seed credentials override
+    settings for tests; `google_client_id` and `google_verifier` do the same
+    for the Google sign-in seam (issue #81)."""
     app = FastAPI(title="Budjetame API", version="0.1.0")
     engine = create_db_engine(database_url or settings.database_url)
     app.state.sessionmaker = sessionmaker(bind=engine, expire_on_commit=False)
     app.state.engine = engine  # tests dispose it at teardown to release the pool
+    app.state.google_client_id = (
+        google_client_id if google_client_id is not None else settings.google_oauth_client_id
+    )
+    app.state.google_verifier = google_verifier or GoogleIdTokenVerifier(app.state.google_client_id)
 
     seed_account(
         app.state.sessionmaker,

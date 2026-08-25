@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 
 import { ApiError } from './api'
+import { GoogleButton } from './GoogleButton'
 import { Card, Screen } from './Screen'
 
 type Mode = 'signin' | 'signup'
@@ -8,9 +9,10 @@ type Mode = 'signin' | 'signup'
 type LoginFormProps = {
   onLogin: (email: string, password: string) => Promise<void>
   onSignUp: (email: string, password: string) => Promise<void>
+  onGoogleSignIn: (idToken: string) => Promise<void>
 }
 
-export function LoginForm({ onLogin, onSignUp }: LoginFormProps) {
+export function LoginForm({ onLogin, onSignUp, onGoogleSignIn }: LoginFormProps) {
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -62,7 +64,15 @@ export function LoginForm({ onLogin, onSignUp }: LoginFormProps) {
         <p className="mt-1 text-sm text-slate-500">
           {signUp ? 'Create an Account to see your money.' : 'Sign in to see your money.'}
         </p>
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        <div className="mt-6">
+          <GoogleButton onIdToken={onGoogleSignIn} />
+        </div>
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span className="text-xs text-slate-400">or</span>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-700">
               Email

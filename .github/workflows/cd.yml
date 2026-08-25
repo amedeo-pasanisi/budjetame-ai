@@ -82,6 +82,7 @@ jobs:
           BUDJETAME_JWT_SECRET=${{ secrets.BUDJETAME_JWT_SECRET }}
           BUDJETAME_SEED_ACCOUNT_EMAIL=${{ secrets.BUDJETAME_SEED_ACCOUNT_EMAIL }}
           BUDJETAME_SEED_ACCOUNT_PASSWORD=${{ secrets.BUDJETAME_SEED_ACCOUNT_PASSWORD }}
+          BUDJETAME_GOOGLE_OAUTH_CLIENT_ID=${{ secrets.BUDJETAME_GOOGLE_OAUTH_CLIENT_ID }}
           EOF
           scp -i ~/.ssh/deploy_key .env compose.deploy.yaml ubuntu@${{ secrets.VM_HOST }}:~/
       - name: Install Docker if missing
