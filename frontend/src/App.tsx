@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { TOKEN_KEY, fetchCurrentAccount, login, type Account } from './api'
+import { TOKEN_KEY, fetchCurrentAccount, login, register, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft } from './importDraft'
@@ -61,6 +61,12 @@ function App() {
     setAuthCheckVersion((count) => count + 1)
   }
 
+  const handleSignUp = async (email: string, password: string): Promise<void> => {
+    const token = await register(email, password)
+    localStorage.setItem(TOKEN_KEY, token)
+    setAuthCheckVersion((count) => count + 1)
+  }
+
   const handleSignOut = () => {
     localStorage.removeItem(TOKEN_KEY)
     setAuth({ kind: 'signedOut' })
@@ -70,7 +76,7 @@ function App() {
     return <CheckingScreen />
   }
   if (auth.kind === 'signedOut') {
-    return <LoginForm onLogin={handleLogin} />
+    return <LoginForm onLogin={handleLogin} onSignUp={handleSignUp} />
   }
   return <AppShell email={auth.account.email} onSignOut={handleSignOut} />
 }

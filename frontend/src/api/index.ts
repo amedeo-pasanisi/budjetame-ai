@@ -5,7 +5,7 @@
 export { ApiError, TOKEN_KEY, apiErrorMessage } from './transport'
 export { formatEuros, formatSignedEuros } from './format'
 
-export { type Account, fetchCurrentAccount, login } from './auth'
+export { type Account, fetchCurrentAccount, login, register } from './auth'
 
 export {
   type Wallet,
