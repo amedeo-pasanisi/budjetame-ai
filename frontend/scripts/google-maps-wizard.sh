@@ -193,8 +193,10 @@ finish() {
 TOTAL_STAGES=5
 TOTAL_MINUTES=25
 
-# Always write to frontend/.env, wherever the script is run from.
-ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/.." && pwd)/.env}"
+# Always write to frontend/.env, wherever the script is run from. (The
+# library's default is ".env" relative to the CWD, which silently goes to
+# the wrong place — this override must be unconditional.)
+ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
 
 banner "Google Maps picker — API key setup"
 

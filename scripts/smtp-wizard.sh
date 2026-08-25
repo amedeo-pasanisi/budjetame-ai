@@ -193,8 +193,10 @@ finish() {
 TOTAL_STAGES=4
 TOTAL_MINUTES=12
 
-# The backend reads BUDJETAME_* from its own .env (app/config.py).
-ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../backend" && pwd)/.env}"
+# The backend reads BUDJETAME_* from its own .env (app/config.py). The
+# library's default is ".env" relative to the CWD, which silently goes to
+# the wrong place — always write backend/.env, wherever the script runs from.
+ENV_FILE="$(cd "$(dirname "$0")/../backend" && pwd)/.env"
 
 banner "Password-reset email — SMTP setup"
 
