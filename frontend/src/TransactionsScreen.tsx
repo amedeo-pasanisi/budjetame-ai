@@ -122,10 +122,15 @@ export function TransactionsScreen({
   const [filterFromDate, setFilterFromDate] = useState('')
   const [filterToDate, setFilterToDate] = useState('')
   const [filterCategoryId, setFilterCategoryId] = useState<number>(ALL_CATEGORIES)
-  // The Recurring link filter (issue #85): undefined = all, 'cost' narrows
-  // to Expenses linked to a Recurring Cost, 'income' to Incomes linked to a
-  // Recurring Income. Like every filter it composes with the others.
-  const [filterRecurring, setFilterRecurring] = useState<'cost' | 'income' | undefined>(undefined)
+  // The Recurring definition filter (issue #86): one select listing every
+  // created Recurring Cost and Recurring Income (grouped — names may
+  // collide across kinds); picking one narrows the ledger to the
+  // Transactions linked to exactly that definition. The options come from
+  // the link picker's auxiliary fetches, so the filter costs no extra
+  // request. Undefined = all.
+  const [filterRecurring, setFilterRecurring] = useState<
+    { kind: 'cost' | 'income'; id: number } | undefined
+  >(undefined)
 
   // Search (issue #54, ADR-0009): the input updates instantly; the request
   // needle is trimmed and debounced ~300ms, then refetches the first page
@@ -147,7 +152,13 @@ export function TransactionsScreen({
     if (filterCategoryId !== ALL_CATEGORIES) result.categoryId = filterCategoryId
     if (filterFromDate !== '') result.fromDate = filterFromDate
     if (filterToDate !== '') result.toDate = filterToDate
-    if (filterRecurring !== undefined) result.recurring = filterRecurring
+    if (filterRecurring !== undefined) {
+      if (filterRecurring.kind === 'cost') {
+        result.recurringCostId = filterRecurring.id
+      } else {
+        result.recurringIncomeId = filterRecurring.id
+      }
+    }
     return result
   }, [filterWalletId, filterCategoryId, filterFromDate, filterToDate, filterRecurring])
 
@@ -565,17 +576,37 @@ export function TransactionsScreen({
                 </label>
                 <select
                   id="filters-recurring"
-                  value={filterRecurring ?? ''}
-                  onChange={(event) =>
-                    setFilterRecurring(
-                      event.target.value === '' ? undefined : (event.target.value as 'cost' | 'income'),
-                    )
+                  value={
+                    filterRecurring === undefined
+                      ? ''
+                      : `${filterRecurring.kind}:${filterRecurring.id}`
                   }
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (value === '') {
+                      setFilterRecurring(undefined)
+                      return
+                    }
+                    const [kind, id] = value.split(':')
+                    setFilterRecurring({ kind: kind as 'cost' | 'income', id: Number(id) })
+                  }}
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
                 >
                   <option value="">All transactions</option>
-                  <option value="cost">Recurring costs</option>
-                  <option value="income">Recurring incomes</option>
+                  <optgroup label="Recurring costs">
+                    {recurringCosts.map((cost) => (
+                      <option key={cost.id} value={`cost:${cost.id}`}>
+                        {cost.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Recurring incomes">
+                    {recurringIncomes.map((income) => (
+                      <option key={income.id} value={`income:${income.id}`}>
+                        {income.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
 

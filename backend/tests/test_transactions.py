@@ -12,6 +12,7 @@ from app.models import (
     Account,
     Category,
     CategoryType,
+    RecurringCost,
     Transaction,
     TransactionType,
     Wallet,
@@ -854,74 +855,119 @@ async def _create_recurring_definition(
     return response.json()["id"]
 
 
-async def test_list_filters_by_the_recurring_link(client: AsyncClient) -> None:
-    """The Recurring filter (issue #85): `recurring=cost` keeps only
-    Expenses linked to a Recurring Cost, `recurring=income` only Incomes
-    linked to a Recurring Income; unlinked Transactions of either type drop
-    out. The linked dates pay ahead (2030-02-15, before the first
-    Occurrence), so the link is valid regardless of when the suite runs."""
+async def test_list_filters_by_a_specific_recurring_definition(
+    client: AsyncClient,
+) -> None:
+    """The Recurring filter (issue #86): `recurring_cost_id` keeps only
+    Transactions pinned to exactly that Recurring Cost, `recurring_income_id`
+    only those pinned to exactly that Recurring Income — sibling definitions
+    and unlinked Transactions of either type drop out. The linked dates pay
+    ahead (2030-02-15, before the first Occurrence), so the links are valid
+    regardless of when the suite runs."""
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Recurring Filter Wallet", "checking")
-    cost_id = await _create_recurring_definition(client, token, "recurring-costs", "Filter Rent")
-    income_id = await _create_recurring_definition(client, token, "recurring-incomes", "Filter Salary")
+    rent = await _create_recurring_definition(client, token, "recurring-costs", "Filter Rent")
+    netflix = await _create_recurring_definition(client, token, "recurring-costs", "Filter Netflix")
+    salary = await _create_recurring_definition(client, token, "recurring-incomes", "Filter Salary")
 
-    linked_expense = await client.post(
+    rent_expense = await client.post(
         "/transactions",
         json={
             "type": "expense",
             "amount": "10.00",
             "date": "2030-02-15",
             "wallet_id": wallet_id,
-            "recurring_cost_id": cost_id,
+            "recurring_cost_id": rent,
         },
         headers=_auth(token),
     )
-    linked_income = await client.post(
+    netflix_expense = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "15.00",
+            "date": "2030-02-15",
+            "wallet_id": wallet_id,
+            "recurring_cost_id": netflix,
+        },
+        headers=_auth(token),
+    )
+    salary_income = await client.post(
         "/transactions",
         json={
             "type": "income",
             "amount": "20.00",
             "date": "2030-02-15",
             "wallet_id": wallet_id,
-            "recurring_income_id": income_id,
+            "recurring_income_id": salary,
         },
         headers=_auth(token),
     )
-    assert linked_expense.status_code == 201
-    assert linked_income.status_code == 201
+    assert rent_expense.status_code == 201
+    assert netflix_expense.status_code == 201
+    assert salary_income.status_code == 201
     await client.post(
         "/transactions",
         json={"type": "expense", "amount": "5.00", "date": "2030-02-14", "wallet_id": wallet_id},
         headers=_auth(token),
     )
 
-    costs = await _list_all(client, token, wallet_id=wallet_id, recurring="cost")
-    assert [t["id"] for t in costs] == [linked_expense.json()["id"]]
-    assert all(t["recurring_cost_id"] == cost_id for t in costs)
+    # Filtering by one cost returns that cost's rows only — not the sibling
+    # cost's, not the income's, not the unlinked expense's.
+    rent_rows = await _list_all(client, token, wallet_id=wallet_id, recurring_cost_id=rent)
+    assert [t["id"] for t in rent_rows] == [rent_expense.json()["id"]]
+    assert all(t["recurring_cost_id"] == rent for t in rent_rows)
 
-    incomes = await _list_all(client, token, wallet_id=wallet_id, recurring="income")
-    assert [t["id"] for t in incomes] == [linked_income.json()["id"]]
-    assert all(t["recurring_income_id"] == income_id for t in incomes)
+    netflix_rows = await _list_all(
+        client, token, wallet_id=wallet_id, recurring_cost_id=netflix
+    )
+    assert [t["id"] for t in netflix_rows] == [netflix_expense.json()["id"]]
 
-    # Unfiltered, all three rows are present — the filter narrows, it never
+    salary_rows = await _list_all(
+        client, token, wallet_id=wallet_id, recurring_income_id=salary
+    )
+    assert [t["id"] for t in salary_rows] == [salary_income.json()["id"]]
+    assert all(t["recurring_income_id"] == salary for t in salary_rows)
+
+    # Unfiltered, all four rows are present — the filter narrows, it never
     # replaces the other filters.
     all_rows = await _list_all(client, token, wallet_id=wallet_id)
     assert {t["id"] for t in all_rows} >= {
-        linked_expense.json()["id"],
-        linked_income.json()["id"],
+        rent_expense.json()["id"],
+        netflix_expense.json()["id"],
+        salary_income.json()["id"],
     }
 
 
-async def test_list_rejects_an_invalid_recurring_filter(client: AsyncClient) -> None:
-    """Any Recurring value other than `cost` or `income` is a client error
-    (422), not a silent no-filter — a typo must never widen the ledger."""
+async def test_list_foreign_or_missing_recurring_filter_is_forbidden(
+    client: AsyncClient, database_url: str
+) -> None:
+    """A Recurring Cost or Income filter naming a definition that is not the
+    Account's own — or that does not exist at all — answers 403, the same
+    as the Wallet and Category filters (ADR-0003: foreign data is never
+    distinguishable from absent data)."""
     token = await _login(client)
+    account_id = insert_foreign_account(database_url, "recurring-nosy@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            cost = RecurringCost(
+                account_id=account_id,
+                name="Their Cost",
+                amount=Decimal("10.00"),
+                interval_value=1,
+                interval_unit="months",
+            )
+            session.add(cost)
+            session.commit()
+            foreign_cost_id = cost.id
+        engine.dispose()
 
-    response = await client.get(
-        "/transactions", params={"recurring": "monthly"}, headers=_auth(token)
-    )
-
-    assert response.status_code == 422
+        for params in ({"recurring_cost_id": foreign_cost_id}, {"recurring_income_id": 999_999}):
+            response = await client.get("/transactions", params=params, headers=_auth(token))
+            assert response.status_code == 403
+    finally:
+        delete_account(database_url, account_id)
 
 
 async def test_foreign_transaction_returns_403(client: AsyncClient, database_url: str) -> None:

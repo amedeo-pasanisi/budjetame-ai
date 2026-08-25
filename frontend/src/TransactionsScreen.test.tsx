@@ -691,9 +691,11 @@ describe('TransactionsScreen search (issue #54)', () => {
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
   })
 
-  it('filters by the recurring link (issue #85)', async () => {
-    // A linked Expense and a linked Income, so the two select options each
-    // show exactly their own kind of row.
+  it('filters by a chosen recurring definition (issue #86)', async () => {
+    // A linked Expense and a linked Income, so picking the Rent cost shows
+    // only its rows and picking the Salary income only its own. The
+    // select's options come from the link picker's fetches, which the
+    // test drives like the screen's reload does.
     const linkedRent = {
       ...baseTransaction,
       id: 8,
@@ -709,11 +711,13 @@ describe('TransactionsScreen search (issue #54)', () => {
       recurring_income_id: 12,
       occurrence_date: '2026-08-01',
     } as Transaction
+    fetchRecurringCostsMock.mockResolvedValue([rentCost])
+    fetchRecurringIncomesMock.mockResolvedValue([salaryIncome])
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) => {
-      if (filters.recurring === 'cost') {
+      if (filters.recurringCostId === 11) {
         return { items: [linkedRent], next_cursor: null }
       }
-      if (filters.recurring === 'income') {
+      if (filters.recurringIncomeId === 12) {
         return { items: [linkedSalary], next_cursor: null }
       }
       return page1
@@ -723,20 +727,23 @@ describe('TransactionsScreen search (issue #54)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
     const recurring = await screen.findByLabelText('Recurring')
+    // Both created definitions are offered, grouped by kind.
+    expect(within(recurring).getByRole('option', { name: 'Rent' })).toBeInTheDocument()
+    expect(within(recurring).getByRole('option', { name: 'Salary' })).toBeInTheDocument()
 
-    // Recurring costs: only the linked Expense is listed.
-    fireEvent.change(recurring, { target: { value: 'cost' } })
+    // Picking the Rent cost sends recurring_cost_id and lists only its rows.
+    fireEvent.change(recurring, { target: { value: 'cost:11' } })
     await waitFor(() =>
-      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { recurring: 'cost' }),
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { recurringCostId: 11 }),
     )
     expect(await screen.findByText(/Linked rent/)).toBeInTheDocument()
     expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
 
-    // Recurring incomes: only the linked Income is listed.
-    fireEvent.change(recurring, { target: { value: 'income' } })
+    // Picking the Salary income sends recurring_income_id instead.
+    fireEvent.change(recurring, { target: { value: 'income:12' } })
     await waitFor(() =>
       expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
-        recurring: 'income',
+        recurringIncomeId: 12,
       }),
     )
     expect(await screen.findByText(/Linked salary/)).toBeInTheDocument()

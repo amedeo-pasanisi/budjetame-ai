@@ -357,33 +357,48 @@ async def test_export_applies_the_search_filter(client: AsyncClient) -> None:
 
 
 async def test_export_applies_the_recurring_filter(client: AsyncClient) -> None:
-    """The Recurring link filter (issue #85) rides the export like every
-    other filter: `recurring=cost` writes only linked Expenses, `income`
-    only linked Incomes — the export is exactly what the ledger shows. The
-    linked dates pay ahead (2030-02-15, before the first Occurrence), so the
-    links are valid regardless of when the suite runs."""
+    """The Recurring definition filter (issue #86) rides the export like
+    every other filter: filtering by a specific Recurring Cost or Recurring
+    Income writes only the Transactions pinned to exactly that definition —
+    the export is exactly what the ledger shows. The linked dates pay ahead
+    (2030-02-15, before the first Occurrence), so the links are valid
+    regardless of when the suite runs."""
     token = await _login(client)
     wallet = await _create_wallet(client, token, _name("Export Recurring"))
-    cost = await _create_recurring_definition(client, token, "recurring-costs", _name("Export Cost"))
-    income = await _create_recurring_definition(client, token, "recurring-incomes", _name("Export Income"))
+    rent = await _create_recurring_definition(client, token, "recurring-costs", _name("Export Rent"))
+    netflix = await _create_recurring_definition(client, token, "recurring-costs", _name("Export Netflix"))
+    salary = await _create_recurring_definition(client, token, "recurring-incomes", _name("Export Salary"))
     await _create_transaction(
         client, token, type="expense", amount="10.00", date="2030-02-15",
-        wallet_id=wallet, recurring_cost_id=cost, description="linked rent",
+        wallet_id=wallet, recurring_cost_id=rent, description="linked rent",
+    )
+    await _create_transaction(
+        client, token, type="expense", amount="15.00", date="2030-02-15",
+        wallet_id=wallet, recurring_cost_id=netflix, description="linked netflix",
     )
     await _create_transaction(
         client, token, type="income", amount="20.00", date="2030-02-15",
-        wallet_id=wallet, recurring_income_id=income, description="linked salary",
+        wallet_id=wallet, recurring_income_id=salary, description="linked salary",
     )
     await _create_transaction(
         client, token, type="expense", amount="5.00", date="2030-02-14",
         wallet_id=wallet, description="plain coffee",
     )
 
-    costs = _cells(await _export(client, token, wallet_id=wallet, recurring="cost"))
-    assert [row[7] for row in costs[1:]] == ["linked rent"]
+    rent_rows = _cells(
+        await _export(client, token, wallet_id=wallet, recurring_cost_id=rent)
+    )
+    assert [row[7] for row in rent_rows[1:]] == ["linked rent"]
 
-    incomes = _cells(await _export(client, token, wallet_id=wallet, recurring="income"))
-    assert [row[7] for row in incomes[1:]] == ["linked salary"]
+    netflix_rows = _cells(
+        await _export(client, token, wallet_id=wallet, recurring_cost_id=netflix)
+    )
+    assert [row[7] for row in netflix_rows[1:]] == ["linked netflix"]
+
+    salary_rows = _cells(
+        await _export(client, token, wallet_id=wallet, recurring_income_id=salary)
+    )
+    assert [row[7] for row in salary_rows[1:]] == ["linked salary"]
 
 
 async def _create_recurring_definition(
