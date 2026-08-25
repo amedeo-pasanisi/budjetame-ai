@@ -1,11 +1,11 @@
 # Budjetame
 
-A single-user personal finance app. Money lives in Wallets; every balance is derived from the Wallet's transaction history, and Net Worth is the sum of all Wallet balances.
+A personal finance app where each person has their own Account. Money lives in Wallets; every balance is derived from the Wallet's transaction history, and Net Worth is the sum of all Wallet balances.
 
 ## Language
 
 **Account**:
-The single login identity in the system, seeded at setup. There is no registration path.
+A person's login identity and personal data space. Created by email+password registration or by a first Google sign-in (auto-provisioned). All data is scoped to the Account that owns it — no Account can see or touch another's.
 _Avoid_: user, profile
 
 **Wallet**:
@@ -151,11 +151,11 @@ _Avoid_: backup, dump, statement
 - Each month's Budget starts fresh at 0; Spendable Today may go negative within the month and is displayed as 0 until future accruals repay it.
 - Imports never set the link.
 - An Export never carries the link either: an exported row has no Recurring link and no Place — coordinates only — and Opening Balance Transactions are not exported.
-- All data is scoped to the single Account; foreign data gets a 403.
+- All data is scoped to its owning Account; foreign data gets a 403.
 
 ## Non-goals
 
-- Registration and multi-user accounts
+- Email verification: signups are trusted without a confirmation email — identity proof is the password itself, a password reset, or Google's verified email
 - Auto-generated transactions: the app never creates them — Recurring Costs and Recurring Incomes are tracking-only
 - Multi-currency
 - Bank sync via GoCardless (deferred to a later milestone)
