@@ -144,6 +144,14 @@
   * Debts are Contact Wallets only: credit cards and other types are accounts, never debt parties.
   * Frontend-only change: no backend, schema, or migration work; no search bar, no subtotals, no Dashboard changes.
 
+**US 5.3 - Expense on a Contact Wallet (consumption a contact paid for)** (issue #79)
+* **Story:** As a user, I want to record an Expense on a Contact Wallet, so that when someone buys something for me I record one Transaction and my Net Worth reflects the debt the same day.
+* **Acceptance Criteria:**
+  * I can create an Expense whose Wallet is a Contact Wallet; the contact's balance decreases (positive shrinks, negative grows) and Net Worth drops on the same day.
+  * The Expense feeds category stats and the Budget like any other Expense.
+  * Incomes on Contact Wallets stay forbidden: they still fail with the Transfers-only error.
+  * Repaying the debt is a Transfer from my wallet to the contact and never changes Net Worth (ADR-0017).
+
 ---
 
 ### EPIC 6: Dashboard and Reporting

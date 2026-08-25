@@ -55,26 +55,34 @@ export function TypeSelector({
 /** The single-Wallet select an Expense or Income moves money through, with
  * the inline "＋ Add wallet…" sentinel (ADR-0013): the shared EntitySelect
  * wrapper renders it always last and reverts the field on a sentinel pick;
- * the screen hosts the inner New wallet modal, restricted to Checking,
- * Credit Card, and Cash — Contact Wallets only move money via Transfers,
- * so they never appear here. */
+ * the screen hosts the inner New wallet modal. An Expense may pick a
+ * Contact Wallet — one Transaction records consumption the contact paid
+ * for, the Balance moving toward zero or negative (ADR-0017) — while an
+ * Income never may: money coming in from a contact is a Transfer, and a
+ * gift is an Income on the user's own Wallet, so the Income picker still
+ * filters Contact Wallets out. */
 export function WalletField({
   wallets,
+  type,
   value,
   disabled,
   onChange,
   onAdd,
 }: {
   wallets: Wallet[]
+  /** The Expense or Income the field belongs to: Expense allows Contact
+   * Wallets, Income does not. */
+  type: 'expense' | 'income'
   value: number | undefined
   disabled: boolean
   onChange: (walletId: number) => void
   /** Opens the Wallet create modal, hosted by the screen. */
   onAdd: () => void
 }) {
-  const spendableWallets = wallets.filter((wallet) =>
-    NON_CONTACT_WALLET_TYPES.includes(wallet.type),
-  )
+  const spendableWallets =
+    type === 'expense'
+      ? wallets
+      : wallets.filter((wallet) => NON_CONTACT_WALLET_TYPES.includes(wallet.type))
   return (
     <div>
       <EntitySelect
@@ -94,7 +102,9 @@ export function WalletField({
         onAdd={onAdd}
       />
       <p className="mt-1 text-xs text-slate-500">
-        Contact wallets only move money through transfers.
+        {type === 'expense'
+          ? 'An expense on a contact wallet means the contact paid for this.'
+          : "Incomes can't be recorded on contact wallets."}
       </p>
     </div>
   )

@@ -13,7 +13,7 @@ Any money-holder in the system. Four types: Checking, Credit Card, Cash, Contact
 _Avoid_: account, bank account
 
 **Contact Wallet**:
-A Wallet that represents a person or organization whose debts with the user are tracked (e.g. "Marco"). A positive balance means they owe you; a negative one means you owe them. Money moves in and out only via Transfers.
+A Wallet that represents a person or organization whose debts with the user are tracked (e.g. "Marco"). A positive balance means they owe you; a negative one means you owe them. Money moves in and out via Transfers, and an Expense on it records consumption the contact paid for.
 _Avoid_: third-party account, friends account, IOU
 
 **Transaction**:
@@ -21,7 +21,7 @@ A dated money movement recorded on one or two Wallets. Types: Expense, Income, T
 _Avoid_: entry, movement, operation, record
 
 **Expense**:
-A Transaction that decreases a Wallet's balance — money leaves the user's control.
+A Transaction that decreases a Wallet's balance — money leaves the user's control, or, on a Contact Wallet, the contact paid for the user's consumption.
 _Avoid_: spending, outgoing, payment
 
 **Income**:
@@ -132,7 +132,7 @@ _Avoid_: backup, dump, statement
 
 - The only supported currency is EUR.
 - Cash Wallets may go negative, but any write that would do so shows a warning. Checking, Credit Card, and Contact Wallets can go negative without a warning.
-- Contact Wallets participate only in Transfers — never direct Expense/Income Transactions.
+- Contact Wallets move money via Transfers and as the Wallet of an Expense (consumption the contact paid for); never as the Wallet of an Income.
 - Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
 - A Wallet can only be frozen when its balance is exactly €0.
 - A Frozen Wallet can be unfrozen at any time: its balance is always exactly €0 while frozen.
