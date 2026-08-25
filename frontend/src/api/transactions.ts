@@ -70,6 +70,10 @@ export type TransactionFilters = {
   categoryId?: number
   fromDate?: string
   toDate?: string
+  /** The Recurring link filter (issue #85): `cost` narrows to Expenses
+   * linked to a Recurring Cost, `income` to Incomes linked to a Recurring
+   * Income; absent means no link filter. */
+  recurring?: 'cost' | 'income'
   /** The Description needle (ADR-0009): sent only when non-blank; the
    * backend matches it case-insensitively as a literal substring. */
   q?: string
@@ -97,6 +101,9 @@ function transactionParams(filters: TransactionFilters): URLSearchParams {
   }
   if (filters.categoryId !== undefined) {
     params.set('category_id', String(filters.categoryId))
+  }
+  if (filters.recurring !== undefined) {
+    params.set('recurring', filters.recurring)
   }
   if (filters.fromDate !== undefined && filters.fromDate !== '') {
     params.set('from_date', filters.fromDate)

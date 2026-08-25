@@ -356,6 +356,56 @@ async def test_export_applies_the_search_filter(client: AsyncClient) -> None:
     assert [row[0] for row in rows[1:]] == ["2026-08-01"]
 
 
+async def test_export_applies_the_recurring_filter(client: AsyncClient) -> None:
+    """The Recurring link filter (issue #85) rides the export like every
+    other filter: `recurring=cost` writes only linked Expenses, `income`
+    only linked Incomes — the export is exactly what the ledger shows. The
+    linked dates pay ahead (2030-02-15, before the first Occurrence), so the
+    links are valid regardless of when the suite runs."""
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, _name("Export Recurring"))
+    cost = await _create_recurring_definition(client, token, "recurring-costs", _name("Export Cost"))
+    income = await _create_recurring_definition(client, token, "recurring-incomes", _name("Export Income"))
+    await _create_transaction(
+        client, token, type="expense", amount="10.00", date="2030-02-15",
+        wallet_id=wallet, recurring_cost_id=cost, description="linked rent",
+    )
+    await _create_transaction(
+        client, token, type="income", amount="20.00", date="2030-02-15",
+        wallet_id=wallet, recurring_income_id=income, description="linked salary",
+    )
+    await _create_transaction(
+        client, token, type="expense", amount="5.00", date="2030-02-14",
+        wallet_id=wallet, description="plain coffee",
+    )
+
+    costs = _cells(await _export(client, token, wallet_id=wallet, recurring="cost"))
+    assert [row[7] for row in costs[1:]] == ["linked rent"]
+
+    incomes = _cells(await _export(client, token, wallet_id=wallet, recurring="income"))
+    assert [row[7] for row in incomes[1:]] == ["linked salary"]
+
+
+async def _create_recurring_definition(
+    client: AsyncClient, token: str, path: str, name: str
+) -> int:
+    """A monthly Recurring Cost or Recurring Income starting 2030-03-01,
+    returning its id."""
+    response = await client.post(
+        f"/{path}",
+        json={
+            "name": name,
+            "amount": "50.00",
+            "interval_value": 1,
+            "interval_unit": "months",
+            "start_date": "2030-03-01",
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
 async def test_export_includes_rows_on_frozen_wallets(client: AsyncClient) -> None:
     token = await _login(client)
     a_name = _name("Export A")

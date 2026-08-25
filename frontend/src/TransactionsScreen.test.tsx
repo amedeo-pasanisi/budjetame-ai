@@ -691,6 +691,65 @@ describe('TransactionsScreen search (issue #54)', () => {
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
   })
 
+  it('filters by the recurring link (issue #85)', async () => {
+    // A linked Expense and a linked Income, so the two select options each
+    // show exactly their own kind of row.
+    const linkedRent = {
+      ...baseTransaction,
+      id: 8,
+      description: 'Linked rent',
+      recurring_cost_id: 11,
+      occurrence_date: '2026-08-01',
+    } as Transaction
+    const linkedSalary = {
+      ...baseTransaction,
+      id: 9,
+      type: 'income',
+      description: 'Linked salary',
+      recurring_income_id: 12,
+      occurrence_date: '2026-08-01',
+    } as Transaction
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) => {
+      if (filters.recurring === 'cost') {
+        return { items: [linkedRent], next_cursor: null }
+      }
+      if (filters.recurring === 'income') {
+        return { items: [linkedSalary], next_cursor: null }
+      }
+      return page1
+    })
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    const recurring = await screen.findByLabelText('Recurring')
+
+    // Recurring costs: only the linked Expense is listed.
+    fireEvent.change(recurring, { target: { value: 'cost' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { recurring: 'cost' }),
+    )
+    expect(await screen.findByText(/Linked rent/)).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+
+    // Recurring incomes: only the linked Income is listed.
+    fireEvent.change(recurring, { target: { value: 'income' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        recurring: 'income',
+      }),
+    )
+    expect(await screen.findByText(/Linked salary/)).toBeInTheDocument()
+    expect(screen.queryByText(/Linked rent/)).not.toBeInTheDocument()
+
+    // Clearing restores the full ledger.
+    fireEvent.change(recurring, { target: { value: '' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}),
+    )
+    expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
+  })
+
   it('resets the search when the screen unmounts (a tab switch)', async () => {
     const { unmount } = render(<Harness />)
     await screen.findByText(/Coffee/)

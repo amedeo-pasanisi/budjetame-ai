@@ -122,6 +122,10 @@ export function TransactionsScreen({
   const [filterFromDate, setFilterFromDate] = useState('')
   const [filterToDate, setFilterToDate] = useState('')
   const [filterCategoryId, setFilterCategoryId] = useState<number>(ALL_CATEGORIES)
+  // The Recurring link filter (issue #85): undefined = all, 'cost' narrows
+  // to Expenses linked to a Recurring Cost, 'income' to Incomes linked to a
+  // Recurring Income. Like every filter it composes with the others.
+  const [filterRecurring, setFilterRecurring] = useState<'cost' | 'income' | undefined>(undefined)
 
   // Search (issue #54, ADR-0009): the input updates instantly; the request
   // needle is trimmed and debounced ~300ms, then refetches the first page
@@ -143,8 +147,9 @@ export function TransactionsScreen({
     if (filterCategoryId !== ALL_CATEGORIES) result.categoryId = filterCategoryId
     if (filterFromDate !== '') result.fromDate = filterFromDate
     if (filterToDate !== '') result.toDate = filterToDate
+    if (filterRecurring !== undefined) result.recurring = filterRecurring
     return result
-  }, [filterWalletId, filterCategoryId, filterFromDate, filterToDate])
+  }, [filterWalletId, filterCategoryId, filterFromDate, filterToDate, filterRecurring])
 
   // The Filters bar and the search compose into one request (ADR-0009): the
   // client omits a blank q, so a cleared search refetches the filtered list.
@@ -552,6 +557,26 @@ export function TransactionsScreen({
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="filters-recurring" className="block text-sm font-medium text-slate-700">
+                  Recurring
+                </label>
+                <select
+                  id="filters-recurring"
+                  value={filterRecurring ?? ''}
+                  onChange={(event) =>
+                    setFilterRecurring(
+                      event.target.value === '' ? undefined : (event.target.value as 'cost' | 'income'),
+                    )
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="">All transactions</option>
+                  <option value="cost">Recurring costs</option>
+                  <option value="income">Recurring incomes</option>
+                </select>
               </div>
 
               <div>

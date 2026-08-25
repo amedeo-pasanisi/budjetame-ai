@@ -833,6 +833,97 @@ async def test_list_foreign_wallet_filter_is_forbidden(
         delete_account(database_url, account_id)
 
 
+async def _create_recurring_definition(
+    client: AsyncClient, token: str, path: str, name: str
+) -> int:
+    """A monthly Recurring Cost or Recurring Income starting 2030-03-01 —
+    the same stable Occurrence sequence the link tests use — returning its
+    id."""
+    response = await client.post(
+        f"/{path}",
+        json={
+            "name": name,
+            "amount": "50.00",
+            "interval_value": 1,
+            "interval_unit": "months",
+            "start_date": "2030-03-01",
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_list_filters_by_the_recurring_link(client: AsyncClient) -> None:
+    """The Recurring filter (issue #85): `recurring=cost` keeps only
+    Expenses linked to a Recurring Cost, `recurring=income` only Incomes
+    linked to a Recurring Income; unlinked Transactions of either type drop
+    out. The linked dates pay ahead (2030-02-15, before the first
+    Occurrence), so the link is valid regardless of when the suite runs."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Recurring Filter Wallet", "checking")
+    cost_id = await _create_recurring_definition(client, token, "recurring-costs", "Filter Rent")
+    income_id = await _create_recurring_definition(client, token, "recurring-incomes", "Filter Salary")
+
+    linked_expense = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "10.00",
+            "date": "2030-02-15",
+            "wallet_id": wallet_id,
+            "recurring_cost_id": cost_id,
+        },
+        headers=_auth(token),
+    )
+    linked_income = await client.post(
+        "/transactions",
+        json={
+            "type": "income",
+            "amount": "20.00",
+            "date": "2030-02-15",
+            "wallet_id": wallet_id,
+            "recurring_income_id": income_id,
+        },
+        headers=_auth(token),
+    )
+    assert linked_expense.status_code == 201
+    assert linked_income.status_code == 201
+    await client.post(
+        "/transactions",
+        json={"type": "expense", "amount": "5.00", "date": "2030-02-14", "wallet_id": wallet_id},
+        headers=_auth(token),
+    )
+
+    costs = await _list_all(client, token, wallet_id=wallet_id, recurring="cost")
+    assert [t["id"] for t in costs] == [linked_expense.json()["id"]]
+    assert all(t["recurring_cost_id"] == cost_id for t in costs)
+
+    incomes = await _list_all(client, token, wallet_id=wallet_id, recurring="income")
+    assert [t["id"] for t in incomes] == [linked_income.json()["id"]]
+    assert all(t["recurring_income_id"] == income_id for t in incomes)
+
+    # Unfiltered, all three rows are present — the filter narrows, it never
+    # replaces the other filters.
+    all_rows = await _list_all(client, token, wallet_id=wallet_id)
+    assert {t["id"] for t in all_rows} >= {
+        linked_expense.json()["id"],
+        linked_income.json()["id"],
+    }
+
+
+async def test_list_rejects_an_invalid_recurring_filter(client: AsyncClient) -> None:
+    """Any Recurring value other than `cost` or `income` is a client error
+    (422), not a silent no-filter — a typo must never widen the ledger."""
+    token = await _login(client)
+
+    response = await client.get(
+        "/transactions", params={"recurring": "monthly"}, headers=_auth(token)
+    )
+
+    assert response.status_code == 422
+
+
 async def test_foreign_transaction_returns_403(client: AsyncClient, database_url: str) -> None:
     token = await _login(client)
     account_id = insert_foreign_account(database_url, "mole@budjetame.dev")

@@ -188,14 +188,18 @@ def _apply_ledger_filters(
     from_date: str | None,
     to_date: str | None,
     q: str | None,
+    recurring: str | None = None,
 ) -> Select[tuple[Transaction]]:
     """The ledger's one filter set, shared by the listing and the export so
     the two can never drift: the Account's rows, narrowed by a Wallet
     (frozen ones included, matching a Transfer on either leg), a Category,
-    an inclusive Europe/Rome date range (`YYYY-MM-DD` days), and the
+    an inclusive Europe/Rome date range (`YYYY-MM-DD` days), the
     Description needle (ADR-0009: case-insensitive, accent-exact, literal;
-    a blank `q` is no filter). Foreign or missing ids are 403 — the same
-    answer the listing gives, so export and ledger filter identically."""
+    a blank `q` is no filter), and the Recurring link — `cost` narrows to
+    Expenses linked to a Recurring Cost, `income` to Incomes linked to a
+    Recurring Income, anything else is 422. Foreign or missing ids are 403
+    — the same answer the listing gives, so export and ledger filter
+    identically."""
     stmt = stmt.where(Transaction.account_id == account.id)
     needle = (q or "").strip()
     if needle:
@@ -225,6 +229,19 @@ def _apply_ledger_filters(
         except scoping.NotOwned:
             raise HTTPException(status_code=403, detail="Category not found") from None
         stmt = stmt.where(Transaction.category_id == category_id)
+    if recurring is not None:
+        # The Recurring link filter (issue #85): `cost` keeps only linked
+        # Expenses, `income` only linked Incomes. A Transaction is one type,
+        # so the two link columns never coexist (CHECK constraint) — each
+        # kind tests exactly one column. Any other value is a client error.
+        if recurring == "cost":
+            stmt = stmt.where(Transaction.recurring_cost_id.is_not(None))
+        elif recurring == "income":
+            stmt = stmt.where(Transaction.recurring_income_id.is_not(None))
+        else:
+            raise HTTPException(
+                status_code=422, detail="Recurring must be 'cost' or 'income'"
+            )
     if from_date is not None:
         stmt = stmt.where(Transaction.date >= _rome_day_or_422(from_date))
     if to_date is not None:
@@ -283,6 +300,7 @@ def export_transactions(
     from_date: str | None = None,
     to_date: str | None = None,
     q: str | None = None,
+    recurring: str | None = None,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -301,6 +319,7 @@ def export_transactions(
         from_date=from_date,
         to_date=to_date,
         q=q,
+        recurring=recurring,
     )
     stmt = stmt.where(Transaction.type != TransactionType.OPENING_BALANCE.value)
     transactions = session.scalars(
@@ -322,6 +341,7 @@ def list_transactions(
     from_date: str | None = None,
     to_date: str | None = None,
     q: str | None = None,
+    recurring: str | None = None,
     limit: int = Query(default=_PAGE_LIMIT_DEFAULT, ge=1, le=_PAGE_LIMIT_MAX),
     cursor: str | None = None,
     account: Account = Depends(get_current_account),
@@ -330,14 +350,15 @@ def list_transactions(
     """The ledger listing, newest first, one page at a time (cursor paging).
 
     Filters compose — a Wallet (including frozen Wallets, whose history stays
-    viewable), a Category, and a Europe/Rome inclusive date range
-    (`YYYY-MM-DD` days) — with the paging: a page is the first `limit` rows
-    strictly after the cursor's (date, id), so rows inserted mid-scroll (e.g.
-    by Import) can never duplicate or skip already-fetched rows. `next_cursor`
-    is null exactly when no further rows remain. `q` narrows to rows whose
-    Description contains the needle as a case-insensitive, accent-exact,
-    literal substring (ADR-0009); a blank or whitespace-only `q` is no
-    filter.
+    viewable), a Category, a Europe/Rome inclusive date range
+    (`YYYY-MM-DD` days), and the Recurring link (`recurring=cost` narrows to
+    linked Expenses, `recurring=income` to linked Incomes) — with the
+    paging: a page is the first `limit` rows strictly after the cursor's
+    (date, id), so rows inserted mid-scroll (e.g. by Import) can never
+    duplicate or skip already-fetched rows. `next_cursor` is null exactly
+    when no further rows remain. `q` narrows to rows whose Description
+    contains the needle as a case-insensitive, accent-exact, literal
+    substring (ADR-0009); a blank or whitespace-only `q` is no filter.
     """
     stmt = select(Transaction)
     stmt = _apply_ledger_filters(
@@ -349,6 +370,7 @@ def list_transactions(
         from_date=from_date,
         to_date=to_date,
         q=q,
+        recurring=recurring,
     )
     if cursor is not None:
         cursor_date, cursor_id = _decode_cursor(cursor)
