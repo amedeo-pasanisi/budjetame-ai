@@ -22,14 +22,16 @@
   * React app initialized and able to render a basic page, with a "Mobile-First" CSS framework (e.g. Tailwind CSS) configured.
 
 **US 1.2 - Registration and Login**
-* **Story:** As a user, I want to be able to log in with email and password, and have my financial data protected from external access.
+* **Story:** As a user, I want to register and log in, and have my financial data protected from external access.
 * **Acceptance Criteria:**
-  * The app is single-user: exactly one Account is seeded into the DB (the "administrator"). There is no registration path and no user creation from the FE.
+  * Registration with email and password; sign-in with email+password or Google (a first Google sign-in auto-provisions an Account).
+  * Password reset by email with single-use tokens; self-service Account deletion.
   * JWT-based authentication.
   * The login endpoint must be functional.
   * If I enter an invalid email, the system must return a format error.
   * If I try to access the frontend pages without being authenticated, I am redirected to the login page.
   * The password stored in the DB must be obscured (hashed).
+  * *Originally scoped as single-user with one seeded administrator and no registration path; superseded by multi-user auth (ADR-0020).*
 
 **US 1.3 - Data Isolation**
 * **Story:** As an authenticated user, I want to be able to view and modify only my own data, so that my privacy is guaranteed.
@@ -214,8 +216,9 @@
 
 ### OUT OF SCOPE FOR v1
 
-- Registration and multi-account (the app is single-user).
-- Recurring transactions.
-- Budgets (may be implemented in the future).
 - Multi-currency.
 - Bank sync via GoCardless (deferred — see US 7.2).
+
+*Originally listed out of scope but shipped during v1: registration and
+multi-account (multi-user auth, ADR-0020), recurring transactions (Recurring
+Costs / Recurring Incomes), and budgets.*

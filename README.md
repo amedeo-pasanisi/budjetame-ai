@@ -1,7 +1,8 @@
 # Budjetame
 
-A single-user personal finance app. Money lives in Wallets; every Balance is derived
-from the Wallet's Transaction history; Net Worth is the sum of all Wallet balances.
+A personal finance app where each person has their own Account. Money lives in
+Wallets; every Balance is derived from the Wallet's Transaction history; Net Worth
+is the sum of all Wallet balances.
 
 Domain vocabulary lives in [`CONTEXT.md`](CONTEXT.md); architectural decisions in
 [`docs/adr/`](docs/adr/). Product work is tracked as GitHub issues.
@@ -56,7 +57,7 @@ writes `frontend/.env` (`VITE_MAP_PROVIDER=google` + the key). See
 the `GOOGLE_MAPS_API_KEY` repo secret (set once via `gh secret set
 GOOGLE_MAPS_API_KEY`); the key never lands in the repo.
 
-Multi-user sign-in needs two one-time setups, each walked through by a wizard:
+Sign-in needs two one-time setups, each walked through by a wizard:
 
 - Google sign-in: `scripts/google-oauth-wizard.sh` (creates the OAuth client
   in the same Google Cloud project, writes `backend/.env` + GitHub secrets).
@@ -92,7 +93,7 @@ manual record.
 
 ## Project conventions
 
-- All data is scoped to the single Account; foreign data gets a 403.
+- All data is scoped to the Account that owns it; foreign data gets a 403.
 - Balances are derived from Transaction history, never stored.
 - Deleted Wallets are frozen (read-only archives), never hard-deleted.
 - Tabs keep-alive once visited and revalidate in the background: any
