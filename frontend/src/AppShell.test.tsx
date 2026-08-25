@@ -321,3 +321,18 @@ describe('AppShell swipe navigation', () => {
     expect(screen.queryByRole('button', { name: 'New wallet' })).not.toBeInTheDocument()
   })
 })
+
+describe('AppShell settings (issue #84)', () => {
+  it('opens the settings modal from the gear and closes it again', async () => {
+    await renderShell()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete account' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument()
+  })
+})

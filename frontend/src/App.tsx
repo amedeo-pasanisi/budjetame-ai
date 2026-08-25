@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react'
 import { TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
-import { DeleteAccountButton } from './DeleteAccountButton'
 import { useImportDraft } from './importDraft'
 import { LoginForm } from './LoginForm'
 import { RecurringScreen } from './RecurringScreen'
 import { ResetPassword } from './ResetPassword'
 import { Screen } from './Screen'
+import { SettingsModal } from './SettingsModal'
 import { useTabSwipe } from './tabSwipe'
 import { TransactionsScreen } from './TransactionsScreen'
 import { WalletsScreen } from './WalletsScreen'
@@ -147,6 +147,7 @@ export function AppShell({
   onDeleteAccount: () => Promise<void>
 }) {
   const [tab, setTab] = useState<Tab>('dashboard')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   // The Import Draft lives here, not in the Transactions screen, so it
   // survives the screen unmounting on a tab switch (issue #43).
   const importState = useImportDraft()
@@ -172,14 +173,33 @@ export function AppShell({
           <h1 className="text-2xl font-semibold text-slate-900">Budjetame</h1>
           <p className="mt-0.5 text-xs text-slate-500">{email}</p>
         </div>
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
+          >
+            ⚙
+          </button>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
+
+      {settingsOpen && (
+        <SettingsModal
+          email={email}
+          onDeleteAccount={onDeleteAccount}
+          onDeleted={onSignOut}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       <main className="mx-auto mt-6 max-w-sm" {...swipeHandlers}>
         {tab === 'dashboard' && <DashboardScreen />}
@@ -188,8 +208,6 @@ export function AppShell({
         {tab === 'categories' && <CategoriesScreen />}
         {tab === 'recurring' && <RecurringScreen />}
       </main>
-
-      <DeleteAccountButton onDelete={onDeleteAccount} onDeleted={onSignOut} />
 
       {/* Five tabs (issue #56 added Recurring): one bottom row on a phone,
        * full-width, five equal columns. */}
