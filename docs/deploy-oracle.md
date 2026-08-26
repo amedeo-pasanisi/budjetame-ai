@@ -49,9 +49,10 @@ commits as tags.
 
 1. **Ride on dev** — do the work on the `dev` branch; every push previews
    on `dev.budjetame.de`. Dev is where problems surface, not stage.
-2. **Cut the tag** — `git tag -a vX.Y.Z` on a green `main` commit and push
-   it. `cd-release.yml` builds both platforms and deploys `vX.Y.Z` to
-   stage automatically.
+2. **Cut the tag** — update `CHANGELOG.md` (that section becomes the
+   release notes), commit, then `git tag -a vX.Y.Z` on the green `main`
+   commit and push it. `cd-release.yml` builds both platforms and deploys
+   `vX.Y.Z` to stage automatically.
 3. **Verify on stage** — log in at `stage.budjetame.de` and exercise the
    release. If it fails: fix on `main`, then force-move the tag
    (`git tag -f vX.Y.Z <fixed-sha> && git push --force origin vX.Y.Z`) —
