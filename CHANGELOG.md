@@ -2,8 +2,24 @@
 
 All notable changes to Budjetame. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
-[SemVer](https://semver.org/). The version the app itself reports is the
-`v1.0.0` tag this file is released with.
+[SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
+here and on GitHub Releases.
+
+## [v1.1.0] — 2026-08-26
+
+### Added
+
+- Ledger filtering by recurring link: a Recurring select in the Filters bar
+  (All transactions / Recurring costs / Recurring incomes) narrows the ledger
+  to Expenses linked to a Recurring Cost or Incomes linked to a Recurring
+  Income. It composes with the existing filters and rides the export — what
+  you see is what downloads (#85, #86).
+
+### Changed
+
+- Deployments are now release-driven: a `v*` tag builds both platforms and
+  deploys to stage (the hard gate); prod deploys only via a manual run of
+  the **CD (prod)** workflow at a stage-verified tag (ADR-0023).
 
 ## [v1.0.0] — 2026-08-25
 
@@ -76,3 +92,4 @@ behind the live deployment at budjetame.de.
 - Tabs keep alive once visited and revalidate in the background (ADR-0022).
 
 [v1.0.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.0.0
+[v1.1.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.0
