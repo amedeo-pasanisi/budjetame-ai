@@ -105,7 +105,12 @@ jobs:
       - name: Health check
         run: |
           DOMAIN_PRIMARY="${DOMAIN%%,*}"
-          for i in $(seq 1 24); do
+          # 48 × 5s: the first deploy after compose gained Caddy volumes
+          # still provisions certs once into the empty volume (and prod's
+          # Let's Encrypt account is often rate-limited, forcing the
+          # ZeroSSL fallback — slower). Later deploys reuse the volume and
+          # pass on the first attempt.
+          for i in $(seq 1 48); do
             if curl -fsS --max-time 10 "https://$DOMAIN_PRIMARY/api/health" | grep -q '"ok"'; then
               echo "healthy: ${{ env.ENV }} at https://$DOMAIN_PRIMARY"
               exit 0
