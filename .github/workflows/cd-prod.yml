@@ -47,8 +47,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check the release manifest exists
         run: |
+          # `docker buildx imagetools inspect` takes exactly one NAME, so
+          # each image is checked separately (both must exist for the tag to
+          # have gone through cd-release.yml).
           docker buildx imagetools inspect \
-            ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }} \
+            ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
+          docker buildx imagetools inspect \
             ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
           echo "ok: ${{ env.ENV }} was built by cd-release.yml — stage ran this artifact"
 
