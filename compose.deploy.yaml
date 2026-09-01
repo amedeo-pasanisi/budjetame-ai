@@ -28,6 +28,10 @@ services:
     environment:
       BUDJETAME_DATABASE_URL: postgresql+psycopg://budjetame:${POSTGRES_PASSWORD:?}@db:5432/budjetame
       BUDJETAME_JWT_SECRET: ${BUDJETAME_JWT_SECRET:?set in .env}
+      # Session length (Android client): 90 days instead of the 24h default,
+      # so phone users don't re-login daily. Optional per environment —
+      # absent from .env, this compose default applies.
+      BUDJETAME_JWT_EXPIRE_MINUTES: ${BUDJETAME_JWT_EXPIRE_MINUTES:-129600}
       BUDJETAME_SEED_ACCOUNT_EMAIL: ${BUDJETAME_SEED_ACCOUNT_EMAIL:?set in .env}
       BUDJETAME_SEED_ACCOUNT_PASSWORD: ${BUDJETAME_SEED_ACCOUNT_PASSWORD:?set in .env}
       # Optional (issue #81): empty disables the Google button.

@@ -36,7 +36,9 @@ commits as tags.
   name matches the original prod stack, so the `db_data` volume — all
   data — carries over on every deploy.
 - Secrets live in GitHub **environments** (`dev`/`stage`/`prod`): VM host,
-  deploy SSH key, Postgres password, JWT secret, seed login. The deploy SSH
+  deploy SSH key, Postgres password, JWT secret, seed login. `BUDJETAME_JWT_EXPIRE_MINUTES`
+  is optional — absent from the environment's secrets, the compose default
+  (129600 minutes = 90 days, for the Android client) applies. The deploy SSH
   public key is in `~/.ssh/authorized_keys` on each VM; the private key is
   only in GitHub.
 - VMs are provisioned by `scripts/oracle-provision.sh` + `scripts/oci_api.py`
