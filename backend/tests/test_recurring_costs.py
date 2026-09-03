@@ -1,14 +1,15 @@
 """Recurring Cost definitions — issue #56, through the HTTP seam.
 
 A Recurring Cost is a name, a fixed amount, an interval (every N days,
-weeks, months, or years), an optional start date (defaults to the creation
-date when unset), and an optional due-date override (day-of-month for
-months, month+day for years, none for day/week). The Wallet and Category of
-a linked Expense are chosen at Transaction creation time — the definition
-itself never carries them. Occurrences are derived, never stored; the list
-exposes each cost's next due date (override applied, clamping included).
-Guards: names unique per Account case-insensitively; all data scoped to the
-Account (foreign data is a 403, ADR-0003).
+weeks, months, or years), and a start date — every definition always
+carries one: left empty at creation it is set to the creation day
+(ADR-0024), and an Occurrence's due date is its own date. The Wallet and
+Category of a linked Expense are chosen at Transaction creation time — the
+definition itself never carries them. Occurrences are derived, never
+stored; the list exposes each cost's next due date.
+Guards: names unique per Account case-insensitively; a start date can be
+changed, never unset; all data scoped to the Account (foreign data is a
+403, ADR-0003).
 
 Hand-worked expected dates use far-future start dates, so the expectations
 are stable regardless of when the suite runs: "today" is always before them.
@@ -16,7 +17,7 @@ The pure arithmetic itself (including clamping) is pinned in
 test_recurrence.py with a fixed "today".
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
@@ -71,7 +72,7 @@ async def test_create_recurring_cost(client: AsyncClient) -> None:
 
     response = await client.post(
         "/recurring-costs",
-        json=_cost(start_date="2030-03-15", due_day=1),
+        json=_cost(start_date="2030-03-15"),
         headers=_auth(token),
     )
 
@@ -82,17 +83,15 @@ async def test_create_recurring_cost(client: AsyncClient) -> None:
     assert body["interval_value"] == 1
     assert body["interval_unit"] == "months"
     assert body["start_date"] == "2030-03-15"
-    assert body["due_day"] == 1
-    assert body["due_month"] is None
-    # The sequence starts on the 15th but is due on the 1st: the first due
-    # date is 2030-03-01, before its own Occurrence (spec user story 5).
-    assert body["next_due_date"] == "2030-03-01"
+    # The first Occurrence is the start date itself: 2030-03-15.
+    assert body["next_due_date"] == "2030-03-15"
 
 
 async def test_create_without_start_date_defaults_to_the_creation_date(
     client: AsyncClient,
 ) -> None:
-    """An unset start date defaults to the creation date, so a daily cost's
+    """An empty start date is set to the creation day at creation
+    (ADR-0024), so a fresh definition always carries one and a daily cost's
     first Occurrence is due today in Europe/Rome."""
     token = await _login(client)
 
@@ -108,7 +107,7 @@ async def test_create_without_start_date_defaults_to_the_creation_date(
 
     assert response.status_code == 201
     body = response.json()
-    assert body["start_date"] is None
+    assert body["start_date"] == datetime.now(ROME).date().isoformat()
     assert body["next_due_date"] == datetime.now(ROME).date().isoformat()
 
 
@@ -132,7 +131,7 @@ async def test_create_with_a_weekly_interval(client: AsyncClient) -> None:
     assert body["next_due_date"] == "2030-01-01"
 
 
-async def test_create_with_a_yearly_override(client: AsyncClient) -> None:
+async def test_create_with_a_yearly_interval(client: AsyncClient) -> None:
     token = await _login(client)
 
     response = await client.post(
@@ -140,17 +139,14 @@ async def test_create_with_a_yearly_override(client: AsyncClient) -> None:
         json=_cost(
             name="Insurance",
             interval_unit="years",
-            start_date="2031-05-10",
-            due_day=1,
-            due_month=12,
+            start_date="2031-12-01",
         ),
         headers=_auth(token),
     )
 
     assert response.status_code == 201
     body = response.json()
-    assert body["due_day"] == 1
-    assert body["due_month"] == 12
+    assert body["start_date"] == "2031-12-01"
     assert body["next_due_date"] == "2031-12-01"
 
 
@@ -178,7 +174,6 @@ async def test_list_is_sorted_by_next_due_date(client: AsyncClient) -> None:
             name="Monthly B",
             interval_unit="months",
             start_date="2030-12-31",
-            due_day=1,
         ),
         headers=_auth(token),
     )
@@ -199,7 +194,7 @@ async def test_list_is_sorted_by_next_due_date(client: AsyncClient) -> None:
     assert ids.index(earliest_id) < ids.index(middle_id) < ids.index(latest_id)
     by_id = {cost["id"]: cost for cost in body}
     assert by_id[earliest_id]["next_due_date"] == "2030-06-01"
-    assert by_id[middle_id]["next_due_date"] == "2030-12-01"
+    assert by_id[middle_id]["next_due_date"] == "2030-12-31"
     assert by_id[latest_id]["next_due_date"] == "2031-01-01"
 
 
@@ -217,29 +212,6 @@ async def test_duplicate_name_conflicts_case_insensitively(
     )
 
     assert second.status_code == 409
-
-
-async def test_override_rules_follow_the_interval_unit(client: AsyncClient) -> None:
-    """The due-date override is a day-of-month for month intervals, a
-    month+day for year intervals, and never allowed for day/week
-    intervals."""
-    token = await _login(client)
-
-    cases: list[dict[str, object]] = [
-        {"interval_unit": "days", "due_day": 5},
-        {"interval_unit": "weeks", "due_day": 5},
-        {"interval_unit": "weeks", "due_month": 3, "due_day": 5},
-        {"interval_unit": "months", "due_month": 3, "due_day": 5},
-        {"interval_unit": "years", "due_day": 5},
-        {"interval_unit": "years", "due_month": 3},
-    ]
-    for overrides in cases:
-        response = await client.post(
-            "/recurring-costs",
-            json=_cost(name=f"Override {overrides}", **overrides),
-            headers=_auth(token),
-        )
-        assert response.status_code == 422, overrides
 
 
 async def test_create_rejects_bad_values(client: AsyncClient) -> None:
@@ -280,20 +252,13 @@ async def test_create_rejects_bad_values(client: AsyncClient) -> None:
             headers=_auth(token),
         )
     ).status_code == 422
-    assert (
-        await client.post(
-            "/recurring-costs",
-            json=_cost(due_day=32),
-            headers=_auth(token),
-        )
-    ).status_code == 422
 
 
 async def test_edit_recurring_cost(client: AsyncClient) -> None:
     token = await _login(client)
     created = await client.post(
         "/recurring-costs",
-        json=_cost(name="Edit Rent", start_date="2030-03-15", due_day=1),
+        json=_cost(name="Edit Rent", start_date="2030-03-15"),
         headers=_auth(token),
     )
     cost_id = created.json()["id"]
@@ -316,63 +281,60 @@ async def test_edit_recurring_cost(client: AsyncClient) -> None:
     assert body["interval_unit"] == "months"
     # Untouched fields survive the edit.
     assert body["start_date"] == "2030-03-15"
-    assert body["due_day"] == 1
-    # Every 2 months from the 15th, due on the 1st: 2030-03-01, 2030-05-01…
-    assert body["next_due_date"] == "2030-03-01"
+    # Every 2 months from the 15th: 2030-03-15, 2030-05-15…
+    assert body["next_due_date"] == "2030-03-15"
 
 
-async def test_edit_can_clear_the_start_date_and_the_override(
-    client: AsyncClient,
-) -> None:
+async def test_edit_cannot_unset_the_start_date(client: AsyncClient) -> None:
+    """A definition always carries a start date (ADR-0024): an explicit null
+    is rejected — the date can be changed, never unset."""
     token = await _login(client)
     created = await client.post(
         "/recurring-costs",
-        json=_cost(name="Clearable Rent", start_date="2030-03-15", due_day=1),
+        json=_cost(name="Clearable Rent", start_date="2030-03-15"),
         headers=_auth(token),
     )
     cost_id = created.json()["id"]
 
     response = await client.patch(
         f"/recurring-costs/{cost_id}",
-        json={"start_date": None, "due_day": None},
+        json={"start_date": None},
         headers=_auth(token),
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["start_date"] is None
-    assert body["due_day"] is None
+    assert response.status_code == 422
+
+    moved = await client.patch(
+        f"/recurring-costs/{cost_id}",
+        json={"start_date": "2030-06-01"},
+        headers=_auth(token),
+    )
+    assert moved.status_code == 200
+    assert moved.json()["start_date"] == "2030-06-01"
 
 
-async def test_edit_rejects_an_override_stale_after_a_unit_change(
+async def test_edit_changing_the_unit_keeps_the_start_date(
     client: AsyncClient,
 ) -> None:
-    """Changing the interval to days while a month override is still set is
-    rejected; clearing the override in the same submission is accepted — the
-    rules judge the resulting definition."""
+    """The interval unit is independent of the start date: switching a
+    monthly cost to days keeps the stored date and reshapes only the derived
+    future."""
     token = await _login(client)
     created = await client.post(
         "/recurring-costs",
-        json=_cost(name="Stale Rent", start_date="2030-03-15", due_day=1),
+        json=_cost(name="Stale Rent", start_date="2030-03-15"),
         headers=_auth(token),
     )
     cost_id = created.json()["id"]
 
-    stale = await client.patch(
+    fixed = await client.patch(
         f"/recurring-costs/{cost_id}",
         json={"interval_unit": "days"},
         headers=_auth(token),
     )
-    assert stale.status_code == 422
-
-    fixed = await client.patch(
-        f"/recurring-costs/{cost_id}",
-        json={"interval_unit": "days", "due_day": None},
-        headers=_auth(token),
-    )
     assert fixed.status_code == 200
     assert fixed.json()["interval_unit"] == "days"
-    assert fixed.json()["due_day"] is None
+    assert fixed.json()["start_date"] == "2030-03-15"
 
 
 async def test_edit_rejects_a_duplicate_name(client: AsyncClient) -> None:
@@ -442,6 +404,7 @@ async def test_foreign_recurring_cost_returns_403(
                 amount="10.00",
                 interval_value=1,
                 interval_unit="months",
+                start_date=date(2030, 1, 1),
             )
             session.add(cost)
             session.commit()

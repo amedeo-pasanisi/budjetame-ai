@@ -39,8 +39,9 @@ def _owned_income_or_403(
 
 def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut:
     """The API view of a Recurring Income, with the derived state: the next
-    due date (override applied, clamping included — the pure recurrence
-    module owns that math), the next Unpaid Occurrence date (issue #61):
+    due date (ADR-0024: an Occurrence's due date is its own date — the pure
+    recurrence module owns that math), the next Unpaid Occurrence date
+    (issue #61):
     the one a new linked Income would pay, what the transaction form's
     picker shows — the Backlog (issue #62): Unpaid Occurrences due today or
     earlier in Europe/Rome, with the Overdue flag — and `next_skip_action`,
@@ -52,9 +53,7 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
         amount=income.amount,
         interval_value=income.interval_value,
         interval_unit=IntervalUnit(income.interval_unit),
-        start_date=income.start_date.isoformat() if income.start_date is not None else None,
-        due_day=income.due_day,
-        due_month=income.due_month,
+        start_date=income.start_date.isoformat(),
         next_due_date=recurring_service.next_due_date_for(session, income).isoformat(),
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, income
@@ -107,8 +106,6 @@ def create_recurring_income(
             interval_value=payload.interval_value,
             interval_unit=payload.interval_unit,
             start_date=payload.start_date,
-            due_day=payload.due_day,
-            due_month=payload.due_month,
         )
     except recurring_service.RecurringIncomeRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

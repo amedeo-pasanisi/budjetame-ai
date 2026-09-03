@@ -1,8 +1,10 @@
 /** Recurring Income form (issue #60): the create/edit form hosted in the
- * modal shell, mirroring the Costs side (issue #56, ADR-0011). The due-date
- * override follows the interval unit — a day-of-month for months, a month+day
- * pair for years, nothing for days/weeks — and an unset start date is sent
- * as null (the creation date is used). The API client is mocked. */
+ * modal shell, mirroring the Costs side (issue #56, ADR-0011). The
+ * definition's fields are name, amount, "Repeats every N days/weeks/months/
+ * years" (the unit reads singular when N is 1), and the start date — the
+ * first Occurrence, the one date the definition carries (ADR-0024):
+ * optional at creation (empty means today, sent as null), and required when
+ * editing (it can be changed, never unset). The API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -44,11 +46,8 @@ const income: RecurringIncome = {
   interval_value: 1,
   interval_unit: 'months',
   start_date: '2030-03-15',
-  due_day: 1,
-  due_month: null,
-  next_due_date: '2030-03-01',
-
-  next_unpaid_occurrence_date: '2030-03-01',
+  next_due_date: '2030-03-15',
+  next_unpaid_occurrence_date: '2030-03-15',
   backlog_count: 0,
   overdue: false,
   next_skip_action: 'skip',
@@ -92,75 +91,59 @@ async function submitCreate() {
   return createRecurringIncomeMock.mock.calls[0][1]
 }
 
-describe('RecurringIncomeForm due-date override', () => {
-  it('months offer a due day; days and weeks offer nothing', () => {
+describe('RecurringIncomeForm interval copy', () => {
+  it('labels the row "Repeats every" and reads the unit singular for 1', () => {
     renderForm()
 
-    expect(screen.getByLabelText('Due day (optional)')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Due month')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Repeats every')).toBeInTheDocument()
+    const unit = screen.getByLabelText('Interval unit') as HTMLSelectElement
+    expect(unit.value).toBe('months')
+    expect(unit.options[2].textContent).toBe('Month')
 
-    fireEvent.change(screen.getByLabelText('Interval unit'), { target: { value: 'days' } })
-    expect(screen.queryByLabelText('Due day (optional)')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Due month')).not.toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('Interval unit'), { target: { value: 'weeks' } })
-    expect(screen.queryByLabelText('Due day (optional)')).not.toBeInTheDocument()
+    // Every 2 flips the unit to the plural.
+    fireEvent.change(screen.getByLabelText('Every N'), { target: { value: '2' } })
+    expect(unit.options[2].textContent).toBe('Months')
+    expect(unit.options[3].textContent).toBe('Years')
   })
+})
 
-  it('years offer a month+day pair, and half a pair blocks the save', async () => {
+describe('RecurringIncomeForm start date', () => {
+  it('is optional at creation: empty means today (sent as null)', async () => {
     renderForm()
-    fireEvent.change(screen.getByLabelText('Interval unit'), { target: { value: 'years' } })
+    const start = screen.getByLabelText('Start date')
+    expect(start).not.toBeRequired()
+    expect(
+      screen.getByText('The first occurrence. Leave empty to start today.'),
+    ).toBeInTheDocument()
 
-    const dueMonth = screen.getByLabelText('Due month')
-    const dueDay = screen.getByLabelText('Due day')
-    // Month alone: the helper warns and the save stays disabled.
-    fireEvent.change(dueMonth, { target: { value: '12' } })
-    expect(screen.getByText('Pick both the month and the day, or leave both unset.')).toBeInTheDocument()
-    const save = screen.getByRole('button', { name: 'Create recurring income' })
-    expect(save).toBeDisabled()
-
-    // The complete pair unblocks the save once the required fields are
-    // filled, and the month+day reach the payload.
-    fireEvent.change(dueDay, { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bonus' } })
-    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1500.00' } })
-    expect(save).not.toBeDisabled()
-    fireEvent.click(save)
-    await waitFor(() => expect(createRecurringIncomeMock).toHaveBeenCalled())
-    expect(createRecurringIncomeMock.mock.calls[0][1]).toMatchObject({
-      intervalUnit: 'years',
-      dueDay: 1,
-      dueMonth: 12,
-    })
-  })
-
-  it('an unset start date is sent as null and a month due day as a number', async () => {
-    renderForm()
     const payload = await submitCreate()
     expect(payload).toMatchObject({
       startDate: null,
       intervalUnit: 'months',
-      dueDay: null,
-      dueMonth: null,
     })
 
-    // Setting the due day reaches the payload without a month.
-    fireEvent.change(screen.getByLabelText('Due day (optional)'), { target: { value: '15' } })
+    // A chosen date reaches the payload as-is.
+    fireEvent.change(start, { target: { value: '2030-06-01' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create recurring income' }))
     await waitFor(() => expect(createRecurringIncomeMock).toHaveBeenCalledTimes(2))
     expect(createRecurringIncomeMock.mock.calls[1][1]).toMatchObject({
-      dueDay: 15,
-      dueMonth: null,
+      startDate: '2030-06-01',
     })
   })
 
-  it('switching months to days drops the override from the payload', async () => {
-    renderForm()
-    fireEvent.change(screen.getByLabelText('Due day (optional)'), { target: { value: '15' } })
-    fireEvent.change(screen.getByLabelText('Interval unit'), { target: { value: 'days' } })
+  it('is required when editing: clearing it blocks the save', () => {
+    renderForm(income)
 
-    const payload = await submitCreate()
-    expect(payload).toMatchObject({ intervalUnit: 'days', dueDay: null, dueMonth: null })
+    const start = screen.getByLabelText('Start date')
+    expect(start).toBeRequired()
+    expect(start).toHaveValue('2030-03-15')
+    expect(
+      screen.queryByText('The first occurrence. Leave empty to start today.'),
+    ).not.toBeInTheDocument()
+
+    const save = screen.getByRole('button', { name: 'Save' })
+    fireEvent.change(start, { target: { value: '' } })
+    expect(save).toBeDisabled()
   })
 })
 
@@ -172,8 +155,7 @@ describe('RecurringIncomeForm edit and delete', () => {
     expect(screen.getByLabelText('Amount')).toHaveValue(2100)
     expect(screen.getByLabelText('Every N')).toHaveValue(1)
     expect(screen.getByLabelText('Interval unit')).toHaveValue('months')
-    expect(screen.getByLabelText('Start date (optional)')).toHaveValue('2030-03-15')
-    expect(screen.getByLabelText('Due day (optional)')).toHaveValue('1')
+    expect(screen.getByLabelText('Start date')).toHaveValue('2030-03-15')
   })
 
   it('saves edits through updateRecurringIncome with the whole definition', async () => {
@@ -190,8 +172,6 @@ describe('RecurringIncomeForm edit and delete', () => {
       intervalValue: 1,
       intervalUnit: 'months',
       startDate: '2030-03-15',
-      dueDay: 1,
-      dueMonth: null,
     })
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })

@@ -600,11 +600,9 @@ class TransactionPage(BaseModel):
 class RecurringCostCreate(BaseModel):
     """Create a Recurring Cost (issue #56). `interval_value` + `interval_unit`
     are the repetition (every N days, weeks, months, or years); `start_date`
-    is an optional Europe/Rome calendar day (defaults to the creation date
-    when unset); `due_day`/`due_month` are the optional due-date override — a
-    day-of-month for month intervals, a month+day for year intervals, and
-    never set for day/week intervals (the per-unit combination is enforced by
-    the service, which sees the same rules as update's merged state).
+    is an optional Europe/Rome calendar day: left empty at creation it is
+    set to the creation day, so every definition always carries one
+    (ADR-0024).
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -614,8 +612,6 @@ class RecurringCostCreate(BaseModel):
     interval_value: int = Field(ge=1)
     interval_unit: IntervalUnit
     start_date: str | None = None
-    due_day: int | None = Field(default=None, ge=1, le=31)
-    due_month: int | None = Field(default=None, ge=1, le=12)
 
     @field_validator("start_date")
     @classmethod
@@ -630,11 +626,12 @@ class RecurringCostCreate(BaseModel):
 
 class RecurringCostUpdate(BaseModel):
     """Edit a Recurring Cost (issue #56). Every field is editable — name,
-    amount, interval, start date, due-date override — and follows the
-    TransactionUpdate contract: a field present in the payload is applied
-    even when null (clearing it); a field absent is untouched. The service
-    re-validates the resulting override combination against the stored
-    definition."""
+    amount, interval, start date — and follows the TransactionUpdate
+    contract: a field present in the payload is applied; a field absent is
+    untouched. `start_date` is the one exception to the null-clears rule: an
+    explicit null is rejected, because a definition always carries a start
+    date (ADR-0024) — it can be changed, never unset.
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -643,8 +640,6 @@ class RecurringCostUpdate(BaseModel):
     interval_value: int | None = Field(default=None, ge=1)
     interval_unit: IntervalUnit | None = None
     start_date: str | None = None
-    due_day: int | None = Field(default=None, ge=1, le=31)
-    due_month: int | None = Field(default=None, ge=1, le=12)
 
     @field_validator("start_date")
     @classmethod
@@ -665,8 +660,8 @@ class RecurringCostUpdate(BaseModel):
 
 class RecurringCostOut(BaseModel):
     """A Recurring Cost as seen through the API, with its derived state:
-    `next_due_date` is the next Occurrence's due date (override applied,
-    clamping included) on or after today in Europe/Rome (issue #56);
+    `next_due_date` is the next Occurrence's own date (ADR-0024: its due
+    date) on or after today in Europe/Rome (issue #56);
     `next_unpaid_occurrence_date` is the next Occurrence a new linked Expense
     would pay — the oldest Unpaid one's own date (issue #57), what the
     transaction form's picker shows. `backlog_count` is the Backlog (issue
@@ -676,17 +671,15 @@ class RecurringCostOut(BaseModel):
     non-empty. `next_skip_action` is what the Skip/Un-skip button reads
     (ADR-0016): "skip" when the oldest Unpaid Occurrence is unskipped,
     "unskip" when it is already Skipped — nothing is left to skip, so the
-    press restores it. `start_date` is the stored value — null when unset,
-    meaning the creation date."""
+    press restores it. `start_date` is the stored start date — every
+    definition carries one (ADR-0024)."""
 
     id: int
     name: str
     amount: Decimal
     interval_value: int
     interval_unit: IntervalUnit
-    start_date: str | None
-    due_day: int | None
-    due_month: int | None
+    start_date: str
     next_due_date: str
     next_unpaid_occurrence_date: str
     backlog_count: int
@@ -704,11 +697,8 @@ class RecurringIncomeCreate(BaseModel):
     """Create a Recurring Income (issue #60), mirroring RecurringCostCreate
     (ADR-0011). `interval_value` + `interval_unit` are the repetition (every
     N days, weeks, months, or years); `start_date` is an optional Europe/Rome
-    calendar day (defaults to the creation date when unset);
-    `due_day`/`due_month` are the optional due-date override — a day-of-month
-    for month intervals, a month+day for year intervals, and never set for
-    day/week intervals (the per-unit combination is enforced by the service,
-    which sees the same rules as update's merged state).
+    calendar day: left empty at creation it is set to the creation day, so
+    every definition always carries one (ADR-0024).
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -718,8 +708,6 @@ class RecurringIncomeCreate(BaseModel):
     interval_value: int = Field(ge=1)
     interval_unit: IntervalUnit
     start_date: str | None = None
-    due_day: int | None = Field(default=None, ge=1, le=31)
-    due_month: int | None = Field(default=None, ge=1, le=12)
 
     @field_validator("start_date")
     @classmethod
@@ -735,10 +723,12 @@ class RecurringIncomeCreate(BaseModel):
 class RecurringIncomeUpdate(BaseModel):
     """Edit a Recurring Income (issue #60), mirroring RecurringCostUpdate
     (ADR-0011). Every field is editable — name, amount, interval, start
-    date, due-date override — and follows the TransactionUpdate contract: a
-    field present in the payload is applied even when null (clearing it); a
-    field absent is untouched. The service re-validates the resulting
-    override combination against the stored definition."""
+    date — and follows the TransactionUpdate contract: a field present in
+    the payload is applied; a field absent is untouched. `start_date` is the
+    one exception to the null-clears rule: an explicit null is rejected,
+    because a definition always carries a start date (ADR-0024) — it can be
+    changed, never unset.
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -747,8 +737,6 @@ class RecurringIncomeUpdate(BaseModel):
     interval_value: int | None = Field(default=None, ge=1)
     interval_unit: IntervalUnit | None = None
     start_date: str | None = None
-    due_day: int | None = Field(default=None, ge=1, le=31)
-    due_month: int | None = Field(default=None, ge=1, le=12)
 
     @field_validator("start_date")
     @classmethod
@@ -769,9 +757,9 @@ class RecurringIncomeUpdate(BaseModel):
 
 class RecurringIncomeOut(BaseModel):
     """A Recurring Income as seen through the API (issue #60), mirroring
-    RecurringCostOut (ADR-0011). `next_due_date` is the next Occurrence's due
-    date (override applied, clamping included) on or after today in
-    Europe/Rome, derived on the fly from the stored definition — never
+    RecurringCostOut (ADR-0011). `next_due_date` is the next Occurrence's own
+    date (ADR-0024: its due date) on or after today in Europe/Rome, derived
+    on the fly from the stored definition — never
     stored. `next_unpaid_occurrence_date` is the next Occurrence a new linked
     Income would pay — the oldest Unpaid one's own date (issue #61), what the
     transaction form's picker shows. `backlog_count` is the Backlog (issue
@@ -781,17 +769,15 @@ class RecurringIncomeOut(BaseModel):
     non-empty. `next_skip_action` is what the Skip/Un-skip button reads
     (ADR-0016), mirroring the cost side: "skip" when the oldest Unpaid
     Occurrence is unskipped, "unskip" when it is already Skipped.
-    `start_date` is the stored value — null when unset, meaning
-    the creation date."""
+    `start_date` is the stored start date — every definition carries one
+    (ADR-0024)."""
 
     id: int
     name: str
     amount: Decimal
     interval_value: int
     interval_unit: IntervalUnit
-    start_date: str | None
-    due_day: int | None
-    due_month: int | None
+    start_date: str
     next_due_date: str
     next_unpaid_occurrence_date: str
     backlog_count: int

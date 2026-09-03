@@ -6,7 +6,7 @@ parameter: the Budget is current-month-only by product decision (the summary
 endpoint stays month-parameterized and untouched). Everything is derived,
 nothing stored (ADR-0001): Monthly Spendable sums the Recurring Income
 Occurrences due in the month minus the Recurring Cost Occurrences due in it —
-counted by due date whether paid or not, overrides and day-clamping included —
+counted by due date whether paid or not, day-clamping included —
 and Spendable Today is the allowance accrued from the 1st through today minus
 the Discretionary Expenses dated in that span: linked Expenses never drain,
 one-off Incomes never fill, Transfers and Opening Balances never touch it,
@@ -127,11 +127,36 @@ def _mid_previous_month() -> str:
     return f"{_previous_month()}-15"
 
 
+def _last_month_holding_day(day: int) -> str:
+    """The most recent month before the current one that can hold `day`,
+    as YYYY-MM-DD on `day` itself. A month lacking a 31st always follows a
+    31-day month, so at most two months back are ever needed — a valid
+    anchor for clamp-exercising constructions no matter when the suite
+    runs."""
+    year, month = (int(part) for part in _current_month().split("-"))
+    for back in (1, 2, 3):
+        total = month - 1 - back
+        y = year + total // 12
+        m = total % 12 + 1
+        last = _days_in_month(y, m)
+        if day <= last:
+            return f"{y}-{m:02d}-{day:02d}"
+    raise AssertionError("no month can hold the day")
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 12:
+        first_next = date(year + 1, 1, 1)
+    else:
+        first_next = date(year, month + 1, 1)
+    return (first_next - timedelta(days=1)).day
+
+
 async def _create_recurring_cost(
     client: AsyncClient, token: str, **overrides: object
 ) -> int:
-    """A monthly cost started on the 15th of last month, due on the 1st —
-    exactly one Occurrence due in the current month. Tests override what
+    """A monthly cost started on the 15th of last month — exactly one
+    Occurrence due in the current month (its 15th). Tests override what
     they exercise."""
     payload: dict[str, object] = {
         "name": f"Budget cost {uuid4().hex[:8]}",
@@ -139,7 +164,6 @@ async def _create_recurring_cost(
         "interval_value": 1,
         "interval_unit": "months",
         "start_date": _mid_previous_month(),
-        "due_day": 1,
     }
     payload.update(overrides)
     response = await client.post(
@@ -240,17 +264,16 @@ async def test_monthly_spendable_sums_the_occurrences_due_in_the_month(
 ) -> None:
     """The Monthly Spendable is the Recurring Income Occurrences due in the
     month minus the Recurring Cost Occurrences due in it, counted by due
-    date whether paid or not: an income due on the 1st and a cost whose
-    day-of-month override pulls its due date into this month both count,
-    and a cost with no payment at all still counts (the spec's due-date
-    rule)."""
+    date whether paid or not: an income due on the 1st and a cost due on
+    the 15th both count, and a cost with no payment at all still counts
+    (the spec's due-date rule)."""
     email = "budget-sum@budjetame.dev"
     account_id = insert_foreign_account(database_url, email)
     try:
         token = await _login(client, email=email, password="whatever")
         wallet = await _create_wallet(client, token, "Budget Sum Wallet")
         # One income Occurrence due this month (start = the 1st) and one
-        # cost Occurrence due on the 1st via its day-of-month override.
+        # cost Occurrence due on the 15th of this month.
         await _create_recurring_income(
             client, token, name="Budget Sum Salary", amount="3000.00"
         )
@@ -275,7 +298,7 @@ async def test_monthly_spendable_sums_the_occurrences_due_in_the_month(
 async def test_an_occurrence_counts_in_its_due_month_not_the_payment_month(
     client: AsyncClient, database_url: str
 ) -> None:
-    """A cost's Occurrence due on the 1st of this month counts in this
+    """A cost's Occurrence due on the 15th of this month counts in this
     month's Monthly Spendable even when its payment — the linked Expense —
     is dated in the next month: counted by due date whether paid or not, so
     a late-paid Occurrence lands in its due month, never the payment month
@@ -292,7 +315,7 @@ async def test_an_occurrence_counts_in_its_due_month_not_the_payment_month(
         # The payment is recorded next month — late, from this month's
         # point of view. The link pays the oldest Unpaid Occurrence (last
         # month's), which is irrelevant to the Budget: the Occurrence due
-        # on the 1st still counts here, unpaid or not.
+        # on the 15th still counts here, unpaid or not.
         await _create_expense(
             client,
             token,
@@ -311,68 +334,61 @@ async def test_an_occurrence_counts_in_its_due_month_not_the_payment_month(
         delete_account(database_url, account_id)
 
 
-async def test_all_interval_units_and_overrides_count_by_due_date(
+async def test_all_interval_units_count_by_occurrence_date(
     client: AsyncClient, database_url: str
 ) -> None:
-    """Monthly Spendable sums one amount per due date per definition across
-    every interval unit and override shape, with the 29–31 clamping: a
-    daily cost due every day of the month, a weekly cost due every 7 days
-    from the 1st, a monthly cost whose day-of-month override 31 clamps to
-    the last day, and a yearly income whose month+day override (the current
-    month, day 31) clamps the same way — each construction puts its
-    Occurrences in the current month no matter when the suite runs, and the
-    expected total is hand-worked integer arithmetic."""
+    """Monthly Spendable sums one amount per Occurrence date per definition
+    across every interval unit, with the 29–31 clamping: a daily cost
+    occurring every day of the month, a weekly cost occurring every 7 days
+    from the 1st, a monthly cost anchored on a past 31st (its occurrence
+    this month clamps to the last day of shorter months), and a yearly
+    income anchored in the current month — each construction puts exactly
+    its expected Occurrences in the current month no matter when the suite
+    runs, and the expected total is hand-worked integer arithmetic."""
     email = "budget-intervals@budjetame.dev"
     account_id = insert_foreign_account(database_url, email)
     try:
         token = await _login(client, email=email, password="whatever")
         wallet = await _create_wallet(client, token, "Intervals Wallet")
         days = _days_in_current_month()
-        year, month = (int(part) for part in _current_month().split("-"))
-        # Daily: due on every day of the month (k = 0 .. days-1).
+        # Daily: one occurrence on every day of the month (k = 0 .. days-1).
         await _create_recurring_cost(
             client,
             token,
-                        name="Intervals Daily",
+            name="Intervals Daily",
             amount="1.00",
             interval_value=1,
             interval_unit="days",
             start_date=_first_day_of_current_month(),
-            due_day=None,
-            due_month=None,
         )
-        # Weekly: due on the 1st and every 7 days after.
+        # Weekly: on the 1st and every 7 days after.
         await _create_recurring_cost(
             client,
             token,
-                        name="Intervals Weekly",
+            name="Intervals Weekly",
             amount="2.00",
             interval_value=1,
             interval_unit="weeks",
             start_date=_first_day_of_current_month(),
-            due_day=None,
-            due_month=None,
         )
-        # Monthly with a day-of-month override of 31: the k=1 Occurrence is
-        # the 15th of this month, due the 31st — clamped to the last day.
+        # Monthly from a past 31st: the month's own occurrence is the 31st,
+        # clamped to the last day of shorter months.
         await _create_recurring_cost(
             client,
             token,
-                        name="Intervals Clamped Month",
+            name="Intervals Clamped Month",
             amount="4.00",
-            due_day=31,
+            start_date=_last_month_holding_day(31),
         )
-        # Yearly with a month+day override in the current month: the k=0
-        # Occurrence (the 10th) is due the 31st — clamped to the last day.
+        # Yearly anchored in the current month: the k=0 Occurrence (the
+        # 15th) is this month's.
         await _create_recurring_income(
             client,
             token,
-                        name="Intervals Clamped Year",
+            name="Intervals Yearly",
             amount="8.00",
             interval_unit="years",
-            start_date=f"{_current_month()}-10",
-            due_day=31,
-            due_month=month,
+            start_date=f"{_current_month()}-15",
         )
 
         budget = await _budget(client, token)
@@ -413,6 +429,7 @@ async def test_dashboard_budget_is_scoped_to_the_account(
                     amount="500.00",
                     interval_value=1,
                     interval_unit="months",
+                    start_date=date(2030, 1, 1),
                 )
             )
             session.add(

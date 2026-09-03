@@ -41,7 +41,7 @@ A definition of an income expected to repeat at a fixed interval (every N days, 
 _Avoid_: recurring earning, paycheck, salary entry
 
 **Occurrence**:
-One derived due instance of a Recurring Cost or Recurring Income, computed from its start date plus k×interval (an unset start date defaults to the creation date). Each Occurrence is either Paid — exactly one linked Transaction of the matching type (an Expense for a Cost, an Income for a Recurring Income) covers it — Unpaid, or Skipped: the user marked it as not applying, so it never enters the Backlog, never counts toward Monthly Spendable, and a link can never cover it. Un-skipping restores it to Unpaid. Its due date is its own date, unless the definition's optional override (day-of-month for months, month+day for years) shifts it.
+One derived due instance of a Recurring Cost or Recurring Income, computed from the definition's start date plus k×interval (k = 0 is the start date itself). Its due date is its own date. Every definition has a start date: one left empty at creation is set to the creation day, so a fresh definition's first Occurrence is its creation day; afterwards the date can only be changed, never unset (ADR-0024). Each Occurrence is either Paid — exactly one linked Transaction of the matching type (an Expense for a Cost, an Income for a Recurring Income) covers it — Unpaid, or Skipped: the user marked it as not applying, so it never enters the Backlog, never counts toward Monthly Spendable, and a link can never cover it. Un-skipping restores it to Unpaid.
 _Avoid_: instance, cycle, due event
 
 **Backlog**:
@@ -146,6 +146,7 @@ _Avoid_: backup, dump, statement
 - Deleting a Recurring Cost severs the links and drops its skips: linked Expenses remain as ordinary Expenses. Deleting a Recurring Income severs the links and drops its skips: linked Incomes remain as ordinary Incomes.
 - A skip is anchored to its Occurrence's period — the month for a monthly definition, the year for a yearly one, the date itself for daily and weekly ones — and travels with the Occurrence: editing the definition never drops it, and changing the interval unit maps the period along (a skipped month becomes its year, a skipped year becomes its month). A skip whose period holds no Occurrence lies dormant; only un-skipping removes it.
 - Occurrences and Backlog are always derived from the definition; editing interval or start date reshapes only the derived future.
+- A Recurring definition never carries a due-day or due-date override (ADR-0024): every Occurrence is due on its own date, the definition's only date is the start date, and one left empty at creation is set to the creation day.
 - The Budget is always derived, never stored: editing a Recurring definition, a Transaction, or a link recomputes Monthly Spendable, Daily Allowance, and Spendable Today retroactively from the 1st of the month.
 - Monthly Spendable counts Occurrences by due date, paid or not — Skipped ones never count; Expenses linked to a Recurring Cost never drain Spendable Today, and one-off Incomes never fill it.
 - Each month's Budget starts fresh at 0; Spendable Today may go negative within the month and is displayed as 0 until future accruals repay it.

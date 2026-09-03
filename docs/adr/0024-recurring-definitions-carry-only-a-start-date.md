@@ -1,0 +1,17 @@
+# Recurring definitions carry only a start date — the due-date override is gone
+
+ADR-0010's due-date override was a second date knob on Recurring Costs and Incomes: the start date anchored the Occurrence sequence, and the override — a day-of-month for month intervals, a month+day pair for year intervals, nothing for days/weeks — shifted each Occurrence's due date inside its own month or year. Grilling showed the two-knob model confused the very question it answered. Users think in one date — "the first occurrence is today, so it repeats on that day; a backdated start means I owe the missed ones; a future start means nothing is due until then" — and everything the override expressed (rent due on the 1st while tracking starts on the 15th, a yearly June 15) is reachable by anchoring the start date on a real past or future due date. The override's only unique gift, inferring the phase when you start tracking mid-cycle, came with a phantom-backlog edge: a due date could precede the definition's creation, so a tracker created after this cycle's due day — with that payment already made — showed a bogus "1 unpaid". We removed it: an Occurrence's due date is its own date, and a definition is name + amount + interval + start date.
+
+The start date is now a plain, always-present attribute instead of "creation date when unset". A start date left empty at creation is set to the creation day, stored like any other; afterwards it can only be changed, never unset. That kills the old rule's worst trap — clearing the date on an existing definition silently re-anchored the whole sequence to the creation day, moving the payment day and unpaying every already-paid Occurrence that fell off the sequence.
+
+## Considered Options
+
+- **Keep both knobs and explain them in copy** ("when the cycle starts" vs "the day the money is due") — rejected: the divergence case is rare, the confusion was structural (two day-of-month fields on the same form), and the model still forced the non-uniform rule that days/weeks can never carry an override.
+- **Remove the override but keep the unset start date re-derived forever** — rejected: "unset means creation day" is only meaningful at creation; kept alive, it made clearing the field on an edit a silent, destructive reshape (see above).
+- **Chosen: remove the override and materialize the start date at creation** — one date, one rule, exactly the model users already described.
+
+## Consequences
+
+- The migration rewrites the start date of every definition that used an override so its derived due schedule is unchanged — a month interval's due day D becomes a start on day D of the anchor month, a year interval's due month+day becomes that month+day of the anchor year, where the anchor is the stored start date or the creation day when unset — and backfills the creation day where the start date was unset with no override. Paid pins and skips are remapped by index where the sequence changed, so paid and skipped history survives.
+- Creating mid-cycle no longer infers the phase: "rent due on the 1st, created on the 15th" needs an explicit past 1st (if the payment is owed) or future 1st (if not) as the start date. Nothing is ever due before the start date, and the phantom backlog disappears with the override.
+- The Backlog boundary is unchanged (ADR-0010 as read by issue #58): an Occurrence due today is unpaid until its linked Transaction is recorded.

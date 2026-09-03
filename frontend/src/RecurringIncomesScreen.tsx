@@ -18,8 +18,7 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; income: RecurringIncome }
 
 /** The Recurring tab's Incomes side (issue #60): every Recurring Income
  * sorted by next due date — the screen's one order — each row showing name,
- * amount, interval, and the next due date (derived on the backend, override
- * applied, clamping included), plus the Backlog badge ("N unpaid", issue
+ * amount, interval, and the next due date (derived on the backend), plus the Backlog badge ("N unpaid", issue
  * #62) and the Overdue mark. The summary line on top — "X incomes overdue ·
  * N unpaid occurrences" — answers the original question at a glance: what
  * remains to receive. The screen mirrors the Costs side (issue #56,

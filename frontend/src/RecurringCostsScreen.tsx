@@ -18,7 +18,7 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; cost: RecurringCost }
 
 /** The Recurring tab (issue #56): every Recurring Cost sorted by next due
  * date — the screen's one order — each row showing name, amount, interval,
- * and the next due date (derived on the backend, override applied), plus
+ * and the next due date (derived on the backend), plus
  * the Backlog badge ("N unpaid", issue #58) and the Overdue mark. The
  * summary line on top — "X costs overdue · N unpaid occurrences" — answers
  * the original question at a glance. Create, edit, and delete live here, in

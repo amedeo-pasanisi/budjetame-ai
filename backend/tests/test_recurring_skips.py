@@ -47,17 +47,6 @@ def _days(offset: int) -> str:
     return (_today() + timedelta(days=offset)).isoformat()
 
 
-def _month_15(offset: int) -> str:
-    """The 15th of the month `offset` months before today's month — the
-    start of the override test's monthly cost. The month arithmetic is
-    plain calendar stepping, matching how the pure module walks months."""
-    today = _today()
-    total = today.month - 1 - offset
-    year = today.year + total // 12
-    month = total % 12 + 1
-    return date(year, month, 15).isoformat()
-
-
 def _month_15_day(offset: int, day: int) -> str:
     """The `day`th of the month `offset` months before today's month."""
     today = _today()
@@ -95,8 +84,6 @@ async def _create_cost(
     start_date: str,
     interval_value: int = 1,
     interval_unit: str = "days",
-    due_day: int | None = None,
-    due_month: int | None = None,
 ) -> int:
     payload: dict[str, object] = {
         "name": name,
@@ -105,10 +92,6 @@ async def _create_cost(
         "interval_unit": interval_unit,
         "start_date": start_date,
     }
-    if due_day is not None:
-        payload["due_day"] = due_day
-    if due_month is not None:
-        payload["due_month"] = due_month
     response = await client.post(
         "/recurring-costs", json=payload, headers=_auth(token)
     )
@@ -362,35 +345,36 @@ async def test_skipping_a_future_occurrence_pushes_the_next_due(
 async def test_the_skip_survives_a_start_date_edit_http(
     client: AsyncClient,
 ) -> None:
-    """The rent example: monthly Occurrences on the 15th, due on the 1st —
-    4 unpaid. Skipping the oldest, then moving the start date to the 20th,
-    keeps that month's Occurrence excused: the badge stays 3 and the button
-    still reads Skip for the next one."""
+    """A monthly cost starting on today's day-of-month of last month: two
+    Occurrences are due (last month's and today's). Skipping the oldest,
+    then moving the start date a month earlier to the 1st — which keeps
+    last month's Occurrence on the sequence — keeps that Occurrence
+    excused: the badge goes 2 -> 1 -> 2 (the new earlier month is unpaid)
+    and the button still reads Skip for the next one."""
     token = await _login(client)
     cost_id = await _create_cost(
         client,
         token,
         name="S16 Edit Rent",
-        start_date=_month_15(3),
+        start_date=_month_15_day(1, min(_today().day, 28)),
         interval_unit="months",
-        due_day=1,
     )
     state = await _cost_state(client, token, cost_id)
-    assert state["backlog_count"] == 4
+    assert state["backlog_count"] == 2
 
     await _toggle_cost(client, token, cost_id)
     state = await _cost_state(client, token, cost_id)
-    assert state["backlog_count"] == 3
+    assert state["backlog_count"] == 1
 
     response = await client.patch(
         f"/recurring-costs/{cost_id}",
-        json={"start_date": _month_15_day(3, 20)},
+        json={"start_date": _month_15_day(2, 1)},
         headers=_auth(token),
     )
     assert response.status_code == 200
 
     state = await _cost_state(client, token, cost_id)
-    assert state["backlog_count"] == 3
+    assert state["backlog_count"] == 2
     assert state["next_skip_action"] == "skip"
 
 
@@ -399,16 +383,15 @@ async def test_a_skipped_month_becomes_the_year_when_the_interval_turns_yearly(
 ) -> None:
     """The original question made concrete: a monthly cost with a skipped
     month, converted to a yearly payment period — the skip maps from the
-    month to its year, so this year's Occurrence is excused: the badge
+    month to its year, so that year's Occurrence is excused: the badge
     reads 0 and the button reads Un-skip. Toggling un-skips it (badge 1)."""
     token = await _login(client)
     cost_id = await _create_cost(
         client,
         token,
         name="S16 Yearly Gym",
-        start_date=_month_15(3),
+        start_date=_month_15_day(3, 1),
         interval_unit="months",
-        due_day=1,
     )
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 4
@@ -422,8 +405,6 @@ async def test_a_skipped_month_becomes_the_year_when_the_interval_turns_yearly(
         json={
             "interval_value": 1,
             "interval_unit": "years",
-            "due_day": None,
-            "due_month": None,
         },
         headers=_auth(token),
     )
@@ -433,7 +414,7 @@ async def test_a_skipped_month_becomes_the_year_when_the_interval_turns_yearly(
     assert state["backlog_count"] == 0
     assert state["overdue"] is False
     assert state["next_skip_action"] == "unskip"
-    start = date.fromisoformat(_month_15(3))
+    start = date.fromisoformat(_month_15_day(3, 1))
     assert state["next_due_date"] == date(
         start.year + 1, start.month, start.day
     ).isoformat()
@@ -529,6 +510,7 @@ async def test_skip_toggle_is_scoped_to_the_account(
                 amount="10.00",
                 interval_value=1,
                 interval_unit="months",
+                start_date=date(2030, 1, 1),
             )
             session.add(cost)
             session.commit()

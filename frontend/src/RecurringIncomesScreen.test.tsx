@@ -1,7 +1,6 @@
 /** Recurring Incomes screen (issue #60): the Incomes side of the Recurring
  * tab renders every income sorted by next due date, each row showing name,
- * amount, interval, and the next due date (derived on the backend, override
- * applied); the Backlog badge, the Overdue mark, and the summary line (issue
+ * amount, interval, and the next due date (derived on the backend); the Backlog badge, the Overdue mark, and the summary line (issue
  * #62) ride on the API's derived state. Create, edit, and delete live in a
  * modal on this screen, mirroring the Costs side (ADR-0011). The API client
  * is mocked; the real display helpers (interval text, euro formatting) stay
@@ -60,9 +59,7 @@ const incomes: RecurringIncome[] = [
     amount: '2100.00',
     interval_value: 1,
     interval_unit: 'months',
-    start_date: null,
-    due_day: 27,
-    due_month: null,
+    start_date: '2026-09-01',
     next_due_date: '2026-09-27',
     next_unpaid_occurrence_date: '2026-09-27',
     backlog_count: 0,
@@ -76,9 +73,7 @@ const incomes: RecurringIncome[] = [
     amount: '600.00',
     interval_value: 1,
     interval_unit: 'months',
-    start_date: null,
-    due_day: 1,
-    due_month: null,
+    start_date: '2026-09-01',
     next_due_date: '2026-09-01',
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 3,
@@ -92,9 +87,7 @@ const incomes: RecurringIncome[] = [
     amount: '1500.00',
     interval_value: 1,
     interval_unit: 'years',
-    start_date: null,
-    due_day: 1,
-    due_month: 12,
+    start_date: '2026-09-01',
     next_due_date: '2026-12-01',
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
@@ -168,9 +161,7 @@ describe('RecurringIncomesScreen create flow', () => {
       amount: '800.00',
       interval_value: 1,
       interval_unit: 'weeks',
-      start_date: null,
-      due_day: null,
-      due_month: null,
+      start_date: '2026-09-01',
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
@@ -197,8 +188,6 @@ describe('RecurringIncomesScreen create flow', () => {
         intervalValue: 1,
         intervalUnit: 'weeks',
         startDate: null,
-        dueDay: null,
-        dueMonth: null,
       }),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -465,9 +454,7 @@ describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => 
       amount: '45.00',
       interval_value: 1,
       interval_unit: 'weeks',
-      start_date: null,
-      due_day: null,
-      due_month: null,
+      start_date: '2026-09-01',
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,

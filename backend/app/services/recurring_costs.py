@@ -1,10 +1,11 @@
 """Recurring Cost business rules (issue #56). Called by the HTTP layer; never
 from tests.
 
-Rules from CONTEXT.md and ADR-0010: names unique per Account,
-case-insensitively; an optional start date defaulting to the creation date;
-an optional due-date override whose shape follows the interval unit
-(day-of-month for months, month+day for years, none for days/weeks).
+Rules from CONTEXT.md, ADR-0010 and ADR-0024: names unique per Account,
+case-insensitively; a start date every definition always carries (left
+empty at creation it is set to the creation day; it can be changed, never
+unset) — an Occurrence's due date is its own date, the due-date override
+is gone.
 Occurrences and the next due date are derived, never stored — the pure
 recurrence module (app.recurrence) owns that math. Deleting a Recurring Cost
 is a hard delete; linked Expenses (issue #57) are severed by the FK's ON
@@ -32,7 +33,6 @@ from app.recurrence import (
     next_due_date,
     occurrence_date,
     period_of,
-    rome_day_of,
     rome_today,
 )
 from app.services import scoping
@@ -47,32 +47,10 @@ class RecurringCostRuleError(Exception):
     """A CONTEXT.md rule rejects the write; maps to 422 with the message."""
 
 
-def _validate_override(
-    unit: str, due_day: int | None, due_month: int | None
-) -> None:
-    """The due-date override follows the interval unit (ADR-0010): none for
-    day/week intervals, a day-of-month alone for months, a month+day pair
-    for years."""
-    if unit in (IntervalUnit.DAYS.value, IntervalUnit.WEEKS.value):
-        if due_day is not None or due_month is not None:
-            raise RecurringCostRuleError(
-                "Day and week intervals never carry a due-date override"
-            )
-    elif unit == IntervalUnit.MONTHS.value:
-        if due_month is not None:
-            raise RecurringCostRuleError(
-                "Month intervals carry a day-of-month override only"
-            )
-    else:  # years
-        if (due_day is None) != (due_month is None):
-            raise RecurringCostRuleError(
-                "Year intervals carry a month+day override"
-            )
-
-
 def _parse_start_date(value: str | None) -> date | None:
-    """The start date as a Europe/Rome calendar day (the schema validated the
-    "YYYY-MM-DD" shape), or None — meaning the creation date."""
+    """The start date as a Europe/Rome calendar day (the schema validated
+    the "YYYY-MM-DD" shape), or None — the empty-at-creation case, which the
+    caller turns into the creation day (ADR-0024)."""
     return date.fromisoformat(value) if value is not None else None
 
 
@@ -85,21 +63,18 @@ def create_recurring_cost(
     interval_value: int,
     interval_unit: IntervalUnit,
     start_date: str | None,
-    due_day: int | None,
-    due_month: int | None,
 ) -> RecurringCost:
     if scoping.name_is_taken(session, RecurringCost, account_id, name):
         raise RecurringCostNameTaken(name)
-    _validate_override(interval_unit.value, due_day, due_month)
     cost = RecurringCost(
         account_id=account_id,
         name=name,
         amount=amount,
         interval_value=interval_value,
         interval_unit=interval_unit.value,
-        start_date=_parse_start_date(start_date),
-        due_day=due_day,
-        due_month=due_month,
+        # An empty start date becomes the creation day, stored like any
+        # other (ADR-0024): every definition always carries one.
+        start_date=_parse_start_date(start_date) or rome_today(),
     )
     session.add(cost)
     session.commit()
@@ -112,18 +87,9 @@ def update_recurring_cost(
 ) -> RecurringCost:
     """Apply the provided changes. `changes` comes from the schema's
     `model_dump(exclude_unset=True)`: a field present in the payload is
-    applied even when null (clearing the optional field); a field absent is
-    untouched. The guards judge the resulting definition — an override left
-    stale by a unit change is rejected, not silently dropped."""
-    unit = (
-        changes["interval_unit"].value
-        if "interval_unit" in changes
-        else cost.interval_unit
-    )
-    due_day = changes["due_day"] if "due_day" in changes else cost.due_day
-    due_month = changes["due_month"] if "due_month" in changes else cost.due_month
-    _validate_override(unit, due_day, due_month)
-
+    applied; a field absent is untouched. `start_date` is the one exception
+    to the null-clears rule: an explicit null is rejected — a definition
+    always carries a start date (ADR-0024), it can be changed, never unset."""
     name = changes.get("name", cost.name)
     if name is not None and name != cost.name:
         if scoping.name_is_taken(
@@ -131,13 +97,19 @@ def update_recurring_cost(
         ):
             raise RecurringCostNameTaken(name)
 
-    for field in ("name", "amount", "interval_value", "due_day", "due_month"):
+    for field in ("name", "amount", "interval_value"):
         if field in changes:
             setattr(cost, field, changes[field])
     if "interval_unit" in changes:
         cost.interval_unit = changes["interval_unit"].value
     if "start_date" in changes:
-        cost.start_date = _parse_start_date(changes["start_date"])
+        start_date = _parse_start_date(changes["start_date"])
+        if start_date is None:
+            raise RecurringCostRuleError(
+                "A recurring cost always carries a start date — it can be "
+                "changed, never unset."
+            )
+        cost.start_date = start_date
 
     session.commit()
     session.refresh(cost)
@@ -188,15 +160,10 @@ def oldest_unpinned_occurrence(session: Session, cost: RecurringCost) -> date:
     infinite and the paid set finite, so the walk always terminates.
     """
     paid = paid_occurrence_dates(session, cost.id)
-    start = (
-        cost.start_date
-        if cost.start_date is not None
-        else rome_day_of(cost.created_at)
-    )
     k = 0
     while True:
         occurrence = occurrence_date(
-            start, cost.interval_value, cost.interval_unit, k
+            cost.start_date, cost.interval_value, cost.interval_unit, k
         )
         if occurrence not in paid:
             return occurrence
@@ -248,21 +215,13 @@ def next_skip_action(session: Session, cost: RecurringCost) -> Literal["skip", "
 
 def next_due_date_for(session: Session, cost: RecurringCost) -> date:
     """The cost's next due date, derived on the fly (ADR-0010): the first
-    Occurrence — from the start date (or the creation date when unset) plus
-    the interval, clamped — whose due date (override applied) is today or
-    later in Europe/Rome. A Skipped Occurrence is not due: the walk steps
-    past it (ADR-0016)."""
-    start = (
-        cost.start_date
-        if cost.start_date is not None
-        else rome_day_of(cost.created_at)
-    )
+    Occurrence — the start date plus the interval, clamped — whose own date
+    (ADR-0024: its due date) is today or later in Europe/Rome. A Skipped
+    Occurrence is not due: the walk steps past it (ADR-0016)."""
     return next_due_date(
-        start,
+        cost.start_date,
         cost.interval_value,
         cost.interval_unit,
-        cost.due_day,
-        cost.due_month,
         rome_today(),
         skipped_periods(session, cost.id, cost.interval_unit),
     )
@@ -296,17 +255,10 @@ def backlog_count_for(session: Session, cost: RecurringCost) -> int:
     an Occurrence a link covers or the user excused is never counted back
     in."""
     paid = paid_occurrence_dates(session, cost.id)
-    start = (
-        cost.start_date
-        if cost.start_date is not None
-        else rome_day_of(cost.created_at)
-    )
     return backlog_count(
-        start,
+        cost.start_date,
         cost.interval_value,
         cost.interval_unit,
-        cost.due_day,
-        cost.due_month,
         rome_today(),
         paid,
         skipped_periods(session, cost.id, cost.interval_unit),
@@ -320,8 +272,8 @@ def oldest_unpaid_occurrence(
     exclude_transaction_id: int | None = None,
 ) -> date:
     """The Occurrence a new link pays (issue #57): the oldest Unpaid one —
-    the first of the derived sequence (from the start date, or the creation
-    date when unset, plus the interval) no linked Expense covers and whose
+    the first of the derived sequence (from the start date plus the
+    interval) no linked Expense covers and whose
     period is not skipped — a Skipped Occurrence is never paid (ADR-0016),
     un-skipping comes first. Future Occurrences are included when nothing
     earlier is Unpaid, so paying ahead is natural; the sequence is infinite
@@ -329,15 +281,12 @@ def oldest_unpaid_occurrence(
     The pin is stored on the link at this moment and never recomputed
     (ADR-0010)."""
     paid = paid_occurrence_dates(session, cost.id, exclude_transaction_id=exclude_transaction_id)
-    start = (
-        cost.start_date
-        if cost.start_date is not None
-        else rome_day_of(cost.created_at)
-    )
     skipped = skipped_periods(session, cost.id, cost.interval_unit)
     k = 0
     while True:
-        occurrence = occurrence_date(start, cost.interval_value, cost.interval_unit, k)
+        occurrence = occurrence_date(
+            cost.start_date, cost.interval_value, cost.interval_unit, k
+        )
         if occurrence not in paid and period_of(occurrence, cost.interval_unit) not in skipped:
             return occurrence
         k += 1

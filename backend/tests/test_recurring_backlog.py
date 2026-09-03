@@ -36,13 +36,21 @@ def _days(offset: int) -> str:
 
 def _month_15(offset: int) -> str:
     """The 15th of the month `offset` months before today's month — the
-    start of the override test's monthly cost. The month arithmetic is
+    start of the monthly Backlog tests (own-date judging, ADR-0024). The
+    month arithmetic is
     plain calendar stepping, matching how the pure module walks months."""
     today = _today()
     total = today.month - 1 - offset
     year = today.year + total // 12
     month = total % 12 + 1
     return date(year, month, 15).isoformat()
+
+
+def _month_1(offset: int) -> str:
+    """The 1st of the month `offset` months before today's month — always
+    due on or before today, whatever the day of the month the suite runs
+    on."""
+    return _month_15(offset)[:8] + "01"
 
 
 async def _login(client: AsyncClient) -> str:
@@ -73,7 +81,6 @@ async def _create_cost(
     start_date: str,
     interval_value: int = 1,
     interval_unit: str = "days",
-    due_day: int | None = None,
 ) -> int:
     payload: dict[str, object] = {
         "name": name,
@@ -82,8 +89,6 @@ async def _create_cost(
         "interval_unit": interval_unit,
         "start_date": start_date,
     }
-    if due_day is not None:
-        payload["due_day"] = due_day
     response = await client.post(
         "/recurring-costs", json=payload, headers=_auth(token)
     )
@@ -230,22 +235,21 @@ async def test_an_occurrence_due_today_counts_in_the_backlog(
     assert state["overdue"] is False
 
 
-async def test_the_override_shifts_which_occurrences_are_due(
+async def test_a_monthly_cost_backlog_reads_its_own_occurrence_dates(
     client: AsyncClient,
 ) -> None:
-    """The rent example: Occurrences on the 15th, due on the 1st. The due
-    date — not the Occurrence's own date — decides the Backlog: with today
-    inside month M, the Occurrences of M-3, M-2, M-1, and M are all due on
-    or before today (the M one due the 1st, ahead of its own date)."""
+    """The Backlog judges each Occurrence by its own date (ADR-0024: a due
+    date is the occurrence date). A monthly cost starting on the 1st of the
+    month M-3: with today inside month M, the Occurrences of M-3, M-2, M-1,
+    and M are all due on or before today (the M one on the 1st)."""
     token = await _login(client)
-    wallet_id = await _create_wallet(client, token, "B58 Override Wallet")
+    wallet_id = await _create_wallet(client, token, "B58 Own-date Wallet")
     cost_id = await _create_cost(
         client,
         token,
-                name="Override Rent",
-        start_date=_month_15(3),
+        name="Rent on the 1st",
+        start_date=_month_1(3),
         interval_unit="months",
-        due_day=1,
     )
 
     state = await _cost_state(client, token, cost_id)
@@ -254,9 +258,9 @@ async def test_the_override_shifts_which_occurrences_are_due(
 
     # Paying the oldest two (the M-3 and M-2 Occurrences) leaves two.
     first_pin = await _link_expense(client, token, wallet_id, cost_id)
-    assert first_pin == _month_15(3)
+    assert first_pin == _month_1(3)
     second_pin = await _link_expense(client, token, wallet_id, cost_id)
-    assert second_pin == _month_15(2)
+    assert second_pin == _month_1(2)
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 2
     assert state["overdue"] is True
