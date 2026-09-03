@@ -1959,13 +1959,14 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('counts the set panel filters on the toggle — search text never counts', async () => {
+  it('never shows a count on the Filters toggle — the chips on the filtered line say what is applied', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
     fetchCategoriesMock.mockResolvedValue([foodCategory])
     render(<Harness />)
     await screen.findByText(/Coffee/)
 
-    // Nothing set: no count on the toggle.
+    // The toggle never carries a count: even with filters set it reads
+    // plain Filters ▸/▾ — the chips on the filtered line say what is set.
     expect(screen.getByRole('button', { name: 'Filters ▸' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
@@ -1977,15 +1978,16 @@ describe('TransactionsScreen chrome (issue #92)', () => {
         categoryId: 1,
       }),
     )
-    expect(screen.getByRole('button', { name: 'Filters (2) ▾' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters ▾' })).toBeInTheDocument()
 
-    // Search text changes nothing on the toggle: only the box shows it.
+    // Two filters set, still no count; search text changes nothing on
+    // the toggle either: only the box shows it.
     withFakeTimers()
     fireEvent.change(
       screen.getByRole('searchbox', { name: 'Search transactions' }),
       { target: { value: 'coffee' } },
     )
-    expect(screen.getByRole('button', { name: 'Filters (2) ▾' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters ▾' })).toBeInTheDocument()
     await debounce()
     vi.useRealTimers()
     await waitFor(() =>
@@ -1995,7 +1997,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
         q: 'coffee',
       }),
     )
-    expect(screen.getByRole('button', { name: 'Filters (2) ▾' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters ▾' })).toBeInTheDocument()
   })
 
   it('shows the filtered line with one chip per set panel filter, dates merged', async () => {
@@ -2020,7 +2022,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
         recurringCostId: 11,
       }),
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (5) ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
 
     // One chip per filter — wallet, category, the two dates merged into a
     // single range chip, recurring — each carrying its own ✕, plus the
@@ -2034,7 +2036,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Remove Rent filter' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clear all' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument()
 
     // The chips read in the spec's order: wallet, category, dates, recurring.
     const chips = ['Old Card', 'Food', '2026-01-01 – 2026-01-31', 'Rent'].map(
@@ -2063,10 +2065,10 @@ describe('TransactionsScreen chrome (issue #92)', () => {
         categoryId: 1,
       }),
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (2) ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
 
-    // The Category chip's ✕ removes only the Category: the wallet chip, the
-    // count, and the rest of the view survive, and the first page refetches.
+    // The Category chip's ✕ removes only the Category: the wallet chip
+    // and the rest of the view survive, and the first page refetches.
     fireEvent.click(screen.getByRole('button', { name: 'Remove Food filter' }))
     await waitFor(() =>
       expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { walletId: 2 }),
@@ -2077,7 +2079,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     expect(
       screen.queryByRole('button', { name: 'Remove Food filter' }),
     ).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Filters (1) ▸' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters ▸' })).toBeInTheDocument()
   })
 
   it('the date chips read From …/To … alone and merge into one chip that clears both', async () => {
@@ -2089,7 +2091,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     fireEvent.change(await screen.findByLabelText('From'), {
       target: { value: '2026-01-01' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
     expect(
       screen.getByRole('button', { name: 'Remove From 2026-01-01 filter' }),
     ).toBeInTheDocument()
@@ -2104,17 +2106,17 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     fireEvent.change(await screen.findByLabelText('To'), {
       target: { value: '2026-01-31' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
     expect(
       screen.getByRole('button', { name: 'Remove To 2026-01-31 filter' }),
     ).toBeInTheDocument()
 
     // Both set: ONE merged chip … – … whose single ✕ clears both dates.
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▸' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
     fireEvent.change(await screen.findByLabelText('From'), {
       target: { value: '2026-01-01' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (2) ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
     expect(
       screen.getByRole('button', { name: 'Remove 2026-01-01 – 2026-01-31 filter' }),
     ).toBeInTheDocument()
@@ -2140,7 +2142,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     await waitFor(() =>
       expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
     withFakeTimers()
     fireEvent.change(
       screen.getByRole('searchbox', { name: 'Search transactions' }),
@@ -2198,7 +2200,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
       screen.getByRole('searchbox', { name: 'Search transactions' }),
     ).toHaveValue('coffee')
     expect(screen.queryByRole('button', { name: 'Clear all' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Filters ▸' })).toBeInTheDocument()
   })
 
@@ -2231,7 +2233,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     // the filtered line shows its own Export too, hence the scoping).
     const clearFilters = screen.getByRole('button', { name: 'Clear all filters' })
     const footer = clearFilters.parentElement as HTMLElement
-    expect(within(footer).getByRole('button', { name: 'Export' })).toBeInTheDocument()
+    expect(within(footer).getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument()
     fireEvent.click(clearFilters)
 
     // Only the five reset: the search keeps filtering, and the footer
@@ -2248,7 +2250,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     expect(
       screen.queryByRole('button', { name: 'Clear all filters' }),
     ).not.toBeInTheDocument()
-    expect(within(footer).getByRole('button', { name: 'Export' })).toBeInTheDocument()
+    expect(within(footer).getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument()
     // The panel is still open, so the toggle reads ▾ — with no count now.
     expect(screen.getByRole('button', { name: 'Filters ▾' })).toBeInTheDocument()
   })
@@ -2268,7 +2270,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     // header entirely — with no filter set and the panel closed, nothing
     // offers it.
     expect(importButton.className).not.toMatch(/border|bg-/)
-    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument()
   })
 })
 
@@ -2295,7 +2297,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
     // The panel footer's Export is always there once the panel opens; with
     // nothing set this is the full-ledger export path.
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export to Excel' }))
 
     await waitFor(() => expect(exportTransactionsMock).toHaveBeenCalledWith('', {}))
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
@@ -2324,8 +2326,8 @@ describe('TransactionsScreen export (US 7.3)', () => {
     )
     // ...then close it: the filtered line's Export downloads the view the
     // ledger shows, panel or no panel.
-    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export to Excel' }))
 
     await waitFor(() =>
       expect(exportTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
@@ -2340,7 +2342,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export to Excel' }))
 
     expect(
       await screen.findByText(/could not export transactions/i),
@@ -2355,7 +2357,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
     // The draft replaces the whole chrome, header actions included.
     expect(screen.queryByRole('button', { name: 'Import' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New transaction' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument()
   })
 })
 

@@ -233,9 +233,11 @@ export function TransactionsScreen({
     return result
   }, [filters, searchNeedle])
 
-  // The count on the Filters toggle (issue #92): how many of the five panel
-  // filters are set — wallet, category, from-date, to-date, recurring. The
-  // search never counts: the box shows its own text and carries its own ✕.
+  // How many of the five panel filters are set (issue #92's taxonomy) —
+  // wallet, category, from-date, to-date, recurring. Drives the filtered
+  // line's visibility and the footer's Clear all filters. The toggle itself
+  // shows no count: the chips on the filtered line say what is applied, and
+  // the search never counts (the box shows its own text and ✕).
   const panelFilterCount = Object.keys(filters()).length
   const panelFiltersActive = panelFilterCount > 0
 
@@ -635,11 +637,12 @@ export function TransactionsScreen({
           )}
 
           {/* Toolbar row (issue #92): the search input takes the width and
-              the Filters toggle sits on its right, showing a count of the
-              set panel filters. A truly empty ledger hides the whole row —
-              there is nothing to search or filter. */}
+              the Filters toggle sits on its right. A truly empty ledger
+              hides the whole row — there is nothing to search or filter.
+              The mt-3 gap under the header row matches the Categories tab's
+              search bar, so the screens read alike. */}
           {!ledgerEmpty && (
-            <div className="mt-8 flex items-center gap-3">
+            <div className="mt-3 flex items-center gap-3">
               <input
                 aria-label="Search transactions"
                 type="search"
@@ -654,8 +657,7 @@ export function TransactionsScreen({
                 onClick={() => setFiltersOpen((open) => !open)}
                 className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600"
               >
-                Filters{panelFilterCount > 0 ? ` (${panelFilterCount})` : ''}{' '}
-                {filtersOpen ? '▾' : '▸'}
+                Filters {filtersOpen ? '▾' : '▸'}
               </button>
             </div>
           )}
@@ -663,8 +665,8 @@ export function TransactionsScreen({
           {/* Filtered line (issue #92): visible only when at least one of
               the five panel filters is set — search text never lands here
               (the box shows it, with its own native ✕). A chip's ✕ removes
-              just that filter; Clear all also clears the search; Export
-              downloads the current view without opening the panel. */}
+              just that filter; Clear all also clears the search; Export to
+              Excel downloads the current view without opening the panel. */}
           {panelFiltersActive && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -698,7 +700,7 @@ export function TransactionsScreen({
                   onClick={handleExport}
                   className="text-slate-600 hover:text-slate-900"
                 >
-                  Export
+                  Export to Excel
                 </button>
               </div>
             </div>
@@ -819,8 +821,8 @@ export function TransactionsScreen({
 
               {/* Panel footer (issue #92): Clear all filters — visible only
                   while at least one of the five is set, and it clears
-                  exactly those (search untouched) — with Export always
-                  present while the panel is open (nothing set: the
+                  exactly those (search untouched) — with Export to Excel
+                  always present while the panel is open (nothing set: the
                   full-ledger export path). */}
               <div className="flex items-center justify-between border-t border-slate-100 pt-3">
                 {panelFilterCount > 0 && (
@@ -837,7 +839,7 @@ export function TransactionsScreen({
                   onClick={handleExport}
                   className="text-xs font-medium text-slate-600 hover:text-slate-900"
                 >
-                  Export
+                  Export to Excel
                 </button>
               </div>
             </div>
