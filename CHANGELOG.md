@@ -5,6 +5,22 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.4.0] — 2026-09-03
+
+### Changed
+
+- **Trend chart fills the card, even with few bars** — the plot's content
+  width is max(fixed geometry, the card's inner width): a short From/To
+  range now spreads its bars evenly across the whole card (bar widths
+  unchanged, the gaps grown symmetrically, gridlines spanning the whole
+  plot), while a wide range keeps the fixed layout and scrolls (#95).
+- **Tapped bars show a value chip** — tapping a column (the whole column
+  is the target) darkens the bar and floats a small chip just above it
+  with that month's exact amount alone ("€42.50"; zero months "€0.00" the
+  same way), clamped inside the chart's edges; tapping the same column
+  again hides it. The old "Month · €amount" readout line above the chart
+  is gone (#95).
+
 ## [v1.3.0] — 2026-09-03
 
 ### Changed
