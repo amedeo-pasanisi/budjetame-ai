@@ -93,7 +93,7 @@ import {
   fetchTransactions,
   fetchWallets,
 } from './api'
-import type { Wallet } from './api'
+import type { Category, Wallet } from './api'
 
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
@@ -481,6 +481,96 @@ describe('AppShell wallet ledger jump (issue #93)', () => {
       screen.queryByRole('button', { name: 'Remove Marco filter' }),
     ).not.toBeInTheDocument()
     expect(panelOf('New wallet')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+})
+
+describe('AppShell category ledger jump (issue #94)', () => {
+  // One expense and one income Category: the ledger's Category filter
+  // covers both directions, so a row tap must jump either way.
+  const createdAt = '2026-08-01T10:00:00Z'
+  const categoryFixtures: Category[] = [
+    { id: 1, name: 'Food', type: 'expense', icon: '🍎', color: '#ef4444', created_at: createdAt },
+    { id: 2, name: 'Salary', type: 'income', icon: '💼', color: '#3b82f6', created_at: createdAt },
+  ]
+
+  beforeEach(() => {
+    fetchCategoriesMock.mockResolvedValue(categoryFixtures)
+  })
+
+  it('an expense Category row tap opens the Transactions tab filtered to that Category', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    await screen.findByRole('region', { name: 'Expenses' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Food/ }))
+
+    await expectTab('transactions')
+    // The very first ledger fetch carries the jump's filter: no unfiltered
+    // fetch first, and the chip line names the Category.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 1 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Food filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(panelOf('New category')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+
+  it('an income Category row tap does the same — the ledger filter covers both directions', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    await screen.findByRole('region', { name: 'Expenses' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Salary/ }))
+
+    await expectTab('transactions')
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 2 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Salary filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+  })
+
+  it('a later Category row jump replaces the filter on the already-mounted Transactions tab', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(screen.getByRole('button', { name: /^Food/ }))
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 1 }),
+    )
+    await screen.findByText('No transactions match these filters.')
+
+    // Back to Categories (its panel stayed mounted) and jump to a
+    // different Category: the mounted ledger replaces its filter, never a
+    // remount.
+    fetchTransactionsMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    fireEvent.click(screen.getByRole('button', { name: /^Salary/ }))
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 2 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Salary filter' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Remove Food filter' }),
+    ).not.toBeInTheDocument()
+    expect(panelOf('New category')).toHaveAttribute('hidden')
     expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
   })
 })
