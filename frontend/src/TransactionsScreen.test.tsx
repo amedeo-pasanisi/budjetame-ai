@@ -365,6 +365,46 @@ describe('TransactionsScreen row title (description-led)', () => {
   })
 })
 
+describe('TransactionsScreen row location pin (issue #91)', () => {
+  it('reads `📍 <place_name>` after the wallet label when the Transaction carries a Place', async () => {
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [
+        {
+          ...coffee,
+          latitude: '41.9028',
+          longitude: '12.4964',
+          place_name: 'Esselunga',
+          place_id: 'ChIJN1t_tDeuEmsRUsoyG83frY4',
+        },
+      ],
+      next_cursor: null,
+    }))
+    render(<Harness />)
+
+    // The pin reads the Place name instead of standing bare.
+    expect(await screen.findByText('2026-08-01 · Cash · 📍 Esselunga')).toBeInTheDocument()
+  })
+
+  it('keeps the bare pin for a coordinates-only Transaction (GPS/Leaflet/import)', async () => {
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [{ ...coffee, latitude: '41.9028', longitude: '12.4964' }],
+      next_cursor: null,
+    }))
+    render(<Harness />)
+
+    // No Place: the subtitle keeps the bare pin (the Place is cleared
+    // together with the coordinates when the Location is not a Place).
+    expect(await screen.findByText('2026-08-01 · Cash · 📍')).toBeInTheDocument()
+  })
+
+  it('shows neither pin nor Place when the Transaction has no location', async () => {
+    render(<Harness />)
+
+    expect(await screen.findByText('2026-08-01 · Cash')).toBeInTheDocument()
+    expect(screen.queryByText('📍')).not.toBeInTheDocument()
+  })
+})
+
 describe('TransactionsScreen infinite scroll', () => {
   it('renders the first page under the "All transactions" heading', async () => {
     render(<Harness />)

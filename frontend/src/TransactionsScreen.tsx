@@ -28,7 +28,7 @@ import { RecurringIncomeModal } from './RecurringIncomeModal'
 import { TransactionModal } from './TransactionModal'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
 import { WalletModal } from './WalletModal'
-import { signedAmount, hasLocation, transactionTitle } from './transactions'
+import { signedAmount, locationSuffix, transactionTitle } from './transactions'
 
 const ALL_CATEGORIES = -1
 
@@ -739,7 +739,7 @@ export function TransactionsScreen({
                         </span>
                         <span className="block truncate text-xs text-slate-500">
                           {transaction.date} · {walletLabel}
-                          {hasLocation(transaction) && ' · 📍'}
+                          {locationSuffix(transaction)}
                         </span>
                       </span>
                       <span className="shrink-0 text-sm font-semibold text-slate-900">

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Transaction } from './api'
-import { transactionTitle } from './transactions'
+import { locationSuffix, transactionTitle } from './transactions'
 
 const base: Transaction = {
   id: 1,
@@ -61,5 +61,32 @@ describe('transactionTitle', () => {
     const transfer = { ...base, type: 'transfer' as const, description: 'To Marco' }
     expect(transactionTitle(transfer, null)).toBe('To Marco')
     expect(transactionTitle({ ...transfer, description: null }, null)).toBe('Transfer')
+  })
+})
+
+describe('locationSuffix', () => {
+  const withCoordinates = { ...base, latitude: '41.9028', longitude: '12.4964' }
+
+  it('is null when the Transaction has no coordinates', () => {
+    expect(locationSuffix(base)).toBeNull()
+    // Coordinates-only, but only one half present — still no location.
+    expect(locationSuffix({ ...base, latitude: '41.9028' })).toBeNull()
+  })
+
+  it('returns the bare pin when the location carries no Place', () => {
+    expect(locationSuffix(withCoordinates)).toBe(' · 📍')
+    expect(locationSuffix({ ...withCoordinates, place_name: null })).toBe(' · 📍')
+    expect(locationSuffix({ ...withCoordinates, place_name: '' })).toBe(' · 📍')
+    // A whitespace-only name counts as none (CONTEXT.md).
+    expect(locationSuffix({ ...withCoordinates, place_name: '   ' })).toBe(' · 📍')
+  })
+
+  it('reads `📍 <place_name>` when the location carries a Place name', () => {
+    const withPlace = { ...withCoordinates, place_name: 'Esselunga' }
+    expect(locationSuffix(withPlace)).toBe(' · 📍 Esselunga')
+    // The name is display text: trimmed before it joins the subtitle.
+    expect(locationSuffix({ ...withPlace, place_name: '  Esselunga ' })).toBe(
+      ' · 📍 Esselunga',
+    )
   })
 })
