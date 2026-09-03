@@ -5,6 +5,20 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.1.1] — 2026-09-02
+
+### Added
+
+- **Privacy policy** — a static privacy policy page at `/privacy.html`, the
+  URL the Android app's Play Store listing points to.
+
+### Changed
+
+- **Sessions** — the deploy's compose now passes
+  `BUDJETAME_JWT_EXPIRE_MINUTES` through with a 129600 (90 days) default,
+  so the Android app's users don't re-login daily; per environment it
+  stays overridable (budjetame-android spec #13).
+
 ## [v1.1.0] — 2026-08-26
 
 ### Added
@@ -93,3 +107,4 @@ behind the live deployment at budjetame.de.
 
 [v1.0.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.0.0
 [v1.1.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.0
+[v1.1.1]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.1

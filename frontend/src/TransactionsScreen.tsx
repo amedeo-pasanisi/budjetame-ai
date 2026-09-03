@@ -19,6 +19,7 @@ import {
   type Wallet,
 } from './api'
 import { useDataVersion, getDataVersion } from './api/dataVersion'
+import type { LedgerFilterRequest } from './App'
 import { CategoryModal } from './CategoryModal'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
@@ -27,7 +28,7 @@ import { RecurringIncomeModal } from './RecurringIncomeModal'
 import { TransactionModal } from './TransactionModal'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
 import { WalletModal } from './WalletModal'
-import { signedAmount, hasLocation, transactionTitle } from './transactions'
+import { signedAmount, locationSuffix, transactionTitle } from './transactions'
 
 const ALL_CATEGORIES = -1
 
@@ -40,11 +41,23 @@ type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
  * Any filter change refetches the first page with it applied; the bar, its
  * values, and the search persist across tab switches (the tab keeps-alive,
  * ADR-0022). The Import Draft (issue #43) is NOT screen state: it arrives
- * from the app shell, so it survives even a real unmount. */
+ * from the app shell, so it survives even a real unmount. The ledger jump
+ * (issue #90) is shell state too — the pending Wallet/Category filter
+ * request arrives with the panel's props and is consumed here exactly
+ * once. */
 export function TransactionsScreen({
   importState,
+  pendingLedgerRequest,
+  onConsumeLedgerRequest,
 }: {
   importState: ImportDraftController
+  /** The pending ledger jump (issue #90): a Wallet/Category row asked the
+   * shell to open this ledger pre-filtered to that entity. Null while no
+   * jump is pending. */
+  pendingLedgerRequest: LedgerFilterRequest | null
+  /** The consume side of the jump: call once the pending request has been
+   * applied, so the shell clears it and no later render can reapply it. */
+  onConsumeLedgerRequest: () => void
 }) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
@@ -111,17 +124,32 @@ export function TransactionsScreen({
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
-  // then the search bar hides — there is nothing to search.
+  // then the whole toolbar row hides (issue #92) — there is nothing to
+  // search or filter.
   const [ledgerEmpty, setLedgerEmpty] = useState(false)
 
   // Filters bar (issue #33): closed by default; every change refetches the
   // first page. Empty wallet/date/category values mean "all" (the tab keeps
-  // its role as the full ledger).
+  // its role as the full ledger). The wallet and category seeds read the
+  // pending ledger jump (issue #90): the panel can mount because a Wallet
+  // or Category row fired the jump, and the very first fetch must already
+  // carry that filter — initial state applies it, never an
+  // apply-then-refetch. The jump's other resets (dates, recurring, search,
+  // the bar itself) are the fresh-mount defaults anyway.
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [filterWalletId, setFilterWalletId] = useState<number | undefined>(undefined)
+  const [filterWalletId, setFilterWalletId] = useState<number | undefined>(
+    () =>
+      pendingLedgerRequest !== null && pendingLedgerRequest.kind === 'wallet'
+        ? pendingLedgerRequest.id
+        : undefined,
+  )
   const [filterFromDate, setFilterFromDate] = useState('')
   const [filterToDate, setFilterToDate] = useState('')
-  const [filterCategoryId, setFilterCategoryId] = useState<number>(ALL_CATEGORIES)
+  const [filterCategoryId, setFilterCategoryId] = useState<number>(() =>
+    pendingLedgerRequest !== null && pendingLedgerRequest.kind === 'category'
+      ? pendingLedgerRequest.id
+      : ALL_CATEGORIES,
+  )
   // The Recurring definition filter (issue #86): one select listing every
   // created Recurring Cost and Recurring Income (grouped — names may
   // collide across kinds); picking one narrows the ledger to the
@@ -145,6 +173,41 @@ export function TransactionsScreen({
     }, 300)
     return () => clearTimeout(timer)
   }, [search])
+
+  // The ledger jump (issue #90), while-mounted side: a Wallet/Category row
+  // on another tab asked for this ledger pre-filtered to that entity. The
+  // request REPLACES the whole filter state — wallet, category, from/to
+  // dates, and the recurring filter all reset — clears the search (input
+  // and debounced needle together, so no late debounce can resurrect it),
+  // closes the Filters bar, and then rides the existing filter-change
+  // reload: the first page refetches once with the new state. First mounts
+  // need none of these updates (the seeds above already applied the
+  // request); they still consume it, exactly once, here. Consuming in the
+  // same tick the request arrives is what makes it safe: the shell's
+  // pending is null on every later render, so a stale request can never
+  // reapply. An open Import Draft changes nothing — the filter applies
+  // underneath the Import screen, and the user exits the draft to find the
+  // ledger already filtered (nothing waits on the draft's lifecycle).
+  useEffect(() => {
+    if (pendingLedgerRequest === null) {
+      return
+    }
+    setFilterWalletId(
+      pendingLedgerRequest.kind === 'wallet' ? pendingLedgerRequest.id : undefined,
+    )
+    setFilterCategoryId(
+      pendingLedgerRequest.kind === 'category'
+        ? pendingLedgerRequest.id
+        : ALL_CATEGORIES,
+    )
+    setFilterFromDate('')
+    setFilterToDate('')
+    setFilterRecurring(undefined)
+    setSearch('')
+    setSearchNeedle('')
+    setFiltersOpen(false)
+    onConsumeLedgerRequest()
+  }, [pendingLedgerRequest, onConsumeLedgerRequest])
 
   const filters = useCallback((): TransactionFilters => {
     const result: TransactionFilters = {}
@@ -170,7 +233,11 @@ export function TransactionsScreen({
     return result
   }, [filters, searchNeedle])
 
-  const filtersActive = Object.keys(filters()).length > 0
+  // The count on the Filters toggle (issue #92): how many of the five panel
+  // filters are set — wallet, category, from-date, to-date, recurring. The
+  // search never counts: the box shows its own text and carries its own ✕.
+  const panelFilterCount = Object.keys(filters()).length
+  const panelFiltersActive = panelFilterCount > 0
 
   // Generation counter: any write (save/delete/import) or filter change
   // resets the list to the first page; a further page still in flight when
@@ -312,6 +379,68 @@ export function TransactionsScreen({
     return categories?.find((c) => c.id === categoryId)?.name ?? null
   }
 
+  // The filtered line's chips (issue #92): one per active panel filter —
+  // wallet, category, the date range (From and To merge into one chip when
+  // both are set), the recurring definition — in that order, with names
+  // read from the already-loaded lists. A set filter whose entity the lists
+  // do not know (still loading, or vanished) shows no chip: the panel
+  // select remains the way back to it.
+  const activeSegments: Array<{
+    key: string
+    label: string
+    clear: () => void
+  }> = []
+  if (filterWalletId !== undefined) {
+    const name = wallets?.find((w) => w.id === filterWalletId)?.name
+    if (name !== undefined) {
+      activeSegments.push({
+        key: 'wallet',
+        label: name,
+        clear: () => setFilterWalletId(undefined),
+      })
+    }
+  }
+  if (filterCategoryId !== ALL_CATEGORIES) {
+    const name = categories?.find((c) => c.id === filterCategoryId)?.name
+    if (name !== undefined) {
+      activeSegments.push({
+        key: 'category',
+        label: name,
+        clear: () => setFilterCategoryId(ALL_CATEGORIES),
+      })
+    }
+  }
+  if (filterFromDate !== '' || filterToDate !== '') {
+    const label =
+      filterFromDate !== '' && filterToDate !== ''
+        ? `${filterFromDate} – ${filterToDate}`
+        : filterFromDate !== ''
+          ? `From ${filterFromDate}`
+          : `To ${filterToDate}`
+    activeSegments.push({
+      key: 'dates',
+      label,
+      // One chip, one ✕, one date-range filter: clearing it resets both
+      // sides.
+      clear: () => {
+        setFilterFromDate('')
+        setFilterToDate('')
+      },
+    })
+  }
+  if (filterRecurring !== undefined) {
+    const definitions =
+      filterRecurring.kind === 'cost' ? recurringCosts : recurringIncomes
+    const name = definitions.find((d) => d.id === filterRecurring.id)?.name
+    if (name !== undefined) {
+      activeSegments.push({
+        key: 'recurring',
+        label: name,
+        clear: () => setFilterRecurring(undefined),
+      })
+    }
+  }
+
   // Frozen-Wallet Transactions are viewable but not editable/deletable
   // (ADR-0002). A Transfer is frozen when either leg is frozen — a Wallet can
   // freeze after the Transfer exists, so the check must cover both legs.
@@ -412,6 +541,26 @@ export function TransactionsScreen({
     setSavedWarning(warning ? 'Deleted — this made a Cash wallet negative.' : null)
   }
 
+  // Clear all filters (panel footer, issue #92): resets the five panel
+  // filters only — the search box keeps its text. The existing
+  // reload-on-filter-change machinery refetches the first page.
+  const clearPanelFilters = () => {
+    setFilterWalletId(undefined)
+    setFilterCategoryId(ALL_CATEGORIES)
+    setFilterFromDate('')
+    setFilterToDate('')
+    setFilterRecurring(undefined)
+  }
+
+  // Clear all (filtered line, issue #92): the five panel filters AND the
+  // search — input and debounced needle together, so no late debounce can
+  // resurrect the query — one tap back to a fully clean list.
+  const clearFiltersAndSearch = () => {
+    clearPanelFilters()
+    setSearch('')
+    setSearchNeedle('')
+  }
+
   // Export (US 7.3): the ledger exactly as the filters show it — every
   // matching row, not just the visible page — downloads as the import
   // template's .xlsx under the server's dated filename. The browser anchor
@@ -441,7 +590,14 @@ export function TransactionsScreen({
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-slate-900">Transactions</h2>
         {importState.draft === null && (
-          <div className="flex gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={importState.open}
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              Import
+            </button>
             <button
               type="button"
               onClick={() => setForm({ kind: 'create' })}
@@ -449,20 +605,6 @@ export function TransactionsScreen({
               className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
             >
               New transaction
-            </button>
-            <button
-              type="button"
-              onClick={importState.open}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
-            >
-              Import
-            </button>
-            <button
-              type="button"
-              onClick={handleExport}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600"
-            >
-              Export
             </button>
           </div>
         )}
@@ -492,28 +634,73 @@ export function TransactionsScreen({
             </p>
           )}
 
-          <div className="mt-8 flex items-center justify-between">
-            <h3 className="text-sm font-medium text-slate-700">All transactions</h3>
-            <button
-              type="button"
-              aria-expanded={filtersOpen}
-              onClick={() => setFiltersOpen((open) => !open)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600"
-            >
-              Filters {filtersOpen ? '▾' : '▸'}
-            </button>
-          </div>
-
+          {/* Toolbar row (issue #92): the search input takes the width and
+              the Filters toggle sits on its right, showing a count of the
+              set panel filters. A truly empty ledger hides the whole row —
+              there is nothing to search or filter. */}
           {!ledgerEmpty && (
-            <div className="mt-3">
+            <div className="mt-8 flex items-center gap-3">
               <input
                 aria-label="Search transactions"
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search transactions…"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
               />
+              <button
+                type="button"
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen((open) => !open)}
+                className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600"
+              >
+                Filters{panelFilterCount > 0 ? ` (${panelFilterCount})` : ''}{' '}
+                {filtersOpen ? '▾' : '▸'}
+              </button>
+            </div>
+          )}
+
+          {/* Filtered line (issue #92): visible only when at least one of
+              the five panel filters is set — search text never lands here
+              (the box shows it, with its own native ✕). A chip's ✕ removes
+              just that filter; Clear all also clears the search; Export
+              downloads the current view without opening the panel. */}
+          {panelFiltersActive && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {activeSegments.map((segment) => (
+                  <span
+                    key={segment.key}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700"
+                  >
+                    {segment.label}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${segment.label} filter`}
+                      onClick={segment.clear}
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-4 text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={clearFiltersAndSearch}
+                  className="text-slate-600 hover:text-slate-900"
+                >
+                  Clear all
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  className="text-slate-600 hover:text-slate-900"
+                >
+                  Export
+                </button>
+              </div>
             </div>
           )}
 
@@ -629,6 +816,30 @@ export function TransactionsScreen({
                   ))}
                 </select>
               </div>
+
+              {/* Panel footer (issue #92): Clear all filters — visible only
+                  while at least one of the five is set, and it clears
+                  exactly those (search untouched) — with Export always
+                  present while the panel is open (nothing set: the
+                  full-ledger export path). */}
+              <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+                {panelFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearPanelFilters}
+                    className="text-xs font-medium text-slate-600 hover:text-slate-900"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  className="text-xs font-medium text-slate-600 hover:text-slate-900"
+                >
+                  Export
+                </button>
+              </div>
             </div>
           )}
 
@@ -644,7 +855,7 @@ export function TransactionsScreen({
             <p className="mt-3 text-sm text-slate-500">
               {searchNeedle !== ''
                 ? 'No transactions match your search.'
-                : filtersActive
+                : panelFiltersActive
                   ? 'No transactions match these filters.'
                   : 'Nothing here yet.'}
             </p>
@@ -677,7 +888,7 @@ export function TransactionsScreen({
                         </span>
                         <span className="block truncate text-xs text-slate-500">
                           {transaction.date} · {walletLabel}
-                          {hasLocation(transaction) && ' · 📍'}
+                          {locationSuffix(transaction)}
                         </span>
                       </span>
                       <span className="shrink-0 text-sm font-semibold text-slate-900">

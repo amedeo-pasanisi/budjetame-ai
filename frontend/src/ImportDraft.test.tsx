@@ -297,9 +297,9 @@ describe('Import Draft lifecycle (issue #43)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     // Back on the normal transactions list; no preview artifacts remain.
-    expect(
-      await screen.findByRole('heading', { name: 'All transactions' }),
-    ).toBeInTheDocument()
+    // The Transactions tab's heading is the only one since the chrome
+    // rework (issue #92) — the list row is the "we are back" signal.
+    expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Import \d+ rows/ })).not.toBeInTheDocument()
 
     // The next import starts from the pick phase, not the old preview.
@@ -340,9 +340,7 @@ describe('Import Draft lifecycle (issue #43)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     // Back on the list, reloaded with the imported data; the draft is gone.
-    expect(
-      await screen.findByRole('heading', { name: 'All transactions' }),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
     await waitFor(() => expect(fetchTransactionsMock).toHaveBeenCalledTimes(2))
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
     expect(screen.getByRole('button', { name: 'Read and validate' })).toBeDisabled()
@@ -352,9 +350,6 @@ describe('Import Draft lifecycle (issue #43)', () => {
     renderShell()
     fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
 
-    expect(
-      await screen.findByRole('heading', { name: 'All transactions' }),
-    ).toBeInTheDocument()
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))

@@ -93,6 +93,7 @@ import {
   fetchTransactions,
   fetchWallets,
 } from './api'
+import type { Category, Wallet } from './api'
 
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
@@ -388,5 +389,188 @@ describe('AppShell tab keep-alive (ADR-0022)', () => {
     await waitFor(() =>
       expect(fetchWalletsMock.mock.calls.length).toBe(callsBefore + 1),
     )
+  })
+})
+
+describe('AppShell wallet ledger jump (issue #93)', () => {
+  // Two active Contact wallets and one frozen credit card: enough rows to
+  // jump twice in a row and to land on a frozen wallet's read-only history.
+  const createdAt = '2026-08-01T10:00:00Z'
+  const walletFixtures: Wallet[] = [
+    { id: 1, name: 'Marco', type: 'contact', balance: '10.00', frozen: false, created_at: createdAt },
+    { id: 2, name: 'anna', type: 'contact', balance: '-30.00', frozen: false, created_at: createdAt },
+    { id: 3, name: 'Old Card', type: 'credit_card', balance: '0.00', frozen: true, created_at: createdAt },
+  ]
+
+  beforeEach(() => {
+    fetchWalletsMock.mockResolvedValue(walletFixtures)
+  })
+
+  it('an active Wallet row tap opens the Transactions tab filtered to that Wallet', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Marco/ }))
+
+    await expectTab('transactions')
+    // The very first ledger fetch carries the jump's filter: no unfiltered
+    // fetch first, and the chip line names the Wallet.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 1 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Marco filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(panelOf('New wallet')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+
+  it('a frozen Wallet row tap does the same and the read-only banner shows on arrival', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Old Card/ }))
+
+    await expectTab('transactions')
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 3 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Old Card filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText(
+        'This wallet is frozen — its history is viewable but read-only.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('a later Wallet row jump replaces the filter on the already-mounted Transactions tab', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    await screen.findByRole('region', { name: 'Contacts' })
+    fireEvent.click(screen.getByRole('button', { name: /^Marco/ }))
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 1 }),
+    )
+    await screen.findByText('No transactions match these filters.')
+
+    // Back to Wallets (its panel stayed mounted) and jump to a different
+    // Wallet: the mounted ledger replaces its filter, never a remount.
+    fetchTransactionsMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    fireEvent.click(screen.getByRole('button', { name: /^anna/ }))
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove anna filter' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Remove Marco filter' }),
+    ).not.toBeInTheDocument()
+    expect(panelOf('New wallet')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+})
+
+describe('AppShell category ledger jump (issue #94)', () => {
+  // One expense and one income Category: the ledger's Category filter
+  // covers both directions, so a row tap must jump either way.
+  const createdAt = '2026-08-01T10:00:00Z'
+  const categoryFixtures: Category[] = [
+    { id: 1, name: 'Food', type: 'expense', icon: '🍎', color: '#ef4444', created_at: createdAt },
+    { id: 2, name: 'Salary', type: 'income', icon: '💼', color: '#3b82f6', created_at: createdAt },
+  ]
+
+  beforeEach(() => {
+    fetchCategoriesMock.mockResolvedValue(categoryFixtures)
+  })
+
+  it('an expense Category row tap opens the Transactions tab filtered to that Category', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    await screen.findByRole('region', { name: 'Expenses' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Food/ }))
+
+    await expectTab('transactions')
+    // The very first ledger fetch carries the jump's filter: no unfiltered
+    // fetch first, and the chip line names the Category.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 1 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Food filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(panelOf('New category')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+
+  it('an income Category row tap does the same — the ledger filter covers both directions', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    await screen.findByRole('region', { name: 'Expenses' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Salary/ }))
+
+    await expectTab('transactions')
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 2 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Salary filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+  })
+
+  it('a later Category row jump replaces the filter on the already-mounted Transactions tab', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(screen.getByRole('button', { name: /^Food/ }))
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 1 }),
+    )
+    await screen.findByText('No transactions match these filters.')
+
+    // Back to Categories (its panel stayed mounted) and jump to a
+    // different Category: the mounted ledger replaces its filter, never a
+    // remount.
+    fetchTransactionsMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Categories' }))
+    await expectTab('categories')
+    fireEvent.click(screen.getByRole('button', { name: /^Salary/ }))
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 2 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Salary filter' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Remove Food filter' }),
+    ).not.toBeInTheDocument()
+    expect(panelOf('New category')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
   })
 })

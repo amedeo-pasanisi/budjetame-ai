@@ -2,12 +2,16 @@
  * renders, the sentinel at the bottom loads the next page
  * (IntersectionObserver), pages accumulate without duplicates, any write
  * resets the list to the first page, and the merged History filters bar
- * (toggle, Frozen Wallet dropdown, refetch-on-filter) works. The API client
+ * (toggle, Frozen Wallet dropdown, refetch-on-filter) works. The tab's
+ * chrome (issue #92) — toolbar row, filter chips with per-filter ✕, panel
+ * footer — lives here too. The API client
  * and the map picker are mocked; the real form is driven like a user would
  * (click, type, submit) for the reset-on-write path. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 
+import type { LedgerFilterRequest } from './App'
 import { TransactionsScreen } from './TransactionsScreen'
 import { useImportDraft } from './importDraft'
 import type {
@@ -129,10 +133,37 @@ async function enterSentinel(): Promise<void> {
 
 /** The Import Draft lives in the app shell (issue #43); the screen takes its
  * controller as a prop. This harness owns a controller the way the shell
- * would — these tests never exercise the import flow, so it stays closed. */
-function Harness() {
+ * would — these tests never exercise the import flow, so it stays closed.
+ *
+ * The pending ledger jump (issue #90) is shell state too: the harness holds
+ * it in local state, hands it to the screen with a consume callback, and
+ * exposes `sendLedgerRequest` — the AppShell `requestLedgerFilter`
+ * equivalent — for tests to fire a jump the way a Wallet/Category row will. */
+let sendLedgerRequest: (request: LedgerFilterRequest) => void = () => {}
+
+function Harness({
+  initialRequest = null,
+  onConsumed,
+}: {
+  /** A ledger jump pending when the screen first mounts — the
+   * first-visit-via-jump case (issue #90). */
+  initialRequest?: LedgerFilterRequest | null
+  /** Observe the consume side of the jump, once per applied request. */
+  onConsumed?: () => void
+} = {}) {
   const controller = useImportDraft()
-  return <TransactionsScreen importState={controller} />
+  const [pending, setPending] = useState<LedgerFilterRequest | null>(initialRequest)
+  sendLedgerRequest = (request: LedgerFilterRequest) => setPending(request)
+  return (
+    <TransactionsScreen
+      importState={controller}
+      pendingLedgerRequest={pending}
+      onConsumeLedgerRequest={() => {
+        setPending(null)
+        onConsumed?.()
+      }}
+    />
+  )
 }
 
 const wallet: Wallet = {
@@ -336,13 +367,50 @@ describe('TransactionsScreen row title (description-led)', () => {
   })
 })
 
-describe('TransactionsScreen infinite scroll', () => {
-  it('renders the first page under the "All transactions" heading', async () => {
+describe('TransactionsScreen row location pin (issue #91)', () => {
+  it('reads `📍 <place_name>` after the wallet label when the Transaction carries a Place', async () => {
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [
+        {
+          ...coffee,
+          latitude: '41.9028',
+          longitude: '12.4964',
+          place_name: 'Esselunga',
+          place_id: 'ChIJN1t_tDeuEmsRUsoyG83frY4',
+        },
+      ],
+      next_cursor: null,
+    }))
     render(<Harness />)
 
-    expect(
-      await screen.findByRole('heading', { name: 'All transactions' }),
-    ).toBeInTheDocument()
+    // The pin reads the Place name instead of standing bare.
+    expect(await screen.findByText('2026-08-01 · Cash · 📍 Esselunga')).toBeInTheDocument()
+  })
+
+  it('keeps the bare pin for a coordinates-only Transaction (GPS/Leaflet/import)', async () => {
+    fetchTransactionsMock.mockImplementation(async () => ({
+      items: [{ ...coffee, latitude: '41.9028', longitude: '12.4964' }],
+      next_cursor: null,
+    }))
+    render(<Harness />)
+
+    // No Place: the subtitle keeps the bare pin (the Place is cleared
+    // together with the coordinates when the Location is not a Place).
+    expect(await screen.findByText('2026-08-01 · Cash · 📍')).toBeInTheDocument()
+  })
+
+  it('shows neither pin nor Place when the Transaction has no location', async () => {
+    render(<Harness />)
+
+    expect(await screen.findByText('2026-08-01 · Cash')).toBeInTheDocument()
+    expect(screen.queryByText('📍')).not.toBeInTheDocument()
+  })
+})
+
+describe('TransactionsScreen infinite scroll', () => {
+  it('renders the first page of the ledger', async () => {
+    render(<Harness />)
+
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
     expect(fetchTransactionsMock).toHaveBeenCalledWith('', {})
   })
@@ -516,22 +584,26 @@ describe('TransactionsScreen search (issue #54)', () => {
 
   const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
-  it('renders the search bar under the header row', async () => {
+  it('renders the toolbar row under the header: search with the Filters toggle to its right', async () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
 
     const search = screen.getByRole('searchbox', { name: 'Search transactions' })
-    const header = screen.getByRole('heading', { name: 'All transactions' })
+    const toggle = screen.getByRole('button', { name: 'Filters ▸' })
+    const header = screen.getByRole('heading', { name: 'Transactions' })
     const list = screen.getByRole('list')
     expect(
       header.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      search.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
     expect(
       search.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
   })
 
-  it('hides the search bar when the ledger is truly empty', async () => {
+  it('hides the whole toolbar row when the ledger is truly empty', async () => {
     fetchTransactionsMock.mockImplementation(async () => ({
       items: [],
       next_cursor: null,
@@ -539,9 +611,12 @@ describe('TransactionsScreen search (issue #54)', () => {
     render(<Harness />)
 
     expect(await screen.findByText('Nothing here yet.')).toBeInTheDocument()
+    // Search AND the Filters toggle disappear together: with nothing to
+    // search or filter there is no toolbar row at all (issue #92).
     expect(
       screen.queryByRole('searchbox', { name: 'Search transactions' }),
     ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Filters ▸' })).not.toBeInTheDocument()
   })
 
   it('debounces typing into a first-page refetch with q', async () => {
@@ -1862,8 +1937,343 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
 
 
 
+describe('TransactionsScreen chrome (issue #92)', () => {
+  /** Fake timers scoped to setTimeout/clearTimeout only, so promises and
+   * React's scheduler keep running normally (same as the search suite). */
+  const debounce = async () => {
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+  }
+  const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+  it('has no "All transactions" heading row under the header', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    // The Transactions h2 is the only heading: the duplicate h3 row that
+    // used to sit above the toolbar is gone (issue #92).
+    expect(screen.getByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'All transactions' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('counts the set panel filters on the toggle — search text never counts', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    // Nothing set: no count on the toggle.
+    expect(screen.getByRole('button', { name: 'Filters ▸' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: '1' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', {
+        walletId: 2,
+        categoryId: 1,
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'Filters (2) ▾' })).toBeInTheDocument()
+
+    // Search text changes nothing on the toggle: only the box shows it.
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    expect(screen.getByRole('button', { name: 'Filters (2) ▾' })).toBeInTheDocument()
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        categoryId: 1,
+        q: 'coffee',
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'Filters (2) ▾' })).toBeInTheDocument()
+  })
+
+  it('shows the filtered line with one chip per set panel filter, dates merged', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    fetchRecurringCostsMock.mockResolvedValue([rentCost])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-01-01' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-01-31' } })
+    fireEvent.change(screen.getByLabelText('Recurring'), { target: { value: 'cost:11' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        categoryId: 1,
+        fromDate: '2026-01-01',
+        toDate: '2026-01-31',
+        recurringCostId: 11,
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (5) ▾' }))
+
+    // One chip per filter — wallet, category, the two dates merged into a
+    // single range chip, recurring — each carrying its own ✕, plus the
+    // Clear all and Export links on the right.
+    expect(
+      screen.getByRole('button', { name: 'Remove Old Card filter' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Food filter' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Remove 2026-01-01 – 2026-01-31 filter' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Rent filter' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clear all' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
+
+    // The chips read in the spec's order: wallet, category, dates, recurring.
+    const chips = ['Old Card', 'Food', '2026-01-01 – 2026-01-31', 'Rent'].map(
+      (label) => screen.getByText(label),
+    )
+    for (let i = 1; i < chips.length; i += 1) {
+      expect(
+        chips[i - 1].compareDocumentPosition(chips[i]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    }
+  })
+
+  it('a chip ✕ removes just that filter and refetches, leaving the rest', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: '1' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        categoryId: 1,
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (2) ▾' }))
+
+    // The Category chip's ✕ removes only the Category: the wallet chip, the
+    // count, and the rest of the view survive, and the first page refetches.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Food filter' }))
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { walletId: 2 }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Old Card filter' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Remove Food filter' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters (1) ▸' })).toBeInTheDocument()
+  })
+
+  it('the date chips read From …/To … alone and merge into one chip that clears both', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    // From alone: one chip named From …, and its ✕ clears just that side.
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('From'), {
+      target: { value: '2026-01-01' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
+    expect(
+      screen.getByRole('button', { name: 'Remove From 2026-01-01 filter' }),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove From 2026-01-01 filter' }))
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}),
+    )
+    expect(screen.queryByRole('button', { name: /^Remove / })).not.toBeInTheDocument()
+
+    // To alone reads To …
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: '2026-01-31' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
+    expect(
+      screen.getByRole('button', { name: 'Remove To 2026-01-31 filter' }),
+    ).toBeInTheDocument()
+
+    // Both set: ONE merged chip … – … whose single ✕ clears both dates.
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▸' }))
+    fireEvent.change(await screen.findByLabelText('From'), {
+      target: { value: '2026-01-01' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (2) ▾' }))
+    expect(
+      screen.getByRole('button', { name: 'Remove 2026-01-01 – 2026-01-31 filter' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Remove To 2026-01-31 filter' }),
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove 2026-01-01 – 2026-01-31 filter' }),
+    )
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}),
+    )
+    expect(screen.queryByRole('button', { name: /^Remove / })).not.toBeInTheDocument()
+  })
+
+  it('the line Clear all removes the five filters AND the search in one tap', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        q: 'coffee',
+      }),
+    )
+
+    // The line shows only the wallet chip — the search never appears on it.
+    expect(
+      screen.getByRole('button', { name: 'Remove Old Card filter' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Remove .*coffee/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+
+    // One tap: the search input and needle clear with the five filters,
+    // and the first page refetches clean.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {}),
+    )
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('')
+    expect(
+      screen.queryByRole('button', { name: 'Remove Old Card filter' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear all' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters ▸' })).toBeInTheDocument()
+    expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
+  })
+
+  it('a search-only state shows no filtered line', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { q: 'coffee' }),
+    )
+
+    // The box holds the text and its own ✕; the line stays hidden.
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('coffee')
+    expect(screen.queryByRole('button', { name: 'Clear all' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters ▸' })).toBeInTheDocument()
+  })
+
+  it('the panel footer Clear all filters clears only the five, leaving the search', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        q: 'coffee',
+      }),
+    )
+
+    // Footer: Clear all filters on the left, Export on the right — Export
+    // is always there while the panel is open (with the wallet filter set
+    // the filtered line shows its own Export too, hence the scoping).
+    const clearFilters = screen.getByRole('button', { name: 'Clear all filters' })
+    const footer = clearFilters.parentElement as HTMLElement
+    expect(within(footer).getByRole('button', { name: 'Export' })).toBeInTheDocument()
+    fireEvent.click(clearFilters)
+
+    // Only the five reset: the search keeps filtering, and the footer
+    // keeps its Export while losing Clear all filters.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', { q: 'coffee' }),
+    )
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('coffee')
+    expect(
+      screen.queryByRole('button', { name: 'Remove Old Card filter' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Clear all filters' }),
+    ).not.toBeInTheDocument()
+    expect(within(footer).getByRole('button', { name: 'Export' })).toBeInTheDocument()
+    // The panel is still open, so the toggle reads ▾ — with no count now.
+    expect(screen.getByRole('button', { name: 'Filters ▾' })).toBeInTheDocument()
+  })
+
+  it('header actions: Import is a muted text link left of New transaction', async () => {
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+
+    const importButton = screen.getByRole('button', { name: 'Import' })
+    const newTransaction = screen.getByRole('button', { name: 'New transaction' })
+    expect(
+      importButton.compareDocumentPosition(newTransaction) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    // Demoted from the bordered button it was: a text link, no border and
+    // no background, next to the unchanged primary button. Export left the
+    // header entirely — with no filter set and the panel closed, nothing
+    // offers it.
+    expect(importButton.className).not.toMatch(/border|bg-/)
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+  })
+})
+
 describe('TransactionsScreen export (US 7.3)', () => {
-  it('downloads the filtered ledger under the server filename', async () => {
+  it('downloads the full ledger from the panel footer when nothing is filtered', async () => {
     const createObjectURL = vi.fn(() => 'blob:export')
     const revokeObjectURL = vi.fn()
     // Restore URL by hand instead of unstubAllGlobals: the file-wide
@@ -1880,13 +2290,31 @@ describe('TransactionsScreen export (US 7.3)', () => {
         downloaded.name = this.download
       })
 
+    render(<Harness />)
+    await screen.findByText(/Coffee/)
+    // The panel footer's Export is always there once the panel opens; with
+    // nothing set this is the full-ledger export path.
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+
+    await waitFor(() => expect(exportTransactionsMock).toHaveBeenCalledWith('', {}))
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(downloaded.name).toBe('budjetame-2026-08-23.xlsx')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:export')
+
+    click.mockRestore()
+    vi.stubGlobal('URL', realURL)
+  })
+
+  it('downloads the current filtered view from the filtered line, without opening the panel', async () => {
     // Frozen Wallets are fetched explicitly so the dropdown can offer them;
     // override before render, so the select has the option when the change
     // fires.
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
     render(<Harness />)
     await screen.findByText(/Coffee/)
-    // The export honors the current filters: select a Frozen Wallet first.
+
+    // Set a filter through the panel...
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
     fireEvent.change(await screen.findByLabelText('Wallet'), {
       target: { value: '2' },
@@ -1894,18 +2322,14 @@ describe('TransactionsScreen export (US 7.3)', () => {
     await waitFor(() =>
       expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
     )
-
+    // ...then close it: the filtered line's Export downloads the view the
+    // ledger shows, panel or no panel.
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1) ▾' }))
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
 
     await waitFor(() =>
       expect(exportTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
     )
-    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
-    expect(downloaded.name).toBe('budjetame-2026-08-23.xlsx')
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:export')
-
-    click.mockRestore()
-    vi.stubGlobal('URL', realURL)
   })
 
   it('shows an error banner when the export fails', async () => {
@@ -1915,18 +2339,204 @@ describe('TransactionsScreen export (US 7.3)', () => {
 
     render(<Harness />)
     await screen.findByText(/Coffee/)
-    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
 
     expect(
       await screen.findByText(/could not export transactions/i),
     ).toBeInTheDocument()
   })
 
-  it('hides the export button while the import draft is open', async () => {
+  it('hides Import, New transaction, and Export while the import draft is open', async () => {
     render(<Harness />)
     await screen.findByText(/Coffee/)
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
+    // The draft replaces the whole chrome, header actions included.
+    expect(screen.queryByRole('button', { name: 'Import' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New transaction' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+  })
+})
+
+describe('TransactionsScreen ledger jump (issue #90)', () => {
+  /** Fake timers scoped to setTimeout/clearTimeout only, so promises and
+   * React's scheduler keep running normally (same as the search suite). */
+  const debounce = async () => {
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+  }
+  const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+  it('first visit with a request pending: the initial fetch carries the filter and the request is consumed once', async () => {
+    const onConsumed = vi.fn()
+    // A wallet with no transactions: the seeded filter is visible in what
+    // the screen renders, not just in the request.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.walletId === 2 ? { items: [], next_cursor: null } : page1,
+    )
+    const view = render(
+      <Harness initialRequest={{ kind: 'wallet', id: 2 }} onConsumed={onConsumed} />,
+    )
+
+    // Initial state applied the request: the one mount fetch already asks
+    // for wallet 2 — no unfiltered fetch first, no apply-then-refetch.
+    await waitFor(() => expect(fetchTransactionsMock).toHaveBeenCalledTimes(1))
+    expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 })
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+
+    // Consumed exactly once on mount: the shell's pending is cleared...
+    await waitFor(() => expect(onConsumed).toHaveBeenCalledTimes(1))
+    // ...so a later render of the still-mounted screen never reapplies it.
+    fetchTransactionsMock.mockClear()
+    view.rerender(
+      <Harness initialRequest={{ kind: 'wallet', id: 2 }} onConsumed={onConsumed} />,
+    )
+    await act(async () => {})
+    expect(fetchTransactionsMock).not.toHaveBeenCalled()
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a request while mounted replaces the whole filter state, clears the search, closes the bar, and refetches once', async () => {
+    fetchWalletsMock.mockResolvedValue([
+      wallet,
+      { ...wallet, id: 2, name: 'Bank', type: 'checking' },
+    ])
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    fetchRecurringCostsMock.mockResolvedValue([rentCost])
+    // The jumped-to Category has no transactions: the replaced state shows
+    // in what the screen renders, not just in the request.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.categoryId === 5 ? { items: [], next_cursor: null } : page1,
+    )
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+
+    // Dirty every piece of state the jump must replace: an open Filters
+    // bar with a wallet, both dates, a recurring definition, a category...
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    fireEvent.change(await screen.findByLabelText('From'), {
+      target: { value: '2026-01-01' },
+    })
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: '2026-01-31' },
+    })
+    fireEvent.change(await screen.findByLabelText('Recurring'), {
+      target: { value: 'cost:11' },
+    })
+    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: '1' } })
+    // ...and a debounced search needle.
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        fromDate: '2026-01-01',
+        toDate: '2026-01-31',
+        recurringCostId: 11,
+        categoryId: 1,
+        q: 'coffee',
+      }),
+    )
+
+    // The jump arrives: every filter resets except the jumped-to Category,
+    // the search clears, the bar closes, and the first page refetches once.
+    fetchTransactionsMock.mockClear()
+    act(() => {
+      sendLedgerRequest({ kind: 'category', id: 5 })
+    })
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 5 }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /filters/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.queryByLabelText('Wallet')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('')
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a newer request replaces one still pending, applying only the latest', async () => {
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+    fetchTransactionsMock.mockClear()
+
+    // Two jumps back to back, before the first is consumed: the shell's
+    // pending slot holds one request, so the second replaces the first —
+    // only it applies, exactly once.
+    act(() => {
+      sendLedgerRequest({ kind: 'wallet', id: 2 })
+      sendLedgerRequest({ kind: 'category', id: 5 })
+    })
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 5 }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(fetchTransactionsMock).not.toHaveBeenCalledWith('', { walletId: 2 })
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a request while an Import Draft is open applies underneath and is there when the draft closes', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    // A wallet-2 Transaction: after the draft closes, the ledger shows the
+    // jump's filter was applied — not lost while the draft covered it.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.walletId === 2
+        ? {
+            items: [
+              { ...baseTransaction, id: 4, wallet_id: 2, description: 'Frozen lunch' },
+            ],
+            next_cursor: null,
+          }
+        : page1,
+    )
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+
+    // Open the Import Draft: the screen swaps to the Import screen.
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    expect(await screen.findByRole('heading', { name: 'Import' })).toBeInTheDocument()
+
+    // The jump arrives while the draft is open: it applies underneath (one
+    // filtered refetch) and the Import screen keeps showing.
+    fetchTransactionsMock.mockClear()
+    act(() => {
+      sendLedgerRequest({ kind: 'wallet', id: 2 })
+    })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('heading', { name: 'Import' })).toBeInTheDocument()
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+
+    // Exit the draft: the ledger appears already filtered.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText(/Frozen lunch/)).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
   })
 })

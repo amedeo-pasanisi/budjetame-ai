@@ -2,11 +2,17 @@
  * the list renders Expenses and Incomes as two sections, each sorted A→Z
  * case-insensitively; the search bar filters both sections live by
  * case-insensitive name substring and clearing restores the full list;
- * tapping a Category opens the edit form in a modal (Type
- * fixed; backdrop, Escape, and Cancel close without saving) and "New
- * category" opens the same modal for creation (Type selectable), the new
- * Category landing at the sorted position of its section. The API client is
- * mocked; the form is driven like a user would (click, type, submit). */
+ * the create/edit modal (Type fixed while editing; backdrop, Escape, and
+ * Cancel close without saving) and "New category" open it for creation
+ * (Type selectable), the new Category landing at the sorted position of
+ * its section.
+ *
+ * Row structure (issue #94): a row is a main tap surface plus a sibling
+ * trailing ✎ button — never nested. The tap surface sends the ledger jump
+ * (requestLedgerFilter, issue #90): the shell opens the Transactions tab
+ * pre-filtered to that Category, expense and income alike; ✎ Edit opens
+ * the edit modal. The API client is mocked; the form is driven like a
+ * user would (click, type, submit). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -81,6 +87,16 @@ const updateCategoryMock = vi.mocked(updateCategory)
 const deleteCategoryMock = vi.mocked(deleteCategory)
 const mergeCategoriesMock = vi.mocked(mergeCategories)
 
+/** The row tap surfaces inside one section: each row is a tap surface plus
+ * a sibling trailing ✎ button (issue #94), so a plain
+ * `getAllByRole('button')` would also pick up the ✎ buttons — told apart
+ * by their `Edit …` aria-labels. */
+function rowTapButtons(region: HTMLElement): HTMLElement[] {
+  return within(region)
+    .getAllByRole('button')
+    .filter((button) => !(button.getAttribute('aria-label') ?? '').startsWith('Edit '))
+}
+
 beforeEach(() => {
   fetchCategoriesMock.mockResolvedValue(categories)
 })
@@ -110,13 +126,13 @@ describe('CategoriesScreen sections (issue #41)', () => {
     render(<CategoriesScreen />)
 
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
-    const expenseRows = within(expenses).getAllByRole('button').map((b) => b.textContent)
+    const expenseRows = rowTapButtons(expenses).map((b) => b.textContent)
     expect(expenseRows[0]).toContain('apple')
     expect(expenseRows[1]).toContain('Banana')
     expect(expenseRows[2]).toContain('Carrots')
 
     const incomes = screen.getByRole('region', { name: 'Incomes' })
-    const incomeRows = within(incomes).getAllByRole('button').map((b) => b.textContent)
+    const incomeRows = rowTapButtons(incomes).map((b) => b.textContent)
     expect(incomeRows[0]).toContain('freelance')
     expect(incomeRows[1]).toContain('Salary')
   })
@@ -141,26 +157,20 @@ describe('CategoriesScreen search (issue #41)', () => {
     // "an" matches Banana (Expenses) and freelance (Incomes) only.
     fireEvent.change(search, { target: { value: 'an' } })
 
-    const expenseRows = within(
-      screen.getByRole('region', { name: 'Expenses' }),
+    const expenseRows = rowTapButtons(screen.getByRole('region', { name: 'Expenses' })).map(
+      (b) => b.textContent,
     )
-      .getAllByRole('button')
-      .map((b) => b.textContent)
     expect(expenseRows).toHaveLength(1)
     expect(expenseRows[0]).toContain('Banana')
 
     const incomes = screen.getByRole('region', { name: 'Incomes' })
-    const incomeRows = within(incomes).getAllByRole('button').map((b) => b.textContent)
+    const incomeRows = rowTapButtons(incomes).map((b) => b.textContent)
     expect(incomeRows).toHaveLength(1)
     expect(incomeRows[0]).toContain('freelance')
 
     fireEvent.change(search, { target: { value: '' } })
-    expect(
-      within(screen.getByRole('region', { name: 'Expenses' })).getAllByRole('button'),
-    ).toHaveLength(3)
-    expect(
-      within(screen.getByRole('region', { name: 'Incomes' })).getAllByRole('button'),
-    ).toHaveLength(2)
+    expect(rowTapButtons(screen.getByRole('region', { name: 'Expenses' }))).toHaveLength(3)
+    expect(rowTapButtons(screen.getByRole('region', { name: 'Incomes' }))).toHaveLength(2)
   })
 
   it('matches case-insensitively, hides a section with no matches, and shows the empty message', async () => {
@@ -173,7 +183,7 @@ describe('CategoriesScreen search (issue #41)', () => {
 
     expect(screen.queryByRole('region', { name: 'Expenses' })).not.toBeInTheDocument()
     const incomes = screen.getByRole('region', { name: 'Incomes' })
-    const incomeRows = within(incomes).getAllByRole('button').map((b) => b.textContent)
+    const incomeRows = rowTapButtons(incomes).map((b) => b.textContent)
     expect(incomeRows).toHaveLength(1)
     expect(incomeRows[0]).toContain('Salary')
 
@@ -185,15 +195,15 @@ describe('CategoriesScreen search (issue #41)', () => {
 })
 
 describe('CategoriesScreen category modal (issue #41)', () => {
-  const openEdit = async (name: string | RegExp) => {
+  const openEdit = async (name: string) => {
     render(<CategoriesScreen />)
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
-    fireEvent.click(within(expenses).getByRole('button', { name }))
+    fireEvent.click(within(expenses).getByRole('button', { name: `Edit ${name}` }))
     return screen.findByRole('dialog', { name: 'Edit category' })
   }
 
-  it('tapping a Category opens the edit form with the Type fixed; Escape closes without saving', async () => {
-    const dialog = await openEdit(/apple/)
+  it('✎ opens the edit form with the Type fixed; Escape closes without saving', async () => {
+    const dialog = await openEdit('apple')
 
     expect(within(dialog).getByLabelText('Name')).toHaveValue('apple')
     // The Type is fixed when editing: no selector, just the type line.
@@ -204,13 +214,11 @@ describe('CategoriesScreen category modal (issue #41)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(updateCategoryMock).not.toHaveBeenCalled()
     // The inline form is gone: the list still shows the untouched rows.
-    expect(
-      within(screen.getByRole('region', { name: 'Expenses' })).getAllByRole('button'),
-    ).toHaveLength(3)
+    expect(rowTapButtons(screen.getByRole('region', { name: 'Expenses' }))).toHaveLength(3)
   })
 
   it('a backdrop tap and the Cancel button close without saving', async () => {
-    const dialog = await openEdit(/apple/)
+    const dialog = await openEdit('apple')
 
     // The backdrop is the panel's sibling, rendered before it.
     fireEvent.click(dialog.previousElementSibling as Element)
@@ -219,7 +227,7 @@ describe('CategoriesScreen category modal (issue #41)', () => {
 
     fireEvent.click(
       within(screen.getByRole('region', { name: 'Expenses' })).getByRole('button', {
-        name: /apple/,
+        name: 'Edit apple',
       }),
     )
     const reopened = await screen.findByRole('dialog', { name: 'Edit category' })
@@ -230,7 +238,7 @@ describe('CategoriesScreen category modal (issue #41)', () => {
 
   it('saving an edit updates the Category, closes the modal, and keeps the row in place', async () => {
     updateCategoryMock.mockResolvedValue({ ...categories[0], name: 'Apple' })
-    const dialog = await openEdit(/apple/)
+    const dialog = await openEdit('apple')
 
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Apple' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
@@ -243,9 +251,9 @@ describe('CategoriesScreen category modal (issue #41)', () => {
       }),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const expenseRows = within(screen.getByRole('region', { name: 'Expenses' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const expenseRows = rowTapButtons(screen.getByRole('region', { name: 'Expenses' })).map(
+      (b) => b.textContent,
+    )
     expect(expenseRows[0]).toContain('Apple')
   })
 
@@ -284,9 +292,9 @@ describe('CategoriesScreen category modal (issue #41)', () => {
       }),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const incomeRows = within(screen.getByRole('region', { name: 'Incomes' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const incomeRows = rowTapButtons(screen.getByRole('region', { name: 'Incomes' })).map(
+      (b) => b.textContent,
+    )
     expect(incomeRows).toHaveLength(3)
     expect(incomeRows[0]).toContain('freelance')
     expect(incomeRows[1]).toContain('Household')
@@ -295,7 +303,7 @@ describe('CategoriesScreen category modal (issue #41)', () => {
 
   it('delete still works from the edit modal with the tap-again confirmation', async () => {
     deleteCategoryMock.mockResolvedValue(undefined)
-    const dialog = await openEdit(/apple/)
+    const dialog = await openEdit('apple')
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete category' }))
     expect(
@@ -307,9 +315,69 @@ describe('CategoriesScreen category modal (issue #41)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(
       within(screen.getByRole('region', { name: 'Expenses' })).queryByRole('button', {
-        name: /apple/,
+        name: 'Edit apple',
       }),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('CategoriesScreen row taps open the ledger (issue #94)', () => {
+  it('an expense row tap requests the ledger jump for that category and opens no modal', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+
+    const expenses = await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(within(expenses).getByRole('button', { name: /^apple/ }))
+
+    expect(requestLedgerFilter).toHaveBeenCalledTimes(1)
+    expect(requestLedgerFilter).toHaveBeenCalledWith({ kind: 'category', id: 1 })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('an income row tap requests the ledger jump too', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+    await screen.findByRole('region', { name: 'Expenses' })
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Incomes' })).getByRole('button', {
+        name: /^Salary/,
+      }),
+    )
+
+    expect(requestLedgerFilter).toHaveBeenCalledTimes(1)
+    expect(requestLedgerFilter).toHaveBeenCalledWith({ kind: 'category', id: 11 })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
+describe('CategoriesScreen trailing ✎ buttons (issue #94)', () => {
+  it('✎ opens the prefilled edit modal on an expense row, without jumping', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+
+    const expenses = await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(within(expenses).getByRole('button', { name: 'Edit apple' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit category' })
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('apple')
+    expect(requestLedgerFilter).not.toHaveBeenCalled()
+  })
+
+  it('✎ opens the edit modal on an income row too', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+    await screen.findByRole('region', { name: 'Expenses' })
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Incomes' })).getByRole('button', {
+        name: 'Edit Salary',
+      }),
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Edit category' })
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Salary')
+    expect(requestLedgerFilter).not.toHaveBeenCalled()
   })
 })
 
@@ -323,16 +391,16 @@ describe('CategoriesScreen merge confirm flow (issue #45)', () => {
     transaction_count: 7,
   })
 
-  const openEdit = async (name: string | RegExp) => {
+  const openEdit = async (name: string) => {
     render(<CategoriesScreen />)
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
-    fireEvent.click(within(expenses).getByRole('button', { name }))
+    fireEvent.click(within(expenses).getByRole('button', { name: `Edit ${name}` }))
     return screen.findByRole('dialog', { name: 'Edit category' })
   }
 
   const renameIntoBanana = async () => {
     updateCategoryMock.mockRejectedValue(bananaConflict)
-    const dialog = await openEdit(/apple/)
+    const dialog = await openEdit('apple')
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Banana' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     return dialog
@@ -355,9 +423,9 @@ describe('CategoriesScreen merge confirm flow (issue #45)', () => {
     expect(screen.getByRole('dialog', { name: 'Edit category' })).toBeInTheDocument()
     expect(mergeCategoriesMock).not.toHaveBeenCalled()
     // Both Categories still listed, unchanged.
-    const expenseRows = within(screen.getByRole('region', { name: 'Expenses' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const expenseRows = rowTapButtons(screen.getByRole('region', { name: 'Expenses' })).map(
+      (b) => b.textContent,
+    )
     expect(expenseRows).toHaveLength(3)
     expect(expenseRows[0]).toContain('apple')
     expect(expenseRows[1]).toContain('Banana')
@@ -376,9 +444,9 @@ describe('CategoriesScreen merge confirm flow (issue #45)', () => {
 
     await waitFor(() => expect(mergeCategoriesMock).toHaveBeenCalledWith('', 1, 2))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const expenseRows = within(screen.getByRole('region', { name: 'Expenses' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const expenseRows = rowTapButtons(screen.getByRole('region', { name: 'Expenses' })).map(
+      (b) => b.textContent,
+    )
     expect(expenseRows).toHaveLength(2)
     expect(expenseRows[0]).toContain('Banana')
     expect(expenseRows[1]).toContain('Carrots')

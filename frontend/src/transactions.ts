@@ -42,6 +42,20 @@ export function transactionTitle(
   return 'Transfer'
 }
 
-export function hasLocation(transaction: Transaction): boolean {
+/** True when the Transaction carries a coordinate pair (a Geographic
+ * Location needs both halves; a Place may or may not ride along). */
+function hasLocation(transaction: Transaction): boolean {
   return transaction.latitude !== null && transaction.longitude !== null
+}
+
+/** The ledger subtitle's location suffix (issue #91): a Transaction with
+ * coordinates appends a pin after `date · wallet` — bare when the location
+ * has no Place (Leaflet taps, GPS and imports attach coordinates alone),
+ * reading `📍 <place_name>` when it carries one (the name is the anchor,
+ * ADR-0005). A whitespace-only name counts as none (CONTEXT.md), and null
+ * means no location at all (the subtitle then ends at the wallet label). */
+export function locationSuffix(transaction: Transaction): string | null {
+  if (!hasLocation(transaction)) return null
+  const placeName = transaction.place_name?.trim() ?? ''
+  return placeName === '' ? ' · 📍' : ` · 📍 ${placeName}`
 }

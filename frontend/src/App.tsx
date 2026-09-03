@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
 import { TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
@@ -19,6 +19,16 @@ type AuthState =
   | { kind: 'signedIn'; account: Account }
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
+
+/** The ledger jump (issue #90): a Wallet or Category row on its own tab
+ * asks the Transactions tab to open with the ledger pre-filtered to that
+ * entity. The request lives in the shell — the Transactions panel mounts
+ * lazily on its first visit (ADR-0022), so the request must survive until
+ * the screen exists to consume it, exactly like the Import Draft. */
+export type LedgerFilterRequest = {
+  kind: 'wallet' | 'category'
+  id: number
+}
 
 /** The tabs in bottom-nav order — the swipe walks this list (issue #51). */
 const TAB_ORDER: readonly Tab[] = [
@@ -174,6 +184,33 @@ export function AppShell({
   // unmounts, and the shell-owned draft is what it was from the start.
   const importState = useImportDraft()
 
+  // The pending ledger jump (issue #90): a Wallet/Category row requested
+  // the Transactions ledger pre-filtered to it, and the request waits here
+  // until the Transactions screen consumes it. Shell state, not screen
+  // state: the request can arrive before the Transactions panel exists
+  // (it mounts lazily on first visit, ADR-0022), and it must not be lost
+  // while the screen is showing the Import Draft. A newer request replaces
+  // an unconsumed one.
+  const [pendingLedgerRequest, setPendingLedgerRequest] =
+    useState<LedgerFilterRequest | null>(null)
+
+  /** Send a ledger jump: hold the request pending and switch to the
+   * Transactions tab — the screen applies it on first mount (initial
+   * state) or, when already mounted, through the filter-change reload.
+   * Passed to the Wallets and Categories screens; their rows fire it
+   * (issues #93/#94). */
+  const requestLedgerFilter = (request: LedgerFilterRequest) => {
+    setPendingLedgerRequest(request)
+    activate('transactions')
+  }
+
+  /** The consume side of the jump: the Transactions screen calls this once
+   * it has applied the pending request. Cleared, the request cannot reach
+   * a later render as stale state. */
+  const consumeLedgerRequest = useCallback(() => {
+    setPendingLedgerRequest(null)
+  }, [])
+
   // Swipe between tabs (issue #51): one step per gesture, clamped at the
   // ends. The gesture evaluator only ever asks for a direction, never a
   // target tab, so tab state stays a plain value in the shell.
@@ -223,7 +260,13 @@ export function AppShell({
       <main className="mx-auto mt-6 max-w-sm" {...swipeHandlers}>
         {TAB_ORDER.filter((candidate) => visited[candidate]).map((candidate) => (
           <div key={candidate} data-tab={candidate} hidden={candidate !== tab}>
-            {tabContent(candidate, importState)}
+            {tabContent(
+              candidate,
+              importState,
+              pendingLedgerRequest,
+              consumeLedgerRequest,
+              requestLedgerFilter,
+            )}
           </div>
         ))}
       </main>
@@ -280,17 +323,33 @@ function TabButton({
 
 /** The screen each tab renders, inside its keep-alive panel (ADR-0022): the
  * panel mounts the screen on the tab's first visit and hides it — `hidden`
- * attribute, not unmount — while another tab is active. */
-function tabContent(tab: Tab, importState: ImportDraftController): ReactNode {
+ * attribute, not unmount — while another tab is active. The ledger jump
+ * (issue #90) rides the same channel: the pending request and its consume
+ * callback go to the Transactions screen; the request setter goes to the
+ * Wallets and Categories screens, whose rows fire it (the Wallets rows
+ * since #93, the Categories rows since #94). */
+function tabContent(
+  tab: Tab,
+  importState: ImportDraftController,
+  pendingLedgerRequest: LedgerFilterRequest | null,
+  consumeLedgerRequest: () => void,
+  requestLedgerFilter: (request: LedgerFilterRequest) => void,
+): ReactNode {
   switch (tab) {
     case 'dashboard':
       return <DashboardScreen />
     case 'wallets':
-      return <WalletsScreen />
+      return <WalletsScreen requestLedgerFilter={requestLedgerFilter} />
     case 'transactions':
-      return <TransactionsScreen importState={importState} />
+      return (
+        <TransactionsScreen
+          importState={importState}
+          pendingLedgerRequest={pendingLedgerRequest}
+          onConsumeLedgerRequest={consumeLedgerRequest}
+        />
+      )
     case 'categories':
-      return <CategoriesScreen />
+      return <CategoriesScreen requestLedgerFilter={requestLedgerFilter} />
     case 'recurring':
       return <RecurringScreen />
   }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import type { LedgerFilterRequest } from './App'
 import { TOKEN_KEY, fetchCategories, type Category, type CategoryType } from './api'
 import { useDataVersion } from './api/dataVersion'
 import { CategoryModal } from './CategoryModal'
@@ -24,8 +25,23 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; category: Category }
  * Incomes — each sorted A→Z case-insensitively, under a search bar that
  * filters both sections live by case-insensitive name substring. Creating
  * and editing happen in a modal, replacing the inline form at
- * the end of the list. */
-export function CategoriesScreen() {
+ * the end of the list.
+ *
+ * Row structure (issue #94): a row is a main tap surface with a sibling
+ * trailing ✎ button inside one card — nested buttons are illegal. The tap
+ * surface (color dot + name + type) sends the ledger jump (issue #90): the
+ * shell opens the Transactions tab pre-filtered to that Category, and the
+ * ledger's Category filter covers expense and income alike. The trailing
+ * ✎ opens the edit modal (rename/delete/merge, ADR-0007) — the old
+ * whole-row edit semantics moved here. */
+export function CategoriesScreen({
+  requestLedgerFilter,
+}: {
+  /** Send a ledger jump (issue #90): open the Transactions tab with the
+   * ledger pre-filtered to one Category. Fired by the whole-row tap
+   * surface (issue #94). */
+  requestLedgerFilter?: (request: LedgerFilterRequest) => void
+}) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [categories, setCategories] = useState<Category[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -159,27 +175,45 @@ export function CategoriesScreen() {
                   <ul className="mt-2 space-y-2">
                     {section.items.map((category) => (
                       <li key={category.id}>
-                        <button
-                          type="button"
-                          onClick={() => setModal({ kind: 'edit', category })}
-                          className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
-                        >
-                          <span
-                            aria-hidden="true"
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-base"
-                            style={{ backgroundColor: category.color }}
+                        {/* A row is a tap surface plus a sibling trailing ✎
+                            (issue #94): the card holds the surface and the
+                            button side by side — nested buttons are
+                            illegal. The whole surface (dot + name + type)
+                            is the ledger jump; ✎ opens the edit modal
+                            (rename/delete/merge, ADR-0007). */}
+                        <div className="flex items-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              requestLedgerFilter?.({ kind: 'category', id: category.id })
+                            }
+                            className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left"
                           >
-                            {category.icon ?? ''}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium text-slate-900">
-                              {category.name}
+                            <span
+                              aria-hidden="true"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base"
+                              style={{ backgroundColor: category.color }}
+                            >
+                              {category.icon ?? ''}
                             </span>
-                            <span className="block text-xs text-slate-500">
-                              {TYPE_LABELS[category.type]}
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-medium text-slate-900">
+                                {category.name}
+                              </span>
+                              <span className="block text-xs text-slate-500">
+                                {TYPE_LABELS[category.type]}
+                              </span>
                             </span>
-                          </span>
-                        </button>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Edit ${category.name}`}
+                            onClick={() => setModal({ kind: 'edit', category })}
+                            className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
+                          >
+                            ✎
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

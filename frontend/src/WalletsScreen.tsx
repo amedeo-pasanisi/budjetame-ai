@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import type { LedgerFilterRequest } from './App'
 import {
   TOKEN_KEY,
   fetchWallets,
@@ -39,10 +40,26 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; wallet: Wallet }
 /** The Wallets tab: the list is four sections — Contacts, Checking Accounts,
  * Credit Cards, Cash — each sorted A→Z case-insensitively, plus a collapsed
  * Frozen Wallets list. Creating and editing (rename, freeze) happen in a
- * modal (issue #49), replacing the inline forms; the New wallet
- * button lives in the page header row like the Transactions tab. Frozen rows
- * keep their one-tap unfreeze. */
-export function WalletsScreen() {
+ * modal (issue #49); the New wallet button lives in the page header row
+ * like the Transactions tab.
+ *
+ * Row structure (issue #93): a row is a main tap surface with sibling
+ * trailing buttons inside one card — nested buttons are illegal. The tap
+ * surface (content + balance, on active AND frozen rows) sends the ledger
+ * jump (issue #90): the shell opens the Transactions tab pre-filtered to
+ * that Wallet, and a frozen Wallet arrives with the read-only banner
+ * already showing. The trailing buttons are the row's actions: ✎ Edit
+ * opens the edit modal (rename/freeze — renaming works on frozen rows
+ * too), and frozen rows add one-tap Unfreeze; the old whole-row edit and
+ * whole-row unfreeze semantics moved here. */
+export function WalletsScreen({
+  requestLedgerFilter,
+}: {
+  /** Send a ledger jump (issue #90): open the Transactions tab with the
+   * ledger pre-filtered to one Wallet. Fired by the whole-row tap surface
+   * (issue #93). */
+  requestLedgerFilter?: (request: LedgerFilterRequest) => void
+}) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -176,21 +193,39 @@ export function WalletsScreen() {
               <ul className="mt-2 space-y-3">
                 {section.items.map((wallet) => (
                   <li key={wallet.id}>
-                    <button
-                      type="button"
-                      onClick={() => setModal({ kind: 'edit', wallet })}
-                      className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
-                    >
-                      <span>
-                        <span className="block font-medium text-slate-900">{wallet.name}</span>
-                        <span className="block text-xs text-slate-500">
-                          {TYPE_LABELS[wallet.type]}
+                    {/* A row is a tap surface plus sibling trailing buttons
+                        (issue #93): the card holds the surface and the ✎
+                        side by side — nested buttons are illegal. The whole
+                        surface (content + balance) is the ledger jump. */}
+                    <div className="flex items-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          requestLedgerFilter?.({ kind: 'wallet', id: wallet.id })
+                        }
+                        className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4 pr-2 text-left"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-slate-900">
+                            {wallet.name}
+                          </span>
+                          <span className="block text-xs text-slate-500">
+                            {TYPE_LABELS[wallet.type]}
+                          </span>
                         </span>
-                      </span>
-                      <span className="font-semibold text-slate-900">
-                        {formatSignedEuros(wallet.balance)}
-                      </span>
-                    </button>
+                        <span className="shrink-0 font-semibold text-slate-900">
+                          {formatSignedEuros(wallet.balance)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Edit ${wallet.name}`}
+                        onClick={() => setModal({ kind: 'edit', wallet })}
+                        className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
+                      >
+                        ✎
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -212,21 +247,45 @@ export function WalletsScreen() {
             <ul className="mt-2 space-y-3">
               {frozenWallets.map((wallet) => (
                 <li key={wallet.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleUnfrozen(wallet)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm"
-                  >
-                    <span>
-                      <span className="block font-medium text-slate-900">{wallet.name}</span>
-                      <span className="block text-xs text-slate-500">
-                        {TYPE_LABELS[wallet.type]} · Frozen
+                  {/* A frozen row is the same tap surface + trailing buttons
+                      (issue #93): the surface jumps to the read-only ledger,
+                      Unfreeze and ✎ Edit are its sibling actions. */}
+                  <div className="flex items-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        requestLedgerFilter?.({ kind: 'wallet', id: wallet.id })
+                      }
+                      className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4 pr-2 text-left"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-slate-900">
+                          {wallet.name}
+                        </span>
+                        <span className="block text-xs text-slate-500">
+                          {TYPE_LABELS[wallet.type]} · Frozen
+                        </span>
                       </span>
-                    </span>
-                    <span className="font-semibold text-slate-900">
-                      {formatSignedEuros(wallet.balance)}
-                    </span>
-                  </button>
+                      <span className="shrink-0 font-semibold text-slate-900">
+                        {formatSignedEuros(wallet.balance)}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUnfrozen(wallet)}
+                      className="h-9 shrink-0 px-1 text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                    >
+                      Unfreeze
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Edit ${wallet.name}`}
+                      onClick={() => setModal({ kind: 'edit', wallet })}
+                      className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
+                    >
+                      ✎
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
