@@ -7,7 +7,9 @@
  * (click, type, submit) for the reset-on-write path. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 
+import type { LedgerFilterRequest } from './App'
 import { TransactionsScreen } from './TransactionsScreen'
 import { useImportDraft } from './importDraft'
 import type {
@@ -129,10 +131,37 @@ async function enterSentinel(): Promise<void> {
 
 /** The Import Draft lives in the app shell (issue #43); the screen takes its
  * controller as a prop. This harness owns a controller the way the shell
- * would — these tests never exercise the import flow, so it stays closed. */
-function Harness() {
+ * would — these tests never exercise the import flow, so it stays closed.
+ *
+ * The pending ledger jump (issue #90) is shell state too: the harness holds
+ * it in local state, hands it to the screen with a consume callback, and
+ * exposes `sendLedgerRequest` — the AppShell `requestLedgerFilter`
+ * equivalent — for tests to fire a jump the way a Wallet/Category row will. */
+let sendLedgerRequest: (request: LedgerFilterRequest) => void = () => {}
+
+function Harness({
+  initialRequest = null,
+  onConsumed,
+}: {
+  /** A ledger jump pending when the screen first mounts — the
+   * first-visit-via-jump case (issue #90). */
+  initialRequest?: LedgerFilterRequest | null
+  /** Observe the consume side of the jump, once per applied request. */
+  onConsumed?: () => void
+} = {}) {
   const controller = useImportDraft()
-  return <TransactionsScreen importState={controller} />
+  const [pending, setPending] = useState<LedgerFilterRequest | null>(initialRequest)
+  sendLedgerRequest = (request: LedgerFilterRequest) => setPending(request)
+  return (
+    <TransactionsScreen
+      importState={controller}
+      pendingLedgerRequest={pending}
+      onConsumeLedgerRequest={() => {
+        setPending(null)
+        onConsumed?.()
+      }}
+    />
+  )
 }
 
 const wallet: Wallet = {
@@ -1928,5 +1957,187 @@ describe('TransactionsScreen export (US 7.3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+  })
+})
+
+describe('TransactionsScreen ledger jump (issue #90)', () => {
+  /** Fake timers scoped to setTimeout/clearTimeout only, so promises and
+   * React's scheduler keep running normally (same as the search suite). */
+  const debounce = async () => {
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+  }
+  const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+  it('first visit with a request pending: the initial fetch carries the filter and the request is consumed once', async () => {
+    const onConsumed = vi.fn()
+    // A wallet with no transactions: the seeded filter is visible in what
+    // the screen renders, not just in the request.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.walletId === 2 ? { items: [], next_cursor: null } : page1,
+    )
+    const view = render(
+      <Harness initialRequest={{ kind: 'wallet', id: 2 }} onConsumed={onConsumed} />,
+    )
+
+    // Initial state applied the request: the one mount fetch already asks
+    // for wallet 2 — no unfiltered fetch first, no apply-then-refetch.
+    await waitFor(() => expect(fetchTransactionsMock).toHaveBeenCalledTimes(1))
+    expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 })
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+
+    // Consumed exactly once on mount: the shell's pending is cleared...
+    await waitFor(() => expect(onConsumed).toHaveBeenCalledTimes(1))
+    // ...so a later render of the still-mounted screen never reapplies it.
+    fetchTransactionsMock.mockClear()
+    view.rerender(
+      <Harness initialRequest={{ kind: 'wallet', id: 2 }} onConsumed={onConsumed} />,
+    )
+    await act(async () => {})
+    expect(fetchTransactionsMock).not.toHaveBeenCalled()
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a request while mounted replaces the whole filter state, clears the search, closes the bar, and refetches once', async () => {
+    fetchWalletsMock.mockResolvedValue([
+      wallet,
+      { ...wallet, id: 2, name: 'Bank', type: 'checking' },
+    ])
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    fetchRecurringCostsMock.mockResolvedValue([rentCost])
+    // The jumped-to Category has no transactions: the replaced state shows
+    // in what the screen renders, not just in the request.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.categoryId === 5 ? { items: [], next_cursor: null } : page1,
+    )
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+
+    // Dirty every piece of state the jump must replace: an open Filters
+    // bar with a wallet, both dates, a recurring definition, a category...
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    fireEvent.change(await screen.findByLabelText('From'), {
+      target: { value: '2026-01-01' },
+    })
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: '2026-01-31' },
+    })
+    fireEvent.change(await screen.findByLabelText('Recurring'), {
+      target: { value: 'cost:11' },
+    })
+    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: '1' } })
+    // ...and a debounced search needle.
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    await debounce()
+    vi.useRealTimers()
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenLastCalledWith('', {
+        walletId: 2,
+        fromDate: '2026-01-01',
+        toDate: '2026-01-31',
+        recurringCostId: 11,
+        categoryId: 1,
+        q: 'coffee',
+      }),
+    )
+
+    // The jump arrives: every filter resets except the jumped-to Category,
+    // the search clears, the bar closes, and the first page refetches once.
+    fetchTransactionsMock.mockClear()
+    act(() => {
+      sendLedgerRequest({ kind: 'category', id: 5 })
+    })
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 5 }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /filters/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.queryByLabelText('Wallet')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('')
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a newer request replaces one still pending, applying only the latest', async () => {
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+    fetchTransactionsMock.mockClear()
+
+    // Two jumps back to back, before the first is consumed: the shell's
+    // pending slot holds one request, so the second replaces the first —
+    // only it applies, exactly once.
+    act(() => {
+      sendLedgerRequest({ kind: 'wallet', id: 2 })
+      sendLedgerRequest({ kind: 'category', id: 5 })
+    })
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { categoryId: 5 }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(fetchTransactionsMock).not.toHaveBeenCalledWith('', { walletId: 2 })
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a request while an Import Draft is open applies underneath and is there when the draft closes', async () => {
+    fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
+    // A wallet-2 Transaction: after the draft closes, the ledger shows the
+    // jump's filter was applied — not lost while the draft covered it.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.walletId === 2
+        ? {
+            items: [
+              { ...baseTransaction, id: 4, wallet_id: 2, description: 'Frozen lunch' },
+            ],
+            next_cursor: null,
+          }
+        : page1,
+    )
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+
+    // Open the Import Draft: the screen swaps to the Import screen.
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    expect(await screen.findByRole('heading', { name: 'Import' })).toBeInTheDocument()
+
+    // The jump arrives while the draft is open: it applies underneath (one
+    // filtered refetch) and the Import screen keeps showing.
+    fetchTransactionsMock.mockClear()
+    act(() => {
+      sendLedgerRequest({ kind: 'wallet', id: 2 })
+    })
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('heading', { name: 'Import' })).toBeInTheDocument()
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+
+    // Exit the draft: the ledger appears already filtered.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText(/Frozen lunch/)).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
   })
 })

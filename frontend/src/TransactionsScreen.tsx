@@ -19,6 +19,7 @@ import {
   type Wallet,
 } from './api'
 import { useDataVersion, getDataVersion } from './api/dataVersion'
+import type { LedgerFilterRequest } from './App'
 import { CategoryModal } from './CategoryModal'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
@@ -40,11 +41,23 @@ type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
  * Any filter change refetches the first page with it applied; the bar, its
  * values, and the search persist across tab switches (the tab keeps-alive,
  * ADR-0022). The Import Draft (issue #43) is NOT screen state: it arrives
- * from the app shell, so it survives even a real unmount. */
+ * from the app shell, so it survives even a real unmount. The ledger jump
+ * (issue #90) is shell state too — the pending Wallet/Category filter
+ * request arrives with the panel's props and is consumed here exactly
+ * once. */
 export function TransactionsScreen({
   importState,
+  pendingLedgerRequest,
+  onConsumeLedgerRequest,
 }: {
   importState: ImportDraftController
+  /** The pending ledger jump (issue #90): a Wallet/Category row asked the
+   * shell to open this ledger pre-filtered to that entity. Null while no
+   * jump is pending. */
+  pendingLedgerRequest: LedgerFilterRequest | null
+  /** The consume side of the jump: call once the pending request has been
+   * applied, so the shell clears it and no later render can reapply it. */
+  onConsumeLedgerRequest: () => void
 }) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
@@ -116,12 +129,26 @@ export function TransactionsScreen({
 
   // Filters bar (issue #33): closed by default; every change refetches the
   // first page. Empty wallet/date/category values mean "all" (the tab keeps
-  // its role as the full ledger).
+  // its role as the full ledger). The wallet and category seeds read the
+  // pending ledger jump (issue #90): the panel can mount because a Wallet
+  // or Category row fired the jump, and the very first fetch must already
+  // carry that filter — initial state applies it, never an
+  // apply-then-refetch. The jump's other resets (dates, recurring, search,
+  // the bar itself) are the fresh-mount defaults anyway.
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [filterWalletId, setFilterWalletId] = useState<number | undefined>(undefined)
+  const [filterWalletId, setFilterWalletId] = useState<number | undefined>(
+    () =>
+      pendingLedgerRequest !== null && pendingLedgerRequest.kind === 'wallet'
+        ? pendingLedgerRequest.id
+        : undefined,
+  )
   const [filterFromDate, setFilterFromDate] = useState('')
   const [filterToDate, setFilterToDate] = useState('')
-  const [filterCategoryId, setFilterCategoryId] = useState<number>(ALL_CATEGORIES)
+  const [filterCategoryId, setFilterCategoryId] = useState<number>(() =>
+    pendingLedgerRequest !== null && pendingLedgerRequest.kind === 'category'
+      ? pendingLedgerRequest.id
+      : ALL_CATEGORIES,
+  )
   // The Recurring definition filter (issue #86): one select listing every
   // created Recurring Cost and Recurring Income (grouped — names may
   // collide across kinds); picking one narrows the ledger to the
@@ -145,6 +172,41 @@ export function TransactionsScreen({
     }, 300)
     return () => clearTimeout(timer)
   }, [search])
+
+  // The ledger jump (issue #90), while-mounted side: a Wallet/Category row
+  // on another tab asked for this ledger pre-filtered to that entity. The
+  // request REPLACES the whole filter state — wallet, category, from/to
+  // dates, and the recurring filter all reset — clears the search (input
+  // and debounced needle together, so no late debounce can resurrect it),
+  // closes the Filters bar, and then rides the existing filter-change
+  // reload: the first page refetches once with the new state. First mounts
+  // need none of these updates (the seeds above already applied the
+  // request); they still consume it, exactly once, here. Consuming in the
+  // same tick the request arrives is what makes it safe: the shell's
+  // pending is null on every later render, so a stale request can never
+  // reapply. An open Import Draft changes nothing — the filter applies
+  // underneath the Import screen, and the user exits the draft to find the
+  // ledger already filtered (nothing waits on the draft's lifecycle).
+  useEffect(() => {
+    if (pendingLedgerRequest === null) {
+      return
+    }
+    setFilterWalletId(
+      pendingLedgerRequest.kind === 'wallet' ? pendingLedgerRequest.id : undefined,
+    )
+    setFilterCategoryId(
+      pendingLedgerRequest.kind === 'category'
+        ? pendingLedgerRequest.id
+        : ALL_CATEGORIES,
+    )
+    setFilterFromDate('')
+    setFilterToDate('')
+    setFilterRecurring(undefined)
+    setSearch('')
+    setSearchNeedle('')
+    setFiltersOpen(false)
+    onConsumeLedgerRequest()
+  }, [pendingLedgerRequest, onConsumeLedgerRequest])
 
   const filters = useCallback((): TransactionFilters => {
     const result: TransactionFilters = {}

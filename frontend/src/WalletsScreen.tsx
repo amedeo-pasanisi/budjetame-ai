@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import type { LedgerFilterRequest } from './App'
 import {
   TOKEN_KEY,
   fetchWallets,
@@ -41,8 +42,19 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; wallet: Wallet }
  * Frozen Wallets list. Creating and editing (rename, freeze) happen in a
  * modal (issue #49), replacing the inline forms; the New wallet
  * button lives in the page header row like the Transactions tab. Frozen rows
- * keep their one-tap unfreeze. */
-export function WalletsScreen() {
+ * keep their one-tap unfreeze.
+ *
+ * The ledger jump (issue #90): the shell passes requestLedgerFilter so a
+ * Wallet row can open the Transactions ledger filtered to that Wallet. It
+ * is destructured as `_requestLedgerFilter` until the row-tap change
+ * (issue #93) wires it — declared here so AppShell can hand it through. */
+export function WalletsScreen({
+  requestLedgerFilter: _requestLedgerFilter,
+}: {
+  /** Send a ledger jump (issue #90): open the Transactions tab with the
+   * ledger pre-filtered to one Wallet. Wired to the rows by issue #93. */
+  requestLedgerFilter?: (request: LedgerFilterRequest) => void
+}) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)

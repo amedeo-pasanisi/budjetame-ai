@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import type { LedgerFilterRequest } from './App'
 import { TOKEN_KEY, fetchCategories, type Category, type CategoryType } from './api'
 import { useDataVersion } from './api/dataVersion'
 import { CategoryModal } from './CategoryModal'
@@ -24,8 +25,19 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; category: Category }
  * Incomes — each sorted A→Z case-insensitively, under a search bar that
  * filters both sections live by case-insensitive name substring. Creating
  * and editing happen in a modal, replacing the inline form at
- * the end of the list. */
-export function CategoriesScreen() {
+ * the end of the list.
+ *
+ * The ledger jump (issue #90): the shell passes requestLedgerFilter so a
+ * Category row can open the Transactions ledger filtered to that Category.
+ * It is destructured as `_requestLedgerFilter` until the row-tap change
+ * (issue #94) wires it — declared here so AppShell can hand it through. */
+export function CategoriesScreen({
+  requestLedgerFilter: _requestLedgerFilter,
+}: {
+  /** Send a ledger jump (issue #90): open the Transactions tab with the
+   * ledger pre-filtered to one Category. Wired to the rows by issue #94. */
+  requestLedgerFilter?: (request: LedgerFilterRequest) => void
+}) {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [categories, setCategories] = useState<Category[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
