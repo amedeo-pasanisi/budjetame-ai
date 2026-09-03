@@ -2,10 +2,15 @@
  * four sections in a fixed order — Contacts, Checking Accounts, Credit Cards,
  * Cash — each sorted A→Z case-insensitively, empty sections hidden, and
  * every balance signed in the transaction-amount convention (+€ / -€, €0.00
- * unsigned). Rows keep their existing look; create, rename, and freeze now
- * live in a modal with the New wallet button in the page header
- * (issue #49), behavior unchanged. The API client is mocked; the real display
- * helpers stay live. */
+ * unsigned). Create, rename, and freeze live in a modal with the New wallet
+ * button in the page header (issue #49).
+ *
+ * Row structure (issue #93): a row is a main tap surface plus sibling
+ * trailing buttons — never nested. The tap surface opens the Transactions
+ * ledger pre-filtered to that Wallet (the shell's requestLedgerFilter,
+ * issue #90); ✎ Edit opens the edit modal, and frozen rows add a one-tap
+ * Unfreeze button. The API client is mocked; the real display helpers stay
+ * live. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -64,6 +69,27 @@ const renameWalletMock = vi.mocked(renameWallet)
 const freezeWalletMock = vi.mocked(freezeWallet)
 const unfreezeWalletMock = vi.mocked(unfreezeWallet)
 
+/** The row tap surfaces inside one section: each row is a tap surface plus
+ * sibling trailing buttons (✎ Edit, and Unfreeze on frozen rows, issue
+ * #93), so a plain `getAllByRole('button')` would also pick up the trailing
+ * ✎ buttons — told apart by their `Edit …` aria-labels. */
+function rowTapButtons(region: HTMLElement): HTMLElement[] {
+  return within(region)
+    .getAllByRole('button')
+    .filter((button) => !(button.getAttribute('aria-label') ?? '').startsWith('Edit '))
+}
+
+// Fixtures for the Frozen Wallets list (issue #48): a credit card frozen at
+// €0.00, plus a frozen Cash wallet for the hidden-section case.
+const frozenWallet: Wallet = {
+  id: 7,
+  name: 'Old Card',
+  type: 'credit_card',
+  balance: '0.00',
+  frozen: true,
+  created_at: createdAt,
+}
+
 beforeEach(() => {
   fetchWalletsMock.mockResolvedValue(wallets)
 })
@@ -93,7 +119,7 @@ describe('WalletsScreen sections (issue #47)', () => {
     render(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
-    const contactRows = within(contacts).getAllByRole('button').map((b) => b.textContent)
+    const contactRows = rowTapButtons(contacts).map((b) => b.textContent)
     expect(contactRows.some((row) => row?.includes('zara'))).toBe(true)
     expect(contactRows.some((row) => row?.includes('Marco'))).toBe(true)
 
@@ -114,7 +140,7 @@ describe('WalletsScreen sections (issue #47)', () => {
     render(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
-    const contactRows = within(contacts).getAllByRole('button').map((b) => b.textContent)
+    const contactRows = rowTapButtons(contacts).map((b) => b.textContent)
     expect(contactRows[0]).toContain('anna')
     expect(contactRows[1]).toContain('Leo')
     expect(contactRows[2]).toContain('Marco')
@@ -127,7 +153,7 @@ describe('WalletsScreen sections (issue #47)', () => {
     render(<WalletsScreen />)
 
     const rows = (region: HTMLElement) =>
-      within(region).getAllByRole('button').map((b) => b.textContent)
+      rowTapButtons(region).map((b) => b.textContent)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     // A positive Contact balance is "owes me", a negative is "I owe", and a
@@ -184,9 +210,9 @@ describe('WalletsScreen sections (issue #47)', () => {
       }),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const contactRows = within(screen.getByRole('region', { name: 'Contacts' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const contactRows = rowTapButtons(screen.getByRole('region', { name: 'Contacts' })).map(
+      (b) => b.textContent,
+    )
     expect(contactRows).toHaveLength(5)
     expect(contactRows[0]).toContain('alice')
   })
@@ -252,16 +278,16 @@ describe('WalletsScreen sections (issue #47)', () => {
     render(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
-    fireEvent.click(within(contacts).getByRole('button', { name: /Marco/ }))
+    fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Marco' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'alberto' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(renameWalletMock).toHaveBeenCalledWith('', 4, 'alberto'))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const contactRows = within(screen.getByRole('region', { name: 'Contacts' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const contactRows = rowTapButtons(screen.getByRole('region', { name: 'Contacts' })).map(
+      (b) => b.textContent,
+    )
     expect(contactRows[0]).toContain('alberto')
     expect(contactRows[1]).toContain('anna')
     expect(contactRows).toHaveLength(4)
@@ -271,7 +297,7 @@ describe('WalletsScreen sections (issue #47)', () => {
     render(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
-    fireEvent.click(within(contacts).getByRole('button', { name: /Marco/ }))
+    fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Marco' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
 
     // The Name is prefilled and the Type is fixed: a note, no selector.
@@ -287,7 +313,7 @@ describe('WalletsScreen sections (issue #47)', () => {
     render(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
-    fireEvent.click(within(contacts).getByRole('button', { name: /Leo/ }))
+    fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Leo' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Freeze wallet' }))
@@ -295,9 +321,9 @@ describe('WalletsScreen sections (issue #47)', () => {
 
     await waitFor(() => expect(freezeWalletMock).toHaveBeenCalledWith('', 6))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const contactRows = within(screen.getByRole('region', { name: 'Contacts' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const contactRows = rowTapButtons(screen.getByRole('region', { name: 'Contacts' })).map(
+      (b) => b.textContent,
+    )
     expect(contactRows.some((row) => row?.includes('Leo'))).toBe(false)
     expect(contactRows).toHaveLength(3)
     // The frozen footer row appears with the count (issue #48).
@@ -306,14 +332,6 @@ describe('WalletsScreen sections (issue #47)', () => {
 })
 
 describe('WalletsScreen frozen wallets (issue #48)', () => {
-  const frozenWallet: Wallet = {
-    id: 7,
-    name: 'Old Card',
-    type: 'credit_card',
-    balance: '0.00',
-    frozen: true,
-    created_at: createdAt,
-  }
   const frozenCash: Wallet = {
     id: 8,
     name: 'Drawer',
@@ -346,25 +364,27 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
     expect(screen.getByText('Old Card')).toBeInTheDocument()
     expect(screen.getByText('Credit Card · Frozen')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Old Card/ }).textContent).toMatch(/€0\.00$/)
+    expect(
+      screen.getByRole('button', { name: /^Old Card/ }).textContent,
+    ).toMatch(/€0\.00$/)
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
     expect(screen.queryByText('Old Card')).not.toBeInTheDocument()
   })
 
-  it('one tap on a frozen row unfreezes it: it lands in its type section at its sorted position and the footer row disappears', async () => {
+  it('one tap on the Unfreeze button unfreezes a frozen row: it lands in its type section at its sorted position and the footer row disappears', async () => {
     unfreezeWalletMock.mockResolvedValue({ ...frozenWallet, frozen: false })
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
     render(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Old Card/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Unfreeze' }))
 
     await waitFor(() => expect(unfreezeWalletMock).toHaveBeenCalledWith('', 7))
-    const cards = within(screen.getByRole('region', { name: 'Credit Cards' }))
-      .getAllByRole('button')
-      .map((b) => b.textContent)
+    const cards = rowTapButtons(screen.getByRole('region', { name: 'Credit Cards' })).map(
+      (b) => b.textContent,
+    )
     expect(cards[0]).toContain('Amex')
     expect(cards[1]).toContain('Old Card')
     expect(screen.queryByRole('button', { name: /Frozen wallets/ })).not.toBeInTheDocument()
@@ -378,12 +398,70 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
     expect(screen.queryByRole('region', { name: 'Cash' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Drawer/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Unfreeze' }))
 
     await waitFor(() => expect(unfreezeWalletMock).toHaveBeenCalledWith('', 8))
     expect(screen.getByRole('region', { name: 'Cash' })).toBeInTheDocument()
-    const cashRows = within(screen.getByRole('region', { name: 'Cash' })).getAllByRole('button')
+    const cashRows = rowTapButtons(screen.getByRole('region', { name: 'Cash' }))
     expect(cashRows).toHaveLength(1)
     expect(cashRows[0].textContent).toContain('Drawer')
+  })
+})
+
+describe('WalletsScreen row taps open the ledger (issue #93)', () => {
+  it('an active row tap requests the ledger jump for that wallet and opens no modal', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+
+    const contacts = await screen.findByRole('region', { name: 'Contacts' })
+    fireEvent.click(within(contacts).getByRole('button', { name: /^anna/ }))
+
+    expect(requestLedgerFilter).toHaveBeenCalledTimes(1)
+    expect(requestLedgerFilter).toHaveBeenCalledWith({ kind: 'wallet', id: 3 })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('a frozen row tap requests the ledger jump too — it neither unfreezes nor edits', async () => {
+    const requestLedgerFilter = vi.fn()
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Old Card/ }))
+
+    expect(requestLedgerFilter).toHaveBeenCalledTimes(1)
+    expect(requestLedgerFilter).toHaveBeenCalledWith({ kind: 'wallet', id: 7 })
+    expect(unfreezeWalletMock).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
+describe('WalletsScreen trailing row buttons (issue #93)', () => {
+  it('✎ opens the prefilled edit modal on an active row, without jumping', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+
+    const contacts = await screen.findByRole('region', { name: 'Contacts' })
+    fireEvent.click(within(contacts).getByRole('button', { name: 'Edit anna' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('anna')
+    expect(requestLedgerFilter).not.toHaveBeenCalled()
+  })
+
+  it('✎ opens the edit modal on a frozen row too (renaming a frozen wallet works), without jumping or unfreezing', async () => {
+    const requestLedgerFilter = vi.fn()
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Old Card' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Old Card')
+    expect(requestLedgerFilter).not.toHaveBeenCalled()
+    expect(unfreezeWalletMock).not.toHaveBeenCalled()
   })
 })

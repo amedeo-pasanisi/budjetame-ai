@@ -197,8 +197,8 @@ export function AppShell({
   /** Send a ledger jump: hold the request pending and switch to the
    * Transactions tab — the screen applies it on first mount (initial
    * state) or, when already mounted, through the filter-change reload.
-   * Passed to the Wallets and Categories screens; their rows wire it
-   * (issues #93/#94). */
+   * Passed to the Wallets and Categories screens; the Wallets rows fire it
+   * (issue #93), the Categories rows still will (issue #94). */
   const requestLedgerFilter = (request: LedgerFilterRequest) => {
     setPendingLedgerRequest(request)
     activate('transactions')
@@ -326,7 +326,8 @@ function TabButton({
  * attribute, not unmount — while another tab is active. The ledger jump
  * (issue #90) rides the same channel: the pending request and its consume
  * callback go to the Transactions screen; the request setter goes to the
- * Wallets and Categories screens, whose rows fire it (issues #93/#94). */
+ * Wallets and Categories screens, whose rows fire it (the Wallets rows
+ * since #93, the Categories rows from #94). */
 function tabContent(
   tab: Tab,
   importState: ImportDraftController,
