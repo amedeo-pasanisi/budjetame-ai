@@ -5,6 +5,23 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.3.0] — 2026-09-03
+
+### Changed
+
+- **Recurring definitions carry one date** — the optional Due day / Due
+  date override is gone (ADR-0024): an Occurrence's due date is its own
+  date, and the start date is the definition's only date. Left empty at
+  creation it becomes the creation day; afterwards it can be changed, never
+  unset — a definition can no longer silently snap back to its creation day.
+  Existing definitions that used an override migrate with their schedule
+  preserved: the start date is rewritten to the override's day, and paid and
+  skipped occurrences stay paid and skipped.
+- **Recurring forms speak plainly** — the interval row reads "Repeats every
+  N months" (the unit turns singular when N is 1), the start date is
+  explained as "The first occurrence. Leave empty to start today." when
+  creating, and editing requires the date.
+
 ## [v1.2.0] — 2026-09-03
 
 ### Added
