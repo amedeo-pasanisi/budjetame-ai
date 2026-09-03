@@ -5,6 +5,30 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.2.0] — 2026-09-03
+
+### Added
+
+- **Ledger jump** — tapping a Wallet row or a Category row opens the
+  Transactions tab with the ledger pre-filtered to that Wallet or Category
+  (filter state replaced, search cleared). Wallet rows keep Edit and
+  Unfreeze as trailing buttons; frozen-wallet taps land on the read-only
+  ledger (#90, #93, #94).
+- **Place names** — transaction cards with a Place now read
+  `📍 <place name>` next to the pin instead of a bare pin; cards whose
+  location has coordinates only keep the bare pin (#91).
+
+### Changed
+
+- **Transactions tab chrome** — the redundant "All transactions" heading
+  is gone; the toolbar pairs the search box with a Filters toggle; active
+  filters appear as chips under the toolbar, each removable with its own
+  ✕, plus Clear all and Export; Import is a muted text link beside New
+  transaction; the Filters panel footer gained Clear all filters (#92).
+- **Toolbar polish** — the Filters toggle no longer counts active filters
+  (the chips already say it), the search bar gap matches the other tabs,
+  and Export is labeled "Export to Excel".
+
 ## [v1.1.1] — 2026-09-02
 
 ### Added
