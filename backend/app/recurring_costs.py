@@ -36,7 +36,7 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
     (issue #57): the
     one a new linked Expense would pay, what the transaction form's picker
     shows — the Backlog (issue #58): Unpaid Occurrences due today or
-    earlier in Europe/Rome, with the Overdue flag — and `next_skip_action`,
+    earlier in Europe/Rome — and `next_skip_action`,
     what the Skip/Un-skip button reads (ADR-0016)."""
     backlog = recurring_service.backlog_count_for(session, cost)
     return RecurringCostOut(
@@ -51,7 +51,6 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
             session, cost
         ).isoformat(),
         backlog_count=backlog,
-        overdue=backlog > 0,
         next_skip_action=recurring_service.next_skip_action(session, cost),
         created_at=cost.created_at,
     )
@@ -118,7 +117,7 @@ def toggle_recurring_cost_skip(
     oldest Skipped one instead (the front of the queue — only the oldest
     Unpaid Occurrence is reachable, exactly like the link contract). The
     response is the refreshed definition with its derived state, so the
-    card can re-render the badge, the Overdue mark, and the next due date."""
+    card can re-render the badge and the next due date."""
     cost = _owned_cost_or_403(session, account, cost_id)
     cost = recurring_service.toggle_skip(session, cost)
     return _cost_out(session, cost)

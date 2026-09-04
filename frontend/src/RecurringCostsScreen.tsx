@@ -18,13 +18,12 @@ type ModalDraft = { kind: 'create' } | { kind: 'edit'; cost: RecurringCost }
 
 /** The Recurring tab (issue #56): every Recurring Cost sorted by next due
  * date — the screen's one order — each row showing name, amount, interval,
- * and the next due date (derived on the backend), plus
- * the Backlog badge ("N unpaid", issue #58) and the Overdue mark. The
- * summary line on top — "X costs overdue · N unpaid occurrences" — answers
- * the original question at a glance. Create, edit, and delete live here, in
- * a modal. The badge, the mark, and the summary are all derived state from
- * the API: they refresh whenever the list reloads (tab switch after a link
- * change) or a saved definition comes back from the modal. */
+ * the next due date (derived on the backend), and the Backlog badge (issue
+ * #58): the red "N unpaid" badge that answers the original question — what
+ * remains to pay (ADR-0025). Create, edit, and delete live here, in a
+ * modal. The badge is derived state from the API: it refreshes whenever
+ * the list reloads (tab switch after a link change) or a saved definition
+ * comes back from the modal. */
 export function RecurringCostsScreen() {
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [costs, setCosts] = useState<RecurringCost[] | null>(null)
@@ -79,8 +78,7 @@ export function RecurringCostsScreen() {
 
   // The Skip/Un-skip button (ADR-0016): the backend flips the oldest Unpaid
   // Occurrence and returns the refreshed definition — the card swaps it in,
-  // so the badge, the Overdue mark, and the next due date re-render from the
-  // response.
+  // so the badge and the next due date re-render from the response.
   const handleToggleSkip = (cost: RecurringCost) => {
     setTogglingId(cost.id)
     toggleSkipRecurringCost(token, cost.id)
@@ -99,14 +97,6 @@ export function RecurringCostsScreen() {
       .finally(() => setTogglingId(null))
   }
 
-  // The summary line (issue #58): totals over the loaded costs. Only shown
-  // when there is at least one cost — the empty state already answers
-  // "what remains to pay" for a screen with nothing on it.
-  const overdueCount =
-    costs === null ? 0 : costs.filter((cost) => cost.overdue).length
-  const unpaidCount =
-    costs === null ? 0 : costs.reduce((sum, cost) => sum + cost.backlog_count, 0)
-
   return (
     <>
       <div className="flex items-center justify-between">
@@ -121,14 +111,6 @@ export function RecurringCostsScreen() {
       </div>
 
       {loadError !== null && <p className="mb-4 mt-2 text-sm text-red-600">{loadError}</p>}
-
-      {costs !== null && costs.length > 0 && (
-        <p className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-          {overdueCount} {overdueCount === 1 ? 'cost overdue' : 'costs overdue'} ·{' '}
-          {unpaidCount}{' '}
-          {unpaidCount === 1 ? 'unpaid occurrence' : 'unpaid occurrences'}
-        </p>
-      )}
 
       {costs === null ? (
         <p className="mt-3 text-sm text-slate-500">Loading recurring costs…</p>
@@ -153,18 +135,13 @@ export function RecurringCostsScreen() {
                     {intervalText(cost.interval_value, cost.interval_unit)} · next
                     due {cost.next_due_date}
                   </span>
-                  {cost.overdue && (
-                    <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
-                      Overdue
-                    </span>
-                  )}
                 </span>
                 <span className="shrink-0 text-right">
                   <span className="block font-semibold text-slate-900">
                     {formatEuros(cost.amount)}
                   </span>
                   {cost.backlog_count > 0 && (
-                    <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                    <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
                       {cost.backlog_count} unpaid
                     </span>
                   )}

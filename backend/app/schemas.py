@@ -667,12 +667,11 @@ class RecurringCostOut(BaseModel):
     transaction form's picker shows. `backlog_count` is the Backlog (issue
     #58): Unpaid Occurrences whose due date is today or earlier in
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
-    pins, never stored; `overdue` is true exactly when the Backlog is
-    non-empty. `next_skip_action` is what the Skip/Un-skip button reads
-    (ADR-0016): "skip" when the oldest Unpaid Occurrence is unskipped,
-    "unskip" when it is already Skipped — nothing is left to skip, so the
-    press restores it. `start_date` is the stored start date — every
-    definition carries one (ADR-0024)."""
+    pins, never stored. `next_skip_action` is what the Skip/Un-skip button
+    reads (ADR-0016): "skip" when the oldest Unpaid Occurrence is
+    unskipped, "unskip" when it is already Skipped — nothing is left to
+    skip, so the press restores it. `start_date` is the stored start date —
+    every definition carries one (ADR-0024)."""
 
     id: int
     name: str
@@ -683,7 +682,6 @@ class RecurringCostOut(BaseModel):
     next_due_date: str
     next_unpaid_occurrence_date: str
     backlog_count: int
-    overdue: bool
     next_skip_action: Literal["skip", "unskip"]
     created_at: datetime
 
@@ -765,10 +763,9 @@ class RecurringIncomeOut(BaseModel):
     transaction form's picker shows. `backlog_count` is the Backlog (issue
     #62): Unpaid Occurrences whose due date is today or earlier in
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
-    pins, never stored; `overdue` is true exactly when the Backlog is
-    non-empty. `next_skip_action` is what the Skip/Un-skip button reads
-    (ADR-0016), mirroring the cost side: "skip" when the oldest Unpaid
-    Occurrence is unskipped, "unskip" when it is already Skipped.
+    pins, never stored. `next_skip_action` is what the Skip/Un-skip button
+    reads (ADR-0016), mirroring the cost side: "skip" when the oldest
+    Unpaid Occurrence is unskipped, "unskip" when it is already Skipped.
     `start_date` is the stored start date — every definition carries one
     (ADR-0024)."""
 
@@ -781,7 +778,6 @@ class RecurringIncomeOut(BaseModel):
     next_due_date: str
     next_unpaid_occurrence_date: str
     backlog_count: int
-    overdue: bool
     next_skip_action: Literal["skip", "unskip"]
     created_at: datetime
 

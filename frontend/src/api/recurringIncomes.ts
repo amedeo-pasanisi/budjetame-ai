@@ -27,8 +27,6 @@ export type RecurringIncome = {
    * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
    * from the definition and the stored link pins, never stored. */
   backlog_count: number
-  /** True exactly when the Backlog is non-empty — the Overdue mark. */
-  overdue: boolean
   /** What the Skip/Un-skip button reads (ADR-0016), mirroring the Costs
    * side: "skip" when the oldest Unpaid Occurrence is unskipped, "unskip"
    * when it is already Skipped. */

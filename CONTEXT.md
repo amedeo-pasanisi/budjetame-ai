@@ -45,8 +45,8 @@ One derived due instance of a Recurring Cost or Recurring Income, computed from 
 _Avoid_: instance, cycle, due event
 
 **Backlog**:
-A Recurring Cost's or Recurring Income's Unpaid, un-Skipped Occurrences whose due date is today or earlier — the "N unpaid" badge on the Recurring screen. A definition with a Backlog shows Overdue.
-_Avoid_: arrears, overdue list
+A Recurring Cost's or Recurring Income's Unpaid, un-Skipped Occurrences whose due date is today or earlier — the red "N unpaid" badge on the Recurring screen. A definition with a non-empty Backlog shows that badge.
+_Avoid_: arrears, overdue list, overdue
 
 **Budget**:
 The per-month spending frame that answers "how much can I spend today": each day the Daily Allowance accrues into Spendable Today and Discretionary Expenses drain it. Each month is its own frame — the Budget resets on the 1st. It is purely derived from Recurring definitions and Transactions, never stored, and recomputes retroactively when they change.

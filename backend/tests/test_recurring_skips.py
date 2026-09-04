@@ -224,13 +224,11 @@ async def test_skipping_the_oldest_unpaid_occurrence_drops_the_badge(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 10
-    assert state["overdue"] is True
     assert state["next_skip_action"] == "skip"
 
     toggled = await _toggle_cost(client, token, cost_id)
 
     assert toggled["backlog_count"] == 9
-    assert toggled["overdue"] is True
     assert toggled["next_skip_action"] == "skip"
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 9
@@ -240,7 +238,7 @@ async def test_repeated_toggles_clear_the_backlog_then_unskip(
     client: AsyncClient,
 ) -> None:
     """Pressing Skip repeatedly clears the whole Backlog oldest-first, one
-    per press — the badge ticks 10, 9, ..., 0 and Overdue clears. Once
+    per press — the badge ticks 10, 9, ..., 0. Once
     nothing is left to skip, the button reads Un-skip; pressing it restores
     the oldest Skipped Occurrence (badge 1), and the button reads Skip
     again."""
@@ -253,7 +251,6 @@ async def test_repeated_toggles_clear_the_backlog_then_unskip(
         toggled = await _toggle_cost(client, token, cost_id)
 
     assert toggled["backlog_count"] == 0
-    assert toggled["overdue"] is False
     assert toggled["next_skip_action"] == "unskip"
 
     toggled = await _toggle_cost(client, token, cost_id)
@@ -412,7 +409,6 @@ async def test_a_skipped_month_becomes_the_year_when_the_interval_turns_yearly(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 0
-    assert state["overdue"] is False
     assert state["next_skip_action"] == "unskip"
     start = date.fromisoformat(_month_15_day(3, 1))
     assert state["next_due_date"] == date(

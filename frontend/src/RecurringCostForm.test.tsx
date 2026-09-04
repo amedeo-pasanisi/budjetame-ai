@@ -49,7 +49,6 @@ const cost: RecurringCost = {
   next_due_date: '2030-03-15',
   next_unpaid_occurrence_date: '2030-03-15',
   backlog_count: 0,
-  overdue: false,
   next_skip_action: 'skip',
   created_at: createdAt,
 }

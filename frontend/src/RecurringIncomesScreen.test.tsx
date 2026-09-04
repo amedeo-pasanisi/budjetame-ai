@@ -1,7 +1,7 @@
 /** Recurring Incomes screen (issue #60): the Incomes side of the Recurring
  * tab renders every income sorted by next due date, each row showing name,
- * amount, interval, and the next due date (derived on the backend); the Backlog badge, the Overdue mark, and the summary line (issue
- * #62) ride on the API's derived state. Create, edit, and delete live in a
+ * amount, interval, and the next due date; the Backlog badge (issue #62)
+ * rides on the API's derived state. Create, edit, and delete live in a
  * modal on this screen, mirroring the Costs side (ADR-0011). The API client
  * is mocked; the real display helpers (interval text, euro formatting) stay
  * live. */
@@ -63,7 +63,6 @@ const incomes: RecurringIncome[] = [
     next_due_date: '2026-09-27',
     next_unpaid_occurrence_date: '2026-09-27',
     backlog_count: 0,
-    overdue: false,
     next_skip_action: 'skip',
     created_at: createdAt,
   },
@@ -77,7 +76,6 @@ const incomes: RecurringIncome[] = [
     next_due_date: '2026-09-01',
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 3,
-    overdue: true,
     next_skip_action: 'skip',
     created_at: createdAt,
   },
@@ -91,7 +89,6 @@ const incomes: RecurringIncome[] = [
     next_due_date: '2026-12-01',
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
-    overdue: false,
     next_skip_action: 'unskip',
     created_at: createdAt,
   },
@@ -165,7 +162,6 @@ describe('RecurringIncomesScreen create flow', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
-      overdue: true,
       next_skip_action: 'skip',
       created_at: createdAt,
     })
@@ -318,7 +314,6 @@ describe('RecurringIncomesScreen skip button', () => {
     toggleSkipRecurringIncomeMock.mockResolvedValue({
       ...incomes[1],
       backlog_count: 0,
-      overdue: false,
       next_skip_action: 'unskip',
     })
     render(<RecurringIncomesScreen />)
@@ -334,9 +329,8 @@ describe('RecurringIncomesScreen skip button', () => {
     await waitFor(() =>
       expect(toggleSkipRecurringIncomeMock).toHaveBeenCalledWith('', 2),
     )
-    // The returned state re-renders the card: no badge, no Overdue mark,
-    // the button now reads Un-skip (Marco joins Bonus), and the summary
-    // re-totals.
+    // The returned state re-renders the card: no badge, and the button now
+    // reads Un-skip (Marco joins Bonus).
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'Un-skip' })).toHaveLength(2)
     })
@@ -345,10 +339,6 @@ describe('RecurringIncomesScreen skip button', () => {
       .filter((button) => button.className.includes('rounded-2xl'))
       .find((row) => row.textContent?.includes('Rent from Marco'))
     expect(marco?.textContent).not.toContain('unpaid')
-    expect(marco?.textContent).not.toContain('Overdue')
-    expect(
-      screen.getByText('0 incomes overdue · 0 unpaid occurrences'),
-    ).toBeInTheDocument()
   })
 
   it('shows the error message when the toggle fails', async () => {
@@ -364,69 +354,32 @@ describe('RecurringIncomesScreen skip button', () => {
   })
 })
 
-describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => {
-  /** The row buttons, in screen order — the badge and the Overdue mark live
-   * inside them. */
+describe('RecurringIncomesScreen backlog badge', () => {
+  /** The row buttons, in screen order — the badge lives inside them. */
   const rowButtons = () =>
     screen
       .getAllByRole('button')
       .filter((button) => button.className.includes('rounded-2xl'))
 
-  it('shows the summary line with the overdue and unpaid totals', async () => {
-    render(<RecurringIncomesScreen />)
-    await screen.findByText('Rent from Marco')
-
-    expect(
-      screen.getByText('1 income overdue · 3 unpaid occurrences'),
-    ).toBeInTheDocument()
-  })
-
-  it('renders the badge and the Overdue mark only on an income with a Backlog', async () => {
+  it('renders the badge only on an income with a Backlog', async () => {
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
 
     const marco = rowButtons().find((row) => row.textContent?.includes('Rent from Marco'))
     expect(marco?.textContent).toContain('3 unpaid')
-    expect(marco?.textContent).toContain('Overdue')
 
-    // Salary and Bonus have no Backlog: no badge, no Overdue mark.
+    // Salary and Bonus have no Backlog: no badge.
     const salary = rowButtons().find((row) => row.textContent?.includes('Salary'))
     expect(salary?.textContent).not.toContain('unpaid')
-    expect(salary?.textContent).not.toContain('Overdue')
   })
 
-  it('uses singular wording for one overdue income and one unpaid occurrence', async () => {
-    fetchRecurringIncomesMock.mockResolvedValue([
-      { ...incomes[1], backlog_count: 1, overdue: true },
-    ])
-    render(<RecurringIncomesScreen />)
-    await screen.findByText('Rent from Marco')
-
-    expect(
-      screen.getByText('1 income overdue · 1 unpaid occurrence'),
-    ).toBeInTheDocument()
-  })
-
-  it('shows zero totals when nothing is behind, and hides the line when there are no incomes', async () => {
-    fetchRecurringIncomesMock.mockResolvedValue([
-      { ...incomes[0], backlog_count: 0, overdue: false },
-    ])
-    render(<RecurringIncomesScreen />)
-    await screen.findByText('Salary')
-
-    expect(
-      screen.getByText('0 incomes overdue · 0 unpaid occurrences'),
-    ).toBeInTheDocument()
-  })
-
-  it('updates the badge, the mark, and the summary after a definition edit', async () => {
+  it('updates the badge after a definition edit', async () => {
     // The edited income comes back with the fresh derived state: a changed
     // start date pushed two Occurrences behind it.
     updateRecurringIncomeMock.mockResolvedValue({
       ...incomes[0],
       amount: '2200.00',
       backlog_count: 2,
-      overdue: true,
     })
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
@@ -440,14 +393,9 @@ describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     const salary = rowButtons().find((row) => row.textContent?.includes('Salary'))
     expect(salary?.textContent).toContain('2 unpaid')
-    expect(salary?.textContent).toContain('Overdue')
-    // The summary re-totals from the returned state: Salary joined Marco.
-    expect(
-      screen.getByText('2 incomes overdue · 5 unpaid occurrences'),
-    ).toBeInTheDocument()
   })
 
-  it('shows the badge and the Overdue mark on a freshly created income', async () => {
+  it('shows the badge on a freshly created income', async () => {
     createRecurringIncomeMock.mockResolvedValue({
       id: 9,
       name: 'Gym Rental',
@@ -458,7 +406,6 @@ describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => 
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
-      overdue: true,
       next_skip_action: 'skip',
       created_at: createdAt,
     })
@@ -474,9 +421,5 @@ describe('RecurringIncomesScreen backlog, Overdue, and the summary line', () => 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     const gym = rowButtons().find((row) => row.textContent?.includes('Gym Rental'))
     expect(gym?.textContent).toContain('1 unpaid')
-    expect(gym?.textContent).toContain('Overdue')
-    expect(
-      screen.getByText('2 incomes overdue · 4 unpaid occurrences'),
-    ).toBeInTheDocument()
   })
 })

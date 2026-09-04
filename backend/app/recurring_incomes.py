@@ -1,9 +1,9 @@
 """The Recurring Incomes resource (issue #60): definitions of incomes that
 repeat at a fixed interval, mirroring Recurring Costs (ADR-0011). The list
 exposes each income's next due date, derived on the fly (ADR-0010); the
-screen sorts by it. The Backlog and the Overdue flag (issue #62) ride on
-the list too, mirroring #58: the "N unpaid" badge the Incomes side shows
-comes from here. Guards: names unique per Account case-insensitively; all
+screen sorts by it. The Backlog (issue #62) rides on the list too,
+mirroring #58: the "N unpaid" badge the Incomes side shows comes from
+here. Guards: names unique per Account case-insensitively; all
 data scoped to the Account (foreign data is a 403, ADR-0003)."""
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,7 +44,7 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
     (issue #61):
     the one a new linked Income would pay, what the transaction form's
     picker shows — the Backlog (issue #62): Unpaid Occurrences due today or
-    earlier in Europe/Rome, with the Overdue flag — and `next_skip_action`,
+    earlier in Europe/Rome — and `next_skip_action`,
     what the Skip/Un-skip button reads (ADR-0016)."""
     backlog = recurring_service.backlog_count_for(session, income)
     return RecurringIncomeOut(
@@ -59,7 +59,6 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
             session, income
         ).isoformat(),
         backlog_count=backlog,
-        overdue=backlog > 0,
         next_skip_action=recurring_service.next_skip_action(session, income),
         created_at=income.created_at,
     )

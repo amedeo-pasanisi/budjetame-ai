@@ -247,9 +247,9 @@ def paid_occurrence_dates(
 
 def backlog_count_for(session: Session, cost: RecurringCost) -> int:
     """The cost's Backlog (issue #58): Unpaid Occurrences whose due date is
-    today or earlier in Europe/Rome — the "N unpaid" badge, and the Overdue
-    flag's source (a non-empty Backlog is Overdue). Unpaid means its own
-    date is not covered by a linked Expense and its period is not skipped:
+    today or earlier in Europe/Rome — the "N unpaid" badge. Unpaid means
+    its own date is not covered by a linked Expense and its period is not
+    skipped:
     the pins are stored (issue #57) and the skips are stored (ADR-0016), so
     editing the interval or start date reshapes only the derived future —
     an Occurrence a link covers or the user excused is never counted back
