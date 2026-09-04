@@ -15,13 +15,14 @@ cost's links cover and `oldest_unpaid_occurrence` the one a new link pays
 (the oldest Unpaid, future Occurrences included — paying ahead) — what the
 transaction form's picker shows as `next_unpaid_occurrence_date` in the API
 view. The skipped state (ADR-0016) lives in recurring_skips: `skipped_periods`
-maps the stored Occurrence dates through the current unit's period shape,
-`toggle_skip` flips the oldest Unpaid Occurrence (the Skip/Un-skip button),
-and every derived read excludes Skipped Occurrences.
+maps the stored Occurrence dates through the current unit's period shape and
+every derived read excludes Skipped Occurrences. The Skip/Un-skip button is
+gone (ADR-0026): `occurrence_states` is the Occurrences section's read — every
+non-Paid Occurrence with its skipped state, newest first — and
+`set_occurrence_skipped` its per-Occurrence skip/un-skip write.
 """
 
 from datetime import date
-from typing import Literal
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -33,6 +34,7 @@ from app.recurrence import (
     next_due_date,
     occurrence_date,
     period_of,
+    period_span_end,
     rome_today,
 )
 from app.services import scoping
@@ -152,65 +154,144 @@ def skipped_periods(
     return {period_of(value, unit) for value in stored}
 
 
-def oldest_unpinned_occurrence(session: Session, cost: RecurringCost) -> date:
-    """The oldest Occurrence no linked Expense covers — Skipped or not
-    (ADR-0016): the Skip/Un-skip button's target, the front of the queue.
-    The link walk (`oldest_unpaid_occurrence`) steps over Skipped ones; the
-    button must not, or un-skipping would be unreachable. The sequence is
-    infinite and the paid set finite, so the walk always terminates.
+def occurrence_states(
+    session: Session, cost: RecurringCost
+) -> list[tuple[date, bool]]:
+    """The Occurrences section's read (ADR-0026): every non-Paid Occurrence
+    of the definition — its own date (ADR-0024) and whether the user
+    excused it — newest first, the one order the modal renders. Paid
+    history lives in the ledger: a row a link covers never appears (there
+    is nothing to skip or un-skip on it), exactly as the derived reads step
+    over paid pins.
+
+    The walk covers the past rows (due today or earlier — today first, down
+    to the oldest), then the future rows: every Skipped future Occurrence
+    stays on the list (an excused one must stay reachable, in date order),
+    and the next incoming Unpaid one — the live row — heads the list:
+    future Occurrences reveal one at a time, so a whole month can be
+    excused by tapping the top row repeatedly in one sitting. The walk runs
+    past the live row until the due date passes the span end of the largest
+    stored period (app.recurrence.period_span_end), so restoring an earlier
+    future row (un-skip in any order) never hides excused rows beyond it:
+    every excused future Occurrence lies within its stored period's span.
+    Paid future rows are stepped over; a dormant skip (a period holding no
+    Occurrence of the current sequence) never matches anything.
     """
+    today = rome_today()
+    unit = cost.interval_unit
     paid = paid_occurrence_dates(session, cost.id)
+    stored = session.scalars(
+        select(RecurringSkip.occurrence_date).where(
+            RecurringSkip.recurring_cost_id == cost.id
+        )
+    ).all()
+    skipped = {period_of(value, unit) for value in stored}
+    # Every Skipped future Occurrence lies at or before the span end of the
+    # largest stored period (app.recurrence.period_span_end): the walk past
+    # the live row only needs to run until the due date passes that bound.
+    walk_bound = max(
+        (period_span_end(period_of(value, unit)) for value in stored), default=None
+    )
+    rows: list[tuple[date, bool]] = []
     k = 0
     while True:
-        occurrence = occurrence_date(
-            cost.start_date, cost.interval_value, cost.interval_unit, k
-        )
-        if occurrence not in paid:
-            return occurrence
+        due = occurrence_date(cost.start_date, cost.interval_value, unit, k)
+        if due <= today:
+            if due not in paid:
+                rows.append((due, period_of(due, unit) in skipped))
+            k += 1
+            continue
+        break
+    live_row_found = False
+    while True:
+        due = occurrence_date(cost.start_date, cost.interval_value, unit, k)
         k += 1
+        period = period_of(due, unit)
+        if due in paid:
+            # A paid future Occurrence is stepped over, like every other
+            # derived read walks past it.
+            pass
+        elif period in skipped:
+            rows.append((due, True))
+        elif not live_row_found:
+            rows.append((due, False))
+            live_row_found = True
+        if live_row_found and (walk_bound is None or due > walk_bound):
+            break
+    # The one order the modal renders: the live row — the next incoming
+    # Unpaid Occurrence — always heads the list, even when an un-skip in
+    # any order leaves excused future rows newer than it (a restored row
+    # must not hide or outrank the rows after it); every other row follows
+    # newest first — the greyed future rows in date order, then the past
+    # group (today first) down to the oldest.
+    rows.sort(reverse=True)
+    live = next(
+        (row for row in rows if row[0] > today and not row[1]), None
+    )
+    if live is None:
+        return rows
+    return [live] + [row for row in rows if row != live]
 
 
-def toggle_skip(session: Session, cost: RecurringCost) -> RecurringCost:
-    """The Skip/Un-skip button (ADR-0016). When the whole Backlog is
-    excused, it un-skips the oldest Skipped Occurrence; otherwise it skips
-    the oldest Unpaid, un-Skipped Occurrence — the same one a link would
-    pay, so the badge ticks down oldest-first, one press per Occurrence.
-    Only Unpaid Occurrences are ever skipped (the walk never targets a
-    link's pin). A skip stores the Occurrence's own date; un-skipping
-    deletes the row whose period covers the target. The response is the
-    refreshed definition: every derived read re-derives from the stored
-    skips."""
-    if next_skip_action(session, cost) == "unskip":
-        target = oldest_unpinned_occurrence(session, cost)
-        target_period = period_of(target, cost.interval_unit)
+def set_occurrence_skipped(
+    session: Session,
+    cost: RecurringCost,
+    date_str: str,
+    *,
+    skipped: bool,
+) -> None:
+    """The per-Occurrence skip write (ADR-0026): PUT the Occurrence's date
+    with {"skipped": true} to excuse it, {"skipped": false} to restore it
+    — every row of the read toggles independently, in any order (the
+    button's queue discipline is gone). A skip stores the Occurrence's own
+    date, so it keeps anchoring to its period and traveling with the
+    Occurrence (ADR-0016); un-skipping deletes the stored row whose period
+    covers the target. The write is idempotent: stating the current state
+    changes nothing, so a double tap cannot double-flip. Only Unpaid
+    Occurrences are ever skipped — a link's pin rejects the skip, exactly
+    as a link can never pay a Skipped one."""
+    try:
+        occurrence = date.fromisoformat(date_str)
+    except ValueError:
+        raise RecurringCostRuleError(
+            f"{date_str!r} is not a calendar day (YYYY-MM-DD)."
+        ) from None
+    unit = cost.interval_unit
+    if not skipped:
+        # Restore: delete every stored row whose effective period covers the
+        # target — period equality is what makes the anchor travel with the
+        # Occurrence when the definition is edited (ADR-0016). Nothing to
+        # delete is the idempotent no-op.
+        target_period = period_of(occurrence, unit)
         rows = session.scalars(
             select(RecurringSkip).where(RecurringSkip.recurring_cost_id == cost.id)
         ).all()
         for row in rows:
-            if period_of(row.occurrence_date, cost.interval_unit) == target_period:
+            if period_of(row.occurrence_date, unit) == target_period:
                 session.delete(row)
-                break
-    else:
-        target = oldest_unpaid_occurrence(session, cost)
-        session.add(RecurringSkip(recurring_cost_id=cost.id, occurrence_date=target))
+        session.commit()
+        return
+    # Excuse: the target must be one of the definition's Occurrences (the
+    # read only ever lists those), and one no link covers. The walk from
+    # the start matches the date exactly; dates strictly increase in k.
+    k = 0
+    while True:
+        due = occurrence_date(cost.start_date, cost.interval_value, unit, k)
+        if due == occurrence:
+            break
+        if due > occurrence:
+            raise RecurringCostRuleError(
+                "This date is not one of the definition's Occurrences."
+            )
+        k += 1
+    if occurrence in paid_occurrence_dates(session, cost.id):
+        raise RecurringCostRuleError("A paid occurrence can never be skipped.")
+    if period_of(occurrence, unit) in skipped_periods(session, cost.id, unit):
+        # Already excused — the idempotent no-op (the existing anchor may
+        # be a different date on the same period after an edit).
+        return
+    session.add(RecurringSkip(recurring_cost_id=cost.id, occurrence_date=occurrence))
     session.commit()
-    session.refresh(cost)
-    return cost
-
-
-def next_skip_action(session: Session, cost: RecurringCost) -> Literal["skip", "unskip"]:
-    """What the Skip/Un-skip button reads (ADR-0016): "unskip" exactly
-    when the whole Backlog is excused — no Unpaid, un-Skipped Occurrence is
-    due — and the oldest Unpaid Occurrence (the front of the queue) is the
-    Skipped one; then the press restores it. Otherwise "skip": there is
-    still an Unpaid, un-Skipped Occurrence to excuse — the button clears
-    the Backlog oldest-first, and only resolves the Skipped ones once the
-    whole Backlog is excused (Q17's queue discipline)."""
-    if backlog_count_for(session, cost) > 0:
-        return "skip"
-    target = oldest_unpinned_occurrence(session, cost)
-    skipped = skipped_periods(session, cost.id, cost.interval_unit)
-    return "unskip" if period_of(target, cost.interval_unit) in skipped else "skip"
 
 
 def next_due_date_for(session: Session, cost: RecurringCost) -> date:

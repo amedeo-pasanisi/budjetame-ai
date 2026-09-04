@@ -18,6 +18,8 @@ from app.schemas import (
     RecurringIncomeCreate,
     RecurringIncomeOut,
     RecurringIncomeUpdate,
+    RecurringOccurrenceOut,
+    RecurringOccurrenceUpdate,
 )
 from app.services import recurring_incomes as recurring_service
 from app.services import scoping
@@ -43,9 +45,9 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
     recurrence module owns that math), the next Unpaid Occurrence date
     (issue #61):
     the one a new linked Income would pay, what the transaction form's
-    picker shows — the Backlog (issue #62): Unpaid Occurrences due today or
-    earlier in Europe/Rome — and `next_skip_action`,
-    what the Skip/Un-skip button reads (ADR-0016)."""
+    picker shows — and the Backlog (issue #62): Unpaid Occurrences due today or
+    earlier in Europe/Rome. Skip controls live per Occurrence on the
+    Occurrences read (ADR-0026), not on the definition."""
     backlog = recurring_service.backlog_count_for(session, income)
     return RecurringIncomeOut(
         id=income.id,
@@ -59,7 +61,6 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
             session, income
         ).isoformat(),
         backlog_count=backlog,
-        next_skip_action=recurring_service.next_skip_action(session, income),
         created_at=income.created_at,
     )
 
@@ -113,19 +114,60 @@ def create_recurring_income(
     return _income_out(session, income)
 
 
-@router.post("/{income_id}/skip-toggle", response_model=RecurringIncomeOut)
-def toggle_recurring_income_skip(
+def _occurrences_out(
+    session: Session, income: RecurringIncome
+) -> list[RecurringOccurrenceOut]:
+    """The Occurrences section's rows as the API view: the read's (date,
+    skipped) pairs newest first (ADR-0026), mirroring the cost side. Both
+    the read and the skip write answer with exactly this list."""
+    return [
+        RecurringOccurrenceOut(date=value.isoformat(), skipped=skipped)
+        for value, skipped in recurring_service.occurrence_states(session, income)
+    ]
+
+
+@router.get("/{income_id}/occurrences", response_model=list[RecurringOccurrenceOut])
+def list_recurring_income_occurrences(
     income_id: int,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> RecurringIncomeOut:
-    """The Skip/Un-skip button (ADR-0016), mirroring the cost side: skip
-    the oldest Unpaid, un-Skipped Occurrence; once the whole Backlog is
-    excused, un-skip the oldest Skipped one instead. The response is the
-    refreshed definition with its derived state."""
+) -> list[RecurringOccurrenceOut]:
+    """The Occurrences section's read (ADR-0026), mirroring the cost side:
+    every non-Paid Occurrence of the income — its own date and whether the
+    user excused it — newest first, the one order the edit modal renders.
+    Paid history lives in the ledger and never appears here."""
     income = _owned_income_or_403(session, account, income_id)
-    income = recurring_service.toggle_skip(session, income)
-    return _income_out(session, income)
+    return _occurrences_out(session, income)
+
+
+@router.put(
+    "/{income_id}/occurrences/{occurrence_date}",
+    response_model=list[RecurringOccurrenceOut],
+)
+def set_recurring_income_occurrence_skipped(
+    income_id: int,
+    occurrence_date: str,
+    payload: RecurringOccurrenceUpdate,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> list[RecurringOccurrenceOut]:
+    """The per-Occurrence skip write (ADR-0026), mirroring the cost side:
+    PUT the Occurrence's date with {"skipped": true} to excuse it,
+    {"skipped": false} to restore it. Every row toggles independently, in
+    any order. A paid Occurrence (or a date that is not one of the
+    income's Occurrences) rejects the skip with 422. The response is the
+    refreshed read."""
+    income = _owned_income_or_403(session, account, income_id)
+    try:
+        recurring_service.set_occurrence_skipped(
+            session,
+            income,
+            occurrence_date,
+            skipped=payload.skipped,
+        )
+    except recurring_service.RecurringIncomeRuleError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return _occurrences_out(session, income)
 
 
 @router.patch("/{income_id}", response_model=RecurringIncomeOut)

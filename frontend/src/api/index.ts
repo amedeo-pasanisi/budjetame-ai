@@ -82,10 +82,12 @@ export {
   type IntervalUnit,
   type RecurringCost,
   type RecurringCostInput,
+  type RecurringOccurrence,
   createRecurringCost,
   deleteRecurringCost,
+  fetchRecurringCostOccurrences,
   fetchRecurringCosts,
-  toggleSkipRecurringCost,
+  setRecurringCostOccurrenceSkipped,
   updateRecurringCost,
 } from './recurringCosts'
 
@@ -94,7 +96,8 @@ export {
   type RecurringIncomeInput,
   createRecurringIncome,
   deleteRecurringIncome,
+  fetchRecurringIncomeOccurrences,
   fetchRecurringIncomes,
-  toggleSkipRecurringIncome,
+  setRecurringIncomeOccurrenceSkipped,
   updateRecurringIncome,
 } from './recurringIncomes'

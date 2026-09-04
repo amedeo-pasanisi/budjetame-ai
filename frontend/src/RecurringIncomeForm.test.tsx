@@ -6,7 +6,7 @@
  * optional at creation (empty means today, sent as null), and required when
  * editing (it can be changed, never unset). The API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { RecurringIncomeForm } from './RecurringIncomeForm'
 import type { RecurringIncome } from './api'
@@ -32,10 +32,18 @@ vi.mock('./api', async () => {
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
     deleteRecurringIncome: vi.fn(),
+    fetchRecurringIncomeOccurrences: vi.fn(),
+    setRecurringIncomeOccurrenceSkipped: vi.fn(),
   }
 })
 
-import { createRecurringIncome, deleteRecurringIncome, updateRecurringIncome } from './api'
+import {
+  createRecurringIncome,
+  deleteRecurringIncome,
+  fetchRecurringIncomeOccurrences,
+  setRecurringIncomeOccurrenceSkipped,
+  updateRecurringIncome,
+} from './api'
 
 const createdAt = '2026-08-20T10:00:00Z'
 
@@ -49,13 +57,21 @@ const income: RecurringIncome = {
   next_due_date: '2030-03-15',
   next_unpaid_occurrence_date: '2030-03-15',
   backlog_count: 0,
-  next_skip_action: 'skip',
   created_at: createdAt,
 }
 
 const createRecurringIncomeMock = vi.mocked(createRecurringIncome)
 const updateRecurringIncomeMock = vi.mocked(updateRecurringIncome)
 const deleteRecurringIncomeMock = vi.mocked(deleteRecurringIncome)
+const fetchRecurringIncomeOccurrencesMock = vi.mocked(fetchRecurringIncomeOccurrences)
+const setRecurringIncomeOccurrenceSkippedMock = vi.mocked(setRecurringIncomeOccurrenceSkipped)
+
+// The Occurrences section's rows (ADR-0026) for the edited definition: the
+// next incoming Unpaid row on top, then excused/past rows — newest first.
+const occurrences = [
+  { date: '2030-04-15', skipped: false },
+  { date: '2030-03-15', skipped: true },
+]
 
 function renderForm(editing?: RecurringIncome) {
   const onSaved = vi.fn()
@@ -74,6 +90,7 @@ function renderForm(editing?: RecurringIncome) {
 
 beforeEach(() => {
   createRecurringIncomeMock.mockResolvedValue({ ...income, id: 2 })
+  fetchRecurringIncomeOccurrencesMock.mockResolvedValue(occurrences)
 })
 
 afterEach(() => {
@@ -209,5 +226,115 @@ describe('RecurringIncomeForm edit and delete', () => {
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '0' } })
     expect(save).toBeDisabled()
+  })
+})
+
+describe('RecurringIncomeForm Occurrences section (ADR-0026)', () => {
+  /** One occurrence row, found by its date — the row's Skip/Un-skip button
+   * lives inside it. */
+  const rowFor = (date: string) => screen.getByText(date).closest('li') as HTMLElement
+
+  it('is absent at creation: a definition under creation has no id yet', async () => {
+    renderForm()
+
+    expect(screen.queryByRole('heading', { name: 'Occurrences' })).not.toBeInTheDocument()
+    expect(fetchRecurringIncomeOccurrencesMock).not.toHaveBeenCalled()
+  })
+
+  it('loads the non-Paid rows and renders Skip on live rows, greyed rows with Un-skip', async () => {
+    renderForm(income)
+
+    const heading = await screen.findByRole('heading', { name: 'Occurrences' })
+    expect(heading).toBeInTheDocument()
+    expect(fetchRecurringIncomeOccurrencesMock).toHaveBeenCalledWith('', 1)
+
+    // The next incoming Unpaid row is live (Skip); the excused past row
+    // stays greyed with Un-skip and a Skipped caption.
+    const live = rowFor('2030-04-15')
+    expect(within(live).getByRole('button', { name: 'Skip' })).toBeInTheDocument()
+    expect(within(live).queryByText(/Skipped/)).not.toBeInTheDocument()
+
+    const skipped = rowFor('2030-03-15')
+    expect(within(skipped).getByRole('button', { name: 'Un-skip' })).toBeInTheDocument()
+    expect(within(skipped).getByText('Skipped — un-skip to pay it')).toBeInTheDocument()
+  })
+
+  it('skipping the live row excuses it and swaps in the refreshed read', async () => {
+    setRecurringIncomeOccurrenceSkippedMock.mockResolvedValue([
+      { date: '2030-05-15', skipped: false },
+      { date: '2030-04-15', skipped: true },
+      { date: '2030-03-15', skipped: true },
+    ])
+    renderForm(income)
+    await screen.findByText('2030-04-15')
+
+    fireEvent.click(within(rowFor('2030-04-15')).getByRole('button', { name: 'Skip' }))
+
+    await waitFor(() =>
+      expect(setRecurringIncomeOccurrenceSkippedMock).toHaveBeenCalledWith(
+        '',
+        1,
+        '2030-04-15',
+        true,
+      ),
+    )
+    // The write's response is the refreshed read: the excused row greys and
+    // the following incoming one surfaces above it.
+    const rows = await screen.findAllByRole('listitem')
+    expect(rows[0].textContent).toContain('2030-05-15')
+    expect(within(rowFor('2030-04-15')).getByRole('button', { name: 'Un-skip' })).toBeInTheDocument()
+  })
+
+  it('un-skipping restores the row (write with skipped false)', async () => {
+    setRecurringIncomeOccurrenceSkippedMock.mockResolvedValue([
+      { date: '2030-04-15', skipped: false },
+      { date: '2030-03-15', skipped: false },
+    ])
+    renderForm(income)
+    await screen.findByText('2030-03-15')
+
+    fireEvent.click(within(rowFor('2030-03-15')).getByRole('button', { name: 'Un-skip' }))
+
+    await waitFor(() =>
+      expect(setRecurringIncomeOccurrenceSkippedMock).toHaveBeenCalledWith(
+        '',
+        1,
+        '2030-03-15',
+        false,
+      ),
+    )
+    await waitFor(() =>
+      expect(within(rowFor('2030-03-15')).getByRole('button', { name: 'Skip' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Skipped — un-skip to pay it')).not.toBeInTheDocument()
+  })
+
+  it('shows the error and keeps the rows when a toggle fails', async () => {
+    setRecurringIncomeOccurrenceSkippedMock.mockRejectedValue(new Error('down'))
+    renderForm(income)
+    await screen.findByText('2030-04-15')
+
+    fireEvent.click(within(rowFor('2030-04-15')).getByRole('button', { name: 'Skip' }))
+
+    expect(
+      await screen.findByText('Could not update the occurrence.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('2030-04-15')).toBeInTheDocument()
+  })
+
+  it('shows the read error without blocking the definition save', async () => {
+    fetchRecurringIncomeOccurrencesMock.mockRejectedValue(new Error('down'))
+    updateRecurringIncomeMock.mockResolvedValue({ ...income, amount: '2200.00' })
+    const { onSaved } = renderForm(income)
+
+    expect(
+      await screen.findByText('Could not load the occurrences.'),
+    ).toBeInTheDocument()
+
+    // The definition fields still work: the section's own failure never
+    // takes the form down.
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '2200.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })
 })

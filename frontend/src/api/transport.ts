@@ -67,7 +67,7 @@ function messageOr(detail: unknown, fallback: string): string {
 }
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   token?: string
   /** JSON body: serialized and sent with a Content-Type header. */
   json?: unknown

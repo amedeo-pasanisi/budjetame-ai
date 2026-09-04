@@ -39,6 +39,10 @@ vi.mock('./api', async () => {
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
     deleteRecurringIncome: vi.fn(),
+    fetchRecurringCostOccurrences: vi.fn(),
+    setRecurringCostOccurrenceSkipped: vi.fn(),
+    fetchRecurringIncomeOccurrences: vi.fn(),
+    setRecurringIncomeOccurrenceSkipped: vi.fn(),
     fetchWallets: vi.fn(),
     fetchCategories: vi.fn(),
   }
@@ -58,7 +62,6 @@ const cost: RecurringCost = {
   next_due_date: '2026-09-01',
   next_unpaid_occurrence_date: '2026-09-01',
   backlog_count: 0,
-  next_skip_action: 'skip',
   created_at: createdAt,
 }
 
@@ -73,7 +76,6 @@ const income: RecurringIncome = {
 
   next_unpaid_occurrence_date: '2026-09-27',
   backlog_count: 0,
-  next_skip_action: 'skip',
   created_at: createdAt,
 }
 

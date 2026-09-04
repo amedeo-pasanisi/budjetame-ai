@@ -274,7 +274,6 @@ const rentCost: RecurringCost = {
   next_due_date: '2026-08-01',
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
-  next_skip_action: 'skip',
   created_at: '2026-08-01T10:00:00Z'
 }
 
@@ -289,7 +288,6 @@ const salaryIncome: RecurringIncome = {
   next_due_date: '2026-08-01',
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
-  next_skip_action: 'skip',
   created_at: '2026-08-01T10:00:00Z'
 }
 
@@ -2536,5 +2534,124 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
     expect(await screen.findByText(/Frozen lunch/)).toBeInTheDocument()
     expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
     expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('first visit with a Recurring Cost request pending: the initial fetch carries that filter (ADR-0026)', async () => {
+    const onConsumed = vi.fn()
+    fetchRecurringCostsMock.mockResolvedValue([rentCost])
+    // The jumped-to definition has no linked Transactions: the seeded
+    // filter is visible in what the screen renders, not just in the
+    // request.
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.recurringCostId === 11 ? { items: [], next_cursor: null } : page1,
+    )
+    const view = render(
+      <Harness
+        initialRequest={{ kind: 'recurring-cost', id: 11 }}
+        onConsumed={onConsumed}
+      />,
+    )
+
+    // Initial state applied the request: the one mount fetch already asks
+    // for recurring cost 11 — no unfiltered fetch first.
+    await waitFor(() => expect(fetchTransactionsMock).toHaveBeenCalledTimes(1))
+    expect(fetchTransactionsMock).toHaveBeenCalledWith('', { recurringCostId: 11 })
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Coffee/)).not.toBeInTheDocument()
+    // The filtered line shows the definition's chip once the lists land,
+    // and the panel's Recurring select carries the seed.
+    expect(
+      await screen.findByRole('button', { name: 'Remove Rent filter' }),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+    expect(await screen.findByLabelText('Recurring')).toHaveValue('cost:11')
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+
+    // Consumed exactly once on mount: the shell's pending is cleared, so a
+    // later render of the still-mounted screen never reapplies it.
+    await waitFor(() => expect(onConsumed).toHaveBeenCalledTimes(1))
+    fetchTransactionsMock.mockClear()
+    view.rerender(
+      <Harness
+        initialRequest={{ kind: 'recurring-cost', id: 11 }}
+        onConsumed={onConsumed}
+      />,
+    )
+    await act(async () => {})
+    expect(fetchTransactionsMock).not.toHaveBeenCalled()
+    expect(onConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it('a Recurring Income request while mounted replaces the whole filter state and refetches once (ADR-0026)', async () => {
+    fetchWalletsMock.mockResolvedValue([
+      wallet,
+      { ...wallet, id: 2, name: 'Bank', type: 'checking' },
+    ])
+    fetchCategoriesMock.mockResolvedValue([foodCategory])
+    fetchRecurringIncomesMock.mockResolvedValue([salaryIncome])
+    fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
+      filters.recurringIncomeId === 12 ? { items: [], next_cursor: null } : page1,
+    )
+    const onConsumed = vi.fn()
+    render(<Harness onConsumed={onConsumed} />)
+    await screen.findByText(/Coffee/)
+
+    // Dirty every piece of state the jump must replace: an open Filters
+    // bar with a wallet, both dates, a category, and the search.
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
+    fireEvent.change(await screen.findByLabelText('From'), {
+      target: { value: '2026-01-01' },
+    })
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: '2026-01-31' },
+    })
+    fireEvent.change(await screen.findByLabelText('Category'), { target: { value: '1' } })
+    withFakeTimers()
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+      { target: { value: 'coffee' } },
+    )
+    await debounce()
+    vi.useRealTimers()
+
+    // The jump arrives: only the recurring filter survives — the whole
+    // filter state replaced by the jumped-to income — the search clears,
+    // the bar closes, and the first page refetches once.
+    fetchTransactionsMock.mockClear()
+    act(() => {
+      sendLedgerRequest({ kind: 'recurring-income', id: 12 })
+    })
+
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', {
+        recurringIncomeId: 12,
+      }),
+    )
+    expect(fetchTransactionsMock).toHaveBeenCalledTimes(1)
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    // The jump replaced the whole state: the filtered line shows Salary's
+    // chip, and the bar is closed again (no wallet, no search).
+    expect(
+      await screen.findByRole('button', { name: 'Remove Salary filter' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /filters/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.queryByLabelText('Wallet')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('searchbox', { name: 'Search transactions' }),
+    ).toHaveValue('')
+    // Re-opening the bar shows the seeded select values: the recurring
+    // filter set to the jumped-to income, everything else cleared.
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }))
+    expect(await screen.findByLabelText('Recurring')).toHaveValue('income:12')
+    expect(screen.getByLabelText('Wallet')).toHaveValue('')
+    expect(onConsumed).toHaveBeenCalledTimes(1)
   })
 })

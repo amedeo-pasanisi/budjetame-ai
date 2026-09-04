@@ -93,7 +93,7 @@ import {
   fetchTransactions,
   fetchWallets,
 } from './api'
-import type { Category, Wallet } from './api'
+import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
 
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
@@ -622,5 +622,88 @@ describe('AppShell category ledger jump (issue #94)', () => {
     ).not.toBeInTheDocument()
     expect(panelOf('New category')).toHaveAttribute('hidden')
     expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+})
+describe('AppShell recurring ledger jump (ADR-0026)', () => {
+  const createdAt = '2026-08-01T10:00:00Z'
+  // One definition per side, so a card tap can jump from either.
+  const costFixtures: RecurringCost[] = [
+    {
+      id: 11,
+      name: 'Rent',
+      amount: '850.00',
+      interval_value: 1,
+      interval_unit: 'months',
+      start_date: '2026-09-01',
+      next_due_date: '2026-09-01',
+      next_unpaid_occurrence_date: '2026-09-01',
+      backlog_count: 0,
+      created_at: createdAt,
+    },
+  ]
+  const incomeFixtures: RecurringIncome[] = [
+    {
+      id: 12,
+      name: 'Salary',
+      amount: '2100.00',
+      interval_value: 1,
+      interval_unit: 'months',
+      start_date: '2026-09-01',
+      next_due_date: '2026-09-01',
+      next_unpaid_occurrence_date: '2026-09-01',
+      backlog_count: 0,
+      created_at: createdAt,
+    },
+  ]
+
+  beforeEach(() => {
+    fetchRecurringCostsMock.mockResolvedValue(costFixtures)
+    fetchRecurringIncomesMock.mockResolvedValue(incomeFixtures)
+  })
+
+  it('a Recurring Cost card tap opens the Transactions tab filtered to that definition', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Recurring' }))
+    await expectTab('recurring')
+
+    // The card's main tap surface — never the ✎ Edit sibling.
+    fireEvent.click(screen.getByRole('button', { name: /^Rent/ }))
+
+    await expectTab('transactions')
+    // The very first ledger fetch carries the jump's filter: no unfiltered
+    // fetch first, and the chip line names the definition.
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', {
+        recurringCostId: 11,
+      }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Rent filter' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('No transactions match these filters.'),
+    ).toBeInTheDocument()
+    expect(panelOf('New recurring cost')).toHaveAttribute('hidden')
+    expect(panelOf('New transaction')).not.toHaveAttribute('hidden')
+  })
+
+  it('a Recurring Income card tap filters the ledger to that definition', async () => {
+    await renderShell()
+    fireEvent.click(screen.getByRole('button', { name: 'Recurring' }))
+    await expectTab('recurring')
+    fireEvent.click(screen.getByRole('button', { name: 'Incomes' }))
+    await screen.findByRole('button', { name: 'New recurring income' })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Salary/ }))
+
+    await expectTab('transactions')
+    await waitFor(() =>
+      expect(fetchTransactionsMock).toHaveBeenCalledWith('', {
+        recurringIncomeId: 12,
+      }),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove Salary filter' }),
+    ).toBeInTheDocument()
   })
 })

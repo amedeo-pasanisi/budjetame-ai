@@ -1,8 +1,11 @@
 /** Recurring Incomes resource (issue #60): definitions of incomes that
  * repeat at a fixed interval, mirroring Recurring Costs (ADR-0011).
  * Occurrences, `next_due_date`, and the Backlog are derived on the backend,
- * never stored (ADR-0010). */
+ * never stored (ADR-0010). The Occurrences read and the per-Occurrence
+ * skip write (ADR-0026) mirror the Costs side too, sharing its row type.
+ */
 
+import type { RecurringOccurrence } from './recurringCosts'
 import { request } from './transport'
 
 export type IntervalUnit = 'days' | 'weeks' | 'months' | 'years'
@@ -27,10 +30,6 @@ export type RecurringIncome = {
    * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
    * from the definition and the stored link pins, never stored. */
   backlog_count: number
-  /** What the Skip/Un-skip button reads (ADR-0016), mirroring the Costs
-   * side: "skip" when the oldest Unpaid Occurrence is unskipped, "unskip"
-   * when it is already Skipped. */
-  next_skip_action: 'skip' | 'unskip'
   created_at: string
 }
 
@@ -103,16 +102,36 @@ export async function deleteRecurringIncome(token: string, incomeId: number): Pr
   })
 }
 
-export async function toggleSkipRecurringIncome(
+export async function fetchRecurringIncomeOccurrences(
   token: string,
   incomeId: number,
-): Promise<RecurringIncome> {
-  // The Skip/Un-skip button (ADR-0016): the backend flips the oldest Unpaid
-  // Occurrence and returns the refreshed definition with its derived state.
-  const response = await request(`/recurring-incomes/${incomeId}/skip-toggle`, {
-    method: 'POST',
+): Promise<RecurringOccurrence[]> {
+  // The Occurrences section's read (ADR-0026), mirroring the Costs side:
+  // every non-Paid Occurrence with its skipped state, newest first.
+  const response = await request(`/recurring-incomes/${incomeId}/occurrences`, {
     token,
-    errorMessage: 'Could not update recurring income',
+    errorMessage: 'Could not load the occurrences',
   })
-  return (await response.json()) as RecurringIncome
+  return (await response.json()) as RecurringOccurrence[]
+}
+
+export async function setRecurringIncomeOccurrenceSkipped(
+  token: string,
+  incomeId: number,
+  occurrenceDate: string,
+  skipped: boolean,
+): Promise<RecurringOccurrence[]> {
+  // The per-Occurrence skip write (ADR-0026), mirroring the Costs side:
+  // state the row's skipped state idempotently; the response is the
+  // refreshed read.
+  const response = await request(
+    `/recurring-incomes/${incomeId}/occurrences/${occurrenceDate}`,
+    {
+      method: 'PUT',
+      token,
+      json: { skipped },
+      errorMessage: 'Could not update the occurrence',
+    },
+  )
+  return (await response.json()) as RecurringOccurrence[]
 }

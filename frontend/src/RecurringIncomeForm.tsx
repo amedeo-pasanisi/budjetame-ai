@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import {
   ApiError,
@@ -6,10 +6,13 @@ import {
   apiErrorMessage,
   createRecurringIncome,
   deleteRecurringIncome,
+  fetchRecurringIncomeOccurrences,
+  setRecurringIncomeOccurrenceSkipped,
   updateRecurringIncome,
   type IntervalUnit,
   type RecurringIncome,
   type RecurringIncomeInput,
+  type RecurringOccurrence,
 } from './api'
 
 const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
@@ -37,8 +40,17 @@ type RecurringIncomeFormProps = {
  * never unset. Occurrences repeat on the start date's day from there on
  * (29–31 clamp to the last day of shorter months). The Wallet and Category
  * of a linked Income are chosen at Transaction creation time, so the
- * definition itself never carries them. Cancel — like the shell's backdrop
- * and Escape — abandons the draft without saving. */
+ * definition itself never carries them.
+ *
+ * Edit mode adds the Occurrences section (ADR-0026), mirroring the Costs
+ * side: every non-Paid Occurrence, newest first — the next incoming Unpaid
+ * one on top, then every excused future row, then the past rows (today
+ * first) down to the oldest — each with its own Skip/Un-skip: Skip
+ * excuses the Occurrence (it never enters the Backlog and a link can
+ * never pay it), Un-skip restores it. The rows come from their own
+ * per-definition read; a toggle states the row's skipped state and swaps
+ * in the refreshed read. Cancel — like the shell's backdrop and Escape —
+ * abandons the draft without saving. */
 export function RecurringIncomeForm({
   income,
   onSaved,
@@ -59,6 +71,59 @@ export function RecurringIncomeForm({
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const token = localStorage.getItem(TOKEN_KEY) ?? ''
+  // The Occurrences section's rows (ADR-0026): their own read, loaded when
+  // an existing definition opens the form (a definition under creation has
+  // no id yet — its first Occurrence is only decided at creation). Null
+  // while the read is still in flight.
+  const [occurrences, setOccurrences] = useState<RecurringOccurrence[] | null>(
+    null,
+  )
+  const [occurrencesError, setOccurrencesError] = useState<string | null>(null)
+  // The row whose Skip/Un-skip write is in flight — it disables itself so a
+  // double tap cannot fire two writes (the write is idempotent anyway).
+  const [togglingDate, setTogglingDate] = useState<string | null>(null)
+  const incomeId = income?.id
+
+  // Load the Occurrences section when an existing definition is edited. The
+  // rows are the section's own truth: a toggle below replaces them with the
+  // refreshed read from the write's response.
+  useEffect(() => {
+    if (incomeId === undefined) {
+      return
+    }
+    let cancelled = false
+    fetchRecurringIncomeOccurrences(token, incomeId)
+      .then((rows) => {
+        if (!cancelled) {
+          setOccurrences(rows)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOccurrencesError('Could not load the occurrences.')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, incomeId])
+
+  // One row's Skip/Un-skip (ADR-0026): state the row's skipped state — the
+  // response is the refreshed read, so the section swaps its rows in
+  // without a second fetch. The write also refreshes the definition's
+  // derived state (the cards behind reload on the cache clock, ADR-0022).
+  const handleToggleOccurrence = (row: RecurringOccurrence) => {
+    if (incomeId === undefined) {
+      return
+    }
+    setTogglingDate(row.date)
+    setOccurrencesError(null)
+    setRecurringIncomeOccurrenceSkipped(token, incomeId, row.date, !row.skipped)
+      .then((rows) => setOccurrences(rows))
+      .catch(() => setOccurrencesError('Could not update the occurrence.'))
+      .finally(() => setTogglingDate(null))
+  }
 
   const intervalNumber = Number.parseInt(intervalValue, 10)
   const amountNumber = Number.parseFloat(amount)
@@ -83,7 +148,6 @@ export function RecurringIncomeForm({
     setSubmitting(true)
     setError(null)
     try {
-      const token = localStorage.getItem(TOKEN_KEY) ?? ''
       const saved = editing
         ? await updateRecurringIncome(token, income.id, buildInput())
         : await createRecurringIncome(token, buildInput())
@@ -116,7 +180,6 @@ export function RecurringIncomeForm({
     setSubmitting(true)
     setError(null)
     try {
-      const token = localStorage.getItem(TOKEN_KEY) ?? ''
       await deleteRecurringIncome(token, income.id)
       onDeleted?.(income.id)
     } catch {
@@ -218,6 +281,66 @@ export function RecurringIncomeForm({
           </p>
         )}
       </div>
+
+      {/* The Occurrences section (ADR-0026) — edit mode only: a definition
+          under creation has no id yet. Rows are the definition's non-Paid
+          Occurrences, newest first, in the order the read returns: the
+          next incoming Unpaid one on top, then every excused future row,
+          then the past rows (today first) down to the oldest. Skipped
+          rows stay greyed with Un-skip, so every excused Occurrence stays
+          reachable; a row's own toggle works in any order. */}
+      {editing && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-slate-700">Occurrences</h3>
+          {occurrencesError !== null && (
+            <p className="text-sm text-red-600">{occurrencesError}</p>
+          )}
+          {occurrences === null ? (
+            occurrencesError === null && (
+              <p className="text-xs text-slate-500">Loading occurrences…</p>
+            )
+          ) : (
+            <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
+              {occurrences.map((row) => (
+                <li
+                  key={row.date}
+                  className="flex items-center justify-between gap-3 py-2 pl-3 pr-2"
+                >
+                  <span className="min-w-0">
+                    <span
+                      className={`block text-sm ${
+                        row.skipped
+                          ? 'text-slate-400'
+                          : 'font-medium text-slate-900'
+                      }`}
+                    >
+                      {row.date}
+                    </span>
+                    {row.skipped && (
+                      <span className="block text-xs text-slate-400">
+                        Skipped — un-skip to pay it
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleOccurrence(row)}
+                    disabled={togglingDate === row.date}
+                    className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {row.skipped ? 'Un-skip' : 'Skip'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-slate-500">
+            Skip excuses an occurrence: it never counts as unpaid, and a
+            payment covers it only after un-skipping. Paid ones live in the
+            ledger.
+          </p>
+        </div>
+      )}
 
       {error !== null && <p className="text-sm text-red-600">{error}</p>}
 

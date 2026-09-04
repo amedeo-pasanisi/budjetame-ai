@@ -22,6 +22,7 @@ from app.recurrence import (
     occurrence_date,
     occurrences_in_window,
     period_of,
+    period_span_end,
     rome_day_of,
     rome_today,
 )
@@ -413,6 +414,27 @@ def test_backlog_ignores_a_dormant_skip() -> None:
     start = date(2026, 1, 1)
     skipped = {period_of(date(2025, 12, 1), "days")}
     assert backlog_count(start, 1, "days", today, set(), skipped) == 10
+
+
+# --- period_span_end (ADR-0026) -------------------------------------------
+
+def test_period_span_end_bounds_the_periods_occurrence() -> None:
+    """The span end is the latest day an Occurrence of the period can fall
+    on: the date itself for day/week intervals, the month's last day (leap
+    February included) for (year, month), December 31st for a year — the
+    bound the Occurrences walk hunts skipped rows up to."""
+    assert period_span_end(date(2026, 5, 15)) == date(2026, 5, 15)
+    assert period_span_end((2026, 2)) == date(2026, 2, 28)
+    assert period_span_end((2028, 2)) == date(2028, 2, 29)
+    assert period_span_end((2026, 12)) == date(2026, 12, 31)
+    assert period_span_end(2026) == date(2026, 12, 31)
+    # An Occurrence of a period never falls past its span end, even with
+    # the 29–31 clamp (a January 31 start lands on February 28).
+    for unit in ("days", "weeks", "months", "years"):
+        start = date(2026, 1, 31)
+        for k in range(13):
+            due = occurrence_date(start, 1, unit, k)
+            assert due <= period_span_end(period_of(due, unit))
 
 
 # --- rome_today -------------------------------------------------------------

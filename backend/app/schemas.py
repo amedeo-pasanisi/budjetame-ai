@@ -597,6 +597,35 @@ class TransactionPage(BaseModel):
     next_cursor: str | None
 
 
+class RecurringOccurrenceUpdate(BaseModel):
+    """The per-Occurrence skip write (ADR-0026): PUT the Occurrence's date
+    with `skipped` true to excuse it (it never enters the Backlog, never
+    counts toward Monthly Spendable, and a link can never pay it), false to
+    restore it to Unpaid. Shared by Recurring Costs and their Incomes
+    mirror (ADR-0011) — the shape has no side-specific field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    skipped: bool
+
+
+class RecurringOccurrenceOut(BaseModel):
+    """One row of the Occurrences section (ADR-0026): a non-Paid Occurrence
+    of a Recurring Cost or Recurring Income — its own date (ADR-0024: an
+    Occurrence's due date is its own date) and whether the user excused it
+    (ADR-0016). Paid history lives in the ledger and never appears here: a
+    link already covers it, so there is nothing to skip or un-skip. The
+    read lists the rows newest first — the section's one order: the next
+    incoming Unpaid one (the live row) on top, then every excused future
+    row and the past rows (today first) down to the oldest. Shared by the
+    Costs side and its Incomes mirror (ADR-0011).
+    """
+
+    date: str
+    skipped: bool
+
+
 class RecurringCostCreate(BaseModel):
     """Create a Recurring Cost (issue #56). `interval_value` + `interval_unit`
     are the repetition (every N days, weeks, months, or years); `start_date`
@@ -667,11 +696,9 @@ class RecurringCostOut(BaseModel):
     transaction form's picker shows. `backlog_count` is the Backlog (issue
     #58): Unpaid Occurrences whose due date is today or earlier in
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
-    pins, never stored. `next_skip_action` is what the Skip/Un-skip button
-    reads (ADR-0016): "skip" when the oldest Unpaid Occurrence is
-    unskipped, "unskip" when it is already Skipped — nothing is left to
-    skip, so the press restores it. `start_date` is the stored start date —
-    every definition carries one (ADR-0024)."""
+    pins and skips, never stored. Skip controls live per Occurrence (ADR-0026)
+    on the Occurrences read, not on the definition. `start_date` is the
+    stored start date — every definition carries one (ADR-0024)."""
 
     id: int
     name: str
@@ -682,7 +709,6 @@ class RecurringCostOut(BaseModel):
     next_due_date: str
     next_unpaid_occurrence_date: str
     backlog_count: int
-    next_skip_action: Literal["skip", "unskip"]
     created_at: datetime
 
     @field_validator("amount")
@@ -763,11 +789,9 @@ class RecurringIncomeOut(BaseModel):
     transaction form's picker shows. `backlog_count` is the Backlog (issue
     #62): Unpaid Occurrences whose due date is today or earlier in
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
-    pins, never stored. `next_skip_action` is what the Skip/Un-skip button
-    reads (ADR-0016), mirroring the cost side: "skip" when the oldest
-    Unpaid Occurrence is unskipped, "unskip" when it is already Skipped.
-    `start_date` is the stored start date — every definition carries one
-    (ADR-0024)."""
+    pins and skips, never stored. Skip controls live per Occurrence (ADR-0026)
+    on the Occurrences read, not on the definition. `start_date` is the
+    stored start date — every definition carries one (ADR-0024)."""
 
     id: int
     name: str
@@ -778,7 +802,6 @@ class RecurringIncomeOut(BaseModel):
     next_due_date: str
     next_unpaid_occurrence_date: str
     backlog_count: int
-    next_skip_action: Literal["skip", "unskip"]
     created_at: datetime
 
     @field_validator("amount")

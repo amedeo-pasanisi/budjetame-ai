@@ -42,18 +42,18 @@ type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
  * values, and the search persist across tab switches (the tab keeps-alive,
  * ADR-0022). The Import Draft (issue #43) is NOT screen state: it arrives
  * from the app shell, so it survives even a real unmount. The ledger jump
- * (issue #90) is shell state too — the pending Wallet/Category filter
- * request arrives with the panel's props and is consumed here exactly
- * once. */
+ * (issue #90) is shell state too — the pending Wallet/Category/Recurring
+ * filter request arrives with the panel's props and is consumed here
+ * exactly once. */
 export function TransactionsScreen({
   importState,
   pendingLedgerRequest,
   onConsumeLedgerRequest,
 }: {
   importState: ImportDraftController
-  /** The pending ledger jump (issue #90): a Wallet/Category row asked the
-   * shell to open this ledger pre-filtered to that entity. Null while no
-   * jump is pending. */
+  /** The pending ledger jump (issue #90): a Wallet, Category, or Recurring
+   * definition row asked the shell to open this ledger pre-filtered to
+   * that entity. Null while no jump is pending. */
   pendingLedgerRequest: LedgerFilterRequest | null
   /** The consume side of the jump: call once the pending request has been
    * applied, so the shell clears it and no later render can reapply it. */
@@ -130,12 +130,13 @@ export function TransactionsScreen({
 
   // Filters bar (issue #33): closed by default; every change refetches the
   // first page. Empty wallet/date/category values mean "all" (the tab keeps
-  // its role as the full ledger). The wallet and category seeds read the
-  // pending ledger jump (issue #90): the panel can mount because a Wallet
-  // or Category row fired the jump, and the very first fetch must already
-  // carry that filter — initial state applies it, never an
-  // apply-then-refetch. The jump's other resets (dates, recurring, search,
-  // the bar itself) are the fresh-mount defaults anyway.
+  // its role as the full ledger). The wallet, category, and recurring seeds
+  // read the pending ledger jump (issue #90): the panel can mount because a
+  // Wallet, Category, or Recurring definition row fired the jump, and the
+  // very first fetch must already carry that filter — initial state applies
+  // it, never an apply-then-refetch. The jump's other resets (dates, the
+  // other filters, search, the bar itself) are the fresh-mount defaults
+  // anyway.
   const [filtersOpen, setFiltersOpen] = useState(false)
   // The chip strip's scroll state (filtered line, issue #92): the chips
   // never wrap — when they overflow, the strip scrolls sideways with the
@@ -178,10 +179,24 @@ export function TransactionsScreen({
   // collide across kinds); picking one narrows the ledger to the
   // Transactions linked to exactly that definition. The options come from
   // the link picker's auxiliary fetches, so the filter costs no extra
-  // request. Undefined = all.
+  // request. Undefined = all. Seeded by the ledger jump's recurring kinds
+  // (ADR-0026): the definition row's tap must land on a ledger already
+  // narrowed to its linked Transactions.
   const [filterRecurring, setFilterRecurring] = useState<
     { kind: 'cost' | 'income'; id: number } | undefined
-  >(undefined)
+  >(() => {
+    if (
+      pendingLedgerRequest !== null &&
+      (pendingLedgerRequest.kind === 'recurring-cost' ||
+        pendingLedgerRequest.kind === 'recurring-income')
+    ) {
+      return {
+        kind: pendingLedgerRequest.kind === 'recurring-cost' ? 'cost' : 'income',
+        id: pendingLedgerRequest.id,
+      }
+    }
+    return undefined
+  })
 
   // Search (issue #54, ADR-0009): the input updates instantly; the request
   // needle is trimmed and debounced ~300ms, then refetches the first page
@@ -197,11 +212,12 @@ export function TransactionsScreen({
     return () => clearTimeout(timer)
   }, [search])
 
-  // The ledger jump (issue #90), while-mounted side: a Wallet/Category row
-  // on another tab asked for this ledger pre-filtered to that entity. The
-  // request REPLACES the whole filter state — wallet, category, from/to
-  // dates, and the recurring filter all reset — clears the search (input
-  // and debounced needle together, so no late debounce can resurrect it),
+  // The ledger jump (issue #90), while-mounted side: a Wallet, Category, or
+  // Recurring definition row on another tab asked for this ledger
+  // pre-filtered to that entity. The request REPLACES the whole filter
+  // state — wallet, category, from/to dates, and the recurring filter all
+  // reset to the request's one entity — clears the search (input and
+  // debounced needle together, so no late debounce can resurrect it),
   // closes the Filters bar, and then rides the existing filter-change
   // reload: the first page refetches once with the new state. First mounts
   // need none of these updates (the seeds above already applied the
@@ -223,9 +239,27 @@ export function TransactionsScreen({
         ? pendingLedgerRequest.id
         : ALL_CATEGORIES,
     )
+    // The recurring state is an object: setting a fresh equal object would
+    // re-render (and refetch) for nothing — the seed already applied it on
+    // first mount. The updater returns the current object when the values
+    // match, so React bails out exactly like the primitive setters.
+    const recurringKind: 'cost' | 'income' | null =
+      pendingLedgerRequest.kind === 'recurring-cost'
+        ? 'cost'
+        : pendingLedgerRequest.kind === 'recurring-income'
+          ? 'income'
+          : null
+    const recurringNext =
+      recurringKind === null
+        ? undefined
+        : { kind: recurringKind, id: pendingLedgerRequest.id }
+    setFilterRecurring((current) =>
+      current?.kind === recurringNext?.kind && current?.id === recurringNext?.id
+        ? current
+        : recurringNext,
+    )
     setFilterFromDate('')
     setFilterToDate('')
-    setFilterRecurring(undefined)
     setSearch('')
     setSearchNeedle('')
     setFiltersOpen(false)

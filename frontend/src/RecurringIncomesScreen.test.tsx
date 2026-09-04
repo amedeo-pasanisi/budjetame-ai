@@ -1,10 +1,17 @@
-/** Recurring Incomes screen (issue #60): the Incomes side of the Recurring
- * tab renders every income sorted by next due date, each row showing name,
- * amount, interval, and the next due date; the Backlog badge (issue #62)
- * rides on the API's derived state. Create, edit, and delete live in a
- * modal on this screen, mirroring the Costs side (ADR-0011). The API client
- * is mocked; the real display helpers (interval text, euro formatting) stay
- * live. */
+/** Recurring Incomes screen (issue #60): the list renders every income
+ * sorted by next due date, each row showing name, amount, interval, and the
+ * next due date; the Backlog badge (issue #62) rides on the API's derived
+ * state. The screen mirrors the Costs side (issue #56, ADR-0011).
+ *
+ * Row structure (ADR-0026): like the Wallets rows (issue #93), a row is a
+ * main tap surface plus a sibling ✎ button — never nested. The tap surface
+ * opens the Transactions ledger pre-filtered to that definition (the shell's
+ * requestLedgerFilter, issue #90); ✎ Edit opens the edit modal, where the
+ * per-Occurrence Skip/Un-skip controls live — the card Skip/Un-skip button
+ * is gone (ADR-0026), and the badge stays the only Backlog signal
+ * (ADR-0025). Create, edit, and delete live in a modal on this screen. The
+ * API client is mocked; the real display helpers (interval text, euro
+ * formatting) stay live. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -36,7 +43,8 @@ vi.mock('./api', async () => {
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
     deleteRecurringIncome: vi.fn(),
-    toggleSkipRecurringIncome: vi.fn(),
+    fetchRecurringIncomeOccurrences: vi.fn(),
+    setRecurringIncomeOccurrenceSkipped: vi.fn(),
   }
 })
 
@@ -44,12 +52,12 @@ import {
   ApiError,
   createRecurringIncome,
   deleteRecurringIncome,
+  fetchRecurringIncomeOccurrences,
   fetchRecurringIncomes,
-  toggleSkipRecurringIncome,
   updateRecurringIncome,
 } from './api'
 
-const createdAt = '2026-08-20T10:00:00Z'
+const createdAt = '2026-08-19T10:00:00Z'
 
 // Deliberately unsorted: the screen's one order is next due date ascending.
 const incomes: RecurringIncome[] = [
@@ -63,7 +71,6 @@ const incomes: RecurringIncome[] = [
     next_due_date: '2026-09-27',
     next_unpaid_occurrence_date: '2026-09-27',
     backlog_count: 0,
-    next_skip_action: 'skip',
     created_at: createdAt,
   },
   {
@@ -76,7 +83,6 @@ const incomes: RecurringIncome[] = [
     next_due_date: '2026-09-01',
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 3,
-    next_skip_action: 'skip',
     created_at: createdAt,
   },
   {
@@ -89,38 +95,52 @@ const incomes: RecurringIncome[] = [
     next_due_date: '2026-12-01',
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
-    next_skip_action: 'unskip',
     created_at: createdAt,
   },
+]
+
+// The edit modal's Occurrences section rows (ADR-0026): the section loads
+// its own per-definition read when an existing income opens for editing.
+const occurrences = [
+  { date: '2026-09-27', skipped: false },
+  { date: '2026-09-01', skipped: true },
 ]
 
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 const createRecurringIncomeMock = vi.mocked(createRecurringIncome)
 const updateRecurringIncomeMock = vi.mocked(updateRecurringIncome)
 const deleteRecurringIncomeMock = vi.mocked(deleteRecurringIncome)
-const toggleSkipRecurringIncomeMock = vi.mocked(toggleSkipRecurringIncome)
+const fetchRecurringIncomeOccurrencesMock = vi.mocked(fetchRecurringIncomeOccurrences)
 
 beforeEach(() => {
   fetchRecurringIncomesMock.mockResolvedValue(incomes)
+  fetchRecurringIncomeOccurrencesMock.mockResolvedValue(occurrences)
 })
 
 afterEach(() => {
   vi.clearAllMocks()
 })
 
+/** A row's main tap surface — the card's content button, told apart from
+ * the ✎ sibling by its missing `Edit …` aria-label. */
+function mainSurface(name: string): HTMLElement {
+  const button = screen
+    .getAllByRole('button')
+    .find(
+      (candidate) =>
+        !(candidate.getAttribute('aria-label') ?? '').startsWith('Edit ') &&
+        candidate.textContent?.includes(name),
+    )
+  expect(button, `main surface for ${name}`).toBeDefined()
+  return button as HTMLElement
+}
+
 describe('RecurringIncomesScreen rows', () => {
   it('renders every income sorted by next due date with name, amount, interval, and due date', async () => {
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
 
-    const rows = screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining('Rent from Marco'),
-      expect.stringContaining('Salary'),
-      expect.stringContaining('Bonus'),
-    ])
+    const rows = ['Rent from Marco', 'Salary', 'Bonus'].map(mainSurface)
     // Each row shows the amount and the interval with the next due date.
     const texts = rows.map((row) => row.textContent ?? '')
     expect(texts[0]).toContain('€600.00')
@@ -150,6 +170,40 @@ describe('RecurringIncomesScreen rows', () => {
   })
 })
 
+describe('RecurringIncomesScreen row actions (ADR-0026)', () => {
+  it('a main-surface tap requests the ledger jump for that income and opens no modal', async () => {
+    const requestLedgerFilter = vi.fn()
+    render(<RecurringIncomesScreen requestLedgerFilter={requestLedgerFilter} />)
+    await screen.findByText('Rent from Marco')
+
+    fireEvent.click(mainSurface('Salary'))
+
+    expect(requestLedgerFilter).toHaveBeenCalledTimes(1)
+    expect(requestLedgerFilter).toHaveBeenCalledWith({
+      kind: 'recurring-income',
+      id: 1,
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('the ✎ button opens the edit modal for exactly that income', async () => {
+    render(<RecurringIncomesScreen />)
+    await screen.findByText('Rent from Marco')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Salary' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit recurring income' })
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Salary')
+  })
+
+  it('the card Skip/Un-skip button is gone: no Skip action on the rows', async () => {
+    render(<RecurringIncomesScreen />)
+    await screen.findByText('Rent from Marco')
+
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Un-skip' })).not.toBeInTheDocument()
+  })
+})
+
 describe('RecurringIncomesScreen create flow', () => {
   it('creates an income from the modal and lands it at its sorted position', async () => {
     createRecurringIncomeMock.mockResolvedValue({
@@ -162,7 +216,6 @@ describe('RecurringIncomesScreen create flow', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
-      next_skip_action: 'skip',
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)
@@ -187,11 +240,11 @@ describe('RecurringIncomesScreen create flow', () => {
       }),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const rows = screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-      .map((row) => row.textContent)
-    expect(rows[0]).toContain('Freelance')
+    // Freelance's next due (2026-08-24) sorts it ahead of every fixture
+    // income (all due in September).
+    expect(
+      mainSurface('Freelance').compareDocumentPosition(mainSurface('Rent from Marco')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
   it('shows the validation error when the API rejects the create', async () => {
@@ -214,7 +267,7 @@ describe('RecurringIncomesScreen create flow', () => {
 })
 
 describe('RecurringIncomesScreen edit and delete flows', () => {
-  it('edits an income from its row and keeps it in the sorted list', async () => {
+  it('edits an income from its ✎ button and keeps it in the sorted list', async () => {
     updateRecurringIncomeMock.mockResolvedValue({
       ...incomes[0],
       amount: '2200.00',
@@ -224,10 +277,7 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
 
-    const rows = screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-    fireEvent.click(rows.find((row) => row.textContent?.includes('Salary')) as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Salary' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit recurring income' })
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Salary')
     expect(within(dialog).getByLabelText('Amount')).toHaveValue(2100)
@@ -243,10 +293,23 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
       ),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const salaryRow = screen
-      .getAllByRole('button')
-      .find((row) => row.textContent?.includes('Salary'))
-    expect(salaryRow?.textContent).toContain('€2200.00')
+    expect(mainSurface('Salary').textContent).toContain('€2200.00')
+  })
+
+  it('loads the Occurrences section into the edit modal (ADR-0026)', async () => {
+    render(<RecurringIncomesScreen />)
+    await screen.findByText('Rent from Marco')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Salary' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit recurring income' })
+
+    await waitFor(() =>
+      expect(fetchRecurringIncomeOccurrencesMock).toHaveBeenCalledWith('', 1),
+    )
+    expect(within(dialog).getByRole('heading', { name: 'Occurrences' })).toBeInTheDocument()
+    for (const row of occurrences) {
+      expect(within(dialog).getByText(row.date)).toBeInTheDocument()
+    }
   })
 
   it('deletes an income with the tap-again confirmation', async () => {
@@ -254,10 +317,7 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
 
-    const rows = screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-    fireEvent.click(rows.find((row) => row.textContent?.includes('Bonus')) as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Bonus' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit recurring income' })
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete recurring income' }))
@@ -291,86 +351,14 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
   })
 })
 
-describe('RecurringIncomesScreen skip button', () => {
-  it('renders Skip or Un-skip per the API state, and keeps the card clickable', async () => {
-    render(<RecurringIncomesScreen />)
-    await screen.findByText('Rent from Marco')
-
-    // Salary and Marco have an unskipped next occurrence: Skip. Bonus has
-    // nothing left to skip: Un-skip.
-    expect(screen.getAllByRole('button', { name: 'Skip' })).toHaveLength(2)
-    expect(screen.getByRole('button', { name: 'Un-skip' })).toBeInTheDocument()
-    // The card itself still opens the edit modal.
-    const rows = screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-    fireEvent.click(rows.find((row) => row.textContent?.includes('Salary')) as HTMLElement)
-    expect(
-      await screen.findByRole('dialog', { name: 'Edit recurring income' }),
-    ).toBeInTheDocument()
-  })
-
-  it('skips the next occurrence and swaps in the returned state', async () => {
-    toggleSkipRecurringIncomeMock.mockResolvedValue({
-      ...incomes[1],
-      backlog_count: 0,
-      next_skip_action: 'unskip',
-    })
-    render(<RecurringIncomesScreen />)
-    await screen.findByText('Rent from Marco')
-
-    const skipButtons = screen.getAllByRole('button', { name: 'Skip' })
-    fireEvent.click(
-      skipButtons.find(
-        (button) => button.closest('li')?.textContent?.includes('Rent from Marco'),
-      ) as HTMLElement,
-    )
-
-    await waitFor(() =>
-      expect(toggleSkipRecurringIncomeMock).toHaveBeenCalledWith('', 2),
-    )
-    // The returned state re-renders the card: no badge, and the button now
-    // reads Un-skip (Marco joins Bonus).
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Un-skip' })).toHaveLength(2)
-    })
-    const marco = screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-      .find((row) => row.textContent?.includes('Rent from Marco'))
-    expect(marco?.textContent).not.toContain('unpaid')
-  })
-
-  it('shows the error message when the toggle fails', async () => {
-    toggleSkipRecurringIncomeMock.mockRejectedValue(new Error('down'))
-    render(<RecurringIncomesScreen />)
-    await screen.findByText('Rent from Marco')
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Skip' })[0])
-
-    expect(
-      await screen.findByText('Could not update your recurring incomes.'),
-    ).toBeInTheDocument()
-  })
-})
-
 describe('RecurringIncomesScreen backlog badge', () => {
-  /** The row buttons, in screen order — the badge lives inside them. */
-  const rowButtons = () =>
-    screen
-      .getAllByRole('button')
-      .filter((button) => button.className.includes('rounded-2xl'))
-
   it('renders the badge only on an income with a Backlog', async () => {
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
 
-    const marco = rowButtons().find((row) => row.textContent?.includes('Rent from Marco'))
-    expect(marco?.textContent).toContain('3 unpaid')
-
+    expect(mainSurface('Rent from Marco').textContent).toContain('3 unpaid')
     // Salary and Bonus have no Backlog: no badge.
-    const salary = rowButtons().find((row) => row.textContent?.includes('Salary'))
-    expect(salary?.textContent).not.toContain('unpaid')
+    expect(mainSurface('Salary').textContent).not.toContain('unpaid')
   })
 
   it('updates the badge after a definition edit', async () => {
@@ -384,15 +372,13 @@ describe('RecurringIncomesScreen backlog badge', () => {
     render(<RecurringIncomesScreen />)
     await screen.findByText('Rent from Marco')
 
-    const rows = rowButtons()
-    fireEvent.click(rows.find((row) => row.textContent?.includes('Salary')) as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Salary' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit recurring income' })
     fireEvent.change(within(dialog).getByLabelText('Amount'), { target: { value: '2200.00' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const salary = rowButtons().find((row) => row.textContent?.includes('Salary'))
-    expect(salary?.textContent).toContain('2 unpaid')
+    expect(mainSurface('Salary').textContent).toContain('2 unpaid')
   })
 
   it('shows the badge on a freshly created income', async () => {
@@ -406,7 +392,6 @@ describe('RecurringIncomesScreen backlog badge', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
-      next_skip_action: 'skip',
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)
@@ -419,7 +404,6 @@ describe('RecurringIncomesScreen backlog badge', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create recurring income' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const gym = rowButtons().find((row) => row.textContent?.includes('Gym Rental'))
-    expect(gym?.textContent).toContain('1 unpaid')
+    expect(mainSurface('Gym Rental').textContent).toContain('1 unpaid')
   })
 })

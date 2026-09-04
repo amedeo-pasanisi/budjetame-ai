@@ -25,10 +25,15 @@ export type RecurringCost = {
    * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
    * from the definition and the stored link pins, never stored. */
   backlog_count: number
-  /** What the Skip/Un-skip button reads (ADR-0016): "skip" when the oldest
-   * Unpaid Occurrence is unskipped, "unskip" when it is already Skipped. */
-  next_skip_action: 'skip' | 'unskip'
   created_at: string
+}
+
+/** One row of the Occurrences section (ADR-0026): a non-Paid Occurrence —
+ * its own date and whether the user excused it (Skipped, ADR-0016). Paid
+ * history lives in the ledger and never appears. */
+export type RecurringOccurrence = {
+  date: string
+  skipped: boolean
 }
 
 /** The fields the create/edit form edits. An empty start date is only ever
@@ -100,17 +105,34 @@ export async function deleteRecurringCost(token: string, costId: number): Promis
   })
 }
 
-export async function toggleSkipRecurringCost(
+export async function fetchRecurringCostOccurrences(
   token: string,
   costId: number,
-): Promise<RecurringCost> {
-  // The Skip/Un-skip button (ADR-0016): the backend flips the oldest Unpaid
-  // Occurrence (skip it, or un-skip it when everything is excused) and
-  // returns the refreshed definition with its derived state.
-  const response = await request(`/recurring-costs/${costId}/skip-toggle`, {
-    method: 'POST',
+): Promise<RecurringOccurrence[]> {
+  // The Occurrences section's read (ADR-0026): every non-Paid Occurrence
+  // with its skipped state, newest first — the one order the edit modal
+  // renders.
+  const response = await request(`/recurring-costs/${costId}/occurrences`, {
     token,
-    errorMessage: 'Could not update recurring cost',
+    errorMessage: 'Could not load the occurrences',
   })
-  return (await response.json()) as RecurringCost
+  return (await response.json()) as RecurringOccurrence[]
+}
+
+export async function setRecurringCostOccurrenceSkipped(
+  token: string,
+  costId: number,
+  occurrenceDate: string,
+  skipped: boolean,
+): Promise<RecurringOccurrence[]> {
+  // The per-Occurrence skip write (ADR-0026): state the row's skipped
+  // state — skip or un-skip — idempotently. The response is the refreshed
+  // read, so the modal swaps its rows in without a second fetch.
+  const response = await request(`/recurring-costs/${costId}/occurrences/${occurrenceDate}`, {
+    method: 'PUT',
+    token,
+    json: { skipped },
+    errorMessage: 'Could not update the occurrence',
+  })
+  return (await response.json()) as RecurringOccurrence[]
 }

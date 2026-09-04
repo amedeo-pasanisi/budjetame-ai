@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_account
 from app.deps import get_session
 from app.models import Account, IntervalUnit, RecurringCost
-from app.schemas import RecurringCostCreate, RecurringCostOut, RecurringCostUpdate
+from app.schemas import (
+    RecurringCostCreate,
+    RecurringCostOut,
+    RecurringCostUpdate,
+    RecurringOccurrenceOut,
+    RecurringOccurrenceUpdate,
+)
 from app.services import recurring_costs as recurring_service
 from app.services import scoping
 
@@ -35,9 +41,9 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
     recurrence module owns the math), the next Unpaid Occurrence date
     (issue #57): the
     one a new linked Expense would pay, what the transaction form's picker
-    shows — the Backlog (issue #58): Unpaid Occurrences due today or
-    earlier in Europe/Rome — and `next_skip_action`,
-    what the Skip/Un-skip button reads (ADR-0016)."""
+    shows — and the Backlog (issue #58): Unpaid Occurrences due today or
+    earlier in Europe/Rome. Skip controls live per Occurrence on the
+    Occurrences read (ADR-0026), not on the definition."""
     backlog = recurring_service.backlog_count_for(session, cost)
     return RecurringCostOut(
         id=cost.id,
@@ -51,7 +57,6 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
             session, cost
         ).isoformat(),
         backlog_count=backlog,
-        next_skip_action=recurring_service.next_skip_action(session, cost),
         created_at=cost.created_at,
     )
 
@@ -105,22 +110,64 @@ def create_recurring_cost(
     return _cost_out(session, cost)
 
 
-@router.post("/{cost_id}/skip-toggle", response_model=RecurringCostOut)
-def toggle_recurring_cost_skip(
+def _occurrences_out(
+    session: Session, cost: RecurringCost
+) -> list[RecurringOccurrenceOut]:
+    """The Occurrences section's rows as the API view: the read's (date,
+    skipped) pairs newest first (ADR-0026). Both the read and the skip
+    write answer with exactly this list."""
+    return [
+        RecurringOccurrenceOut(date=value.isoformat(), skipped=skipped)
+        for value, skipped in recurring_service.occurrence_states(session, cost)
+    ]
+
+
+@router.get("/{cost_id}/occurrences", response_model=list[RecurringOccurrenceOut])
+def list_recurring_cost_occurrences(
     cost_id: int,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> RecurringCostOut:
-    """The Skip/Un-skip button (ADR-0016): skip the oldest Unpaid,
-    un-Skipped Occurrence — the same one a link would pay, so the badge
-    ticks down oldest-first; once the whole Backlog is excused, un-skip the
-    oldest Skipped one instead (the front of the queue — only the oldest
-    Unpaid Occurrence is reachable, exactly like the link contract). The
-    response is the refreshed definition with its derived state, so the
-    card can re-render the badge and the next due date."""
+) -> list[RecurringOccurrenceOut]:
+    """The Occurrences section's read (ADR-0026): every non-Paid
+    Occurrence of the cost — its own date and whether the user excused it —
+    newest first, the one order the edit modal renders: the next incoming
+    Unpaid row on top, then every excused future row, then the past rows
+    (today first) down to the oldest. Paid history lives in the ledger and
+    never appears here. The response is the section's whole state: each row
+    carries exactly what its Skip/Un-skip button needs."""
     cost = _owned_cost_or_403(session, account, cost_id)
-    cost = recurring_service.toggle_skip(session, cost)
-    return _cost_out(session, cost)
+    return _occurrences_out(session, cost)
+
+
+@router.put(
+    "/{cost_id}/occurrences/{occurrence_date}",
+    response_model=list[RecurringOccurrenceOut],
+)
+def set_recurring_cost_occurrence_skipped(
+    cost_id: int,
+    occurrence_date: str,
+    payload: RecurringOccurrenceUpdate,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> list[RecurringOccurrenceOut]:
+    """The per-Occurrence skip write (ADR-0026): PUT the Occurrence's date
+    with {"skipped": true} to excuse it, {"skipped": false} to restore it.
+    Every row toggles independently, in any order — the card button's
+    queue discipline is gone. A paid Occurrence (or a date that is not one
+    of the cost's Occurrences) rejects the skip with 422. The response is
+    the refreshed read, so the modal swaps its rows in without a second
+    fetch."""
+    cost = _owned_cost_or_403(session, account, cost_id)
+    try:
+        recurring_service.set_occurrence_skipped(
+            session,
+            cost,
+            occurrence_date,
+            skipped=payload.skipped,
+        )
+    except recurring_service.RecurringCostRuleError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return _occurrences_out(session, cost)
 
 
 @router.patch("/{cost_id}", response_model=RecurringCostOut)

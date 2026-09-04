@@ -68,6 +68,22 @@ def _add_years(start: date, years: int) -> date:
     return _clamp_day(start.year + years, start.month, start.day)
 
 
+def period_span_end(period: Period) -> date:
+    """The latest calendar day an Occurrence of the given period can fall
+    on: the period's own date for day/week intervals, the last day of the
+    month for (year, month) periods, December 31st for a year period. One
+    period of a sequence holds at most one Occurrence, and that Occurrence
+    lies inside the period's span, so a walk over a sequence can bound the
+    hunt for a skipped Occurrence by the span end of the largest stored
+    period (ADR-0026)."""
+    if isinstance(period, tuple):
+        year, month = period
+        return date(year, month, calendar.monthrange(year, month)[1])
+    if isinstance(period, int):
+        return date(period, 12, 31)
+    return period
+
+
 def occurrence_date(start: date, n: int, unit: str, k: int) -> date:
     """The k-th Occurrence of a definition starting on `start` and repeating
     every n `unit`s (k = 0 is the start date itself).

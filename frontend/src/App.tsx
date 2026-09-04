@@ -20,15 +20,19 @@ type AuthState =
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
-/** The ledger jump (issue #90): a Wallet or Category row on its own tab
- * asks the Transactions tab to open with the ledger pre-filtered to that
- * entity. The request lives in the shell — the Transactions panel mounts
- * lazily on its first visit (ADR-0022), so the request must survive until
- * the screen exists to consume it, exactly like the Import Draft. */
-export type LedgerFilterRequest = {
-  kind: 'wallet' | 'category'
-  id: number
-}
+/** The ledger jump (issue #90): a Wallet, Category, or Recurring
+ * definition row on its own tab asks the Transactions tab to open with the
+ * ledger pre-filtered to that entity (the Recurring kinds are the cards'
+ * main tap, ADR-0026). The request lives in the shell — the Transactions
+ * panel mounts lazily on its first visit (ADR-0022), so the request must
+ * survive until the screen exists to consume it, exactly like the Import
+ * Draft. Recurring Costs and Recurring Incomes are separate kinds: they
+ * live in different tables and filter through different query parameters. */
+export type LedgerFilterRequest =
+  | { kind: 'wallet'; id: number }
+  | { kind: 'category'; id: number }
+  | { kind: 'recurring-cost'; id: number }
+  | { kind: 'recurring-income'; id: number }
 
 /** The tabs in bottom-nav order — the swipe walks this list (issue #51). */
 const TAB_ORDER: readonly Tab[] = [
@@ -184,21 +188,21 @@ export function AppShell({
   // unmounts, and the shell-owned draft is what it was from the start.
   const importState = useImportDraft()
 
-  // The pending ledger jump (issue #90): a Wallet/Category row requested
-  // the Transactions ledger pre-filtered to it, and the request waits here
-  // until the Transactions screen consumes it. Shell state, not screen
-  // state: the request can arrive before the Transactions panel exists
-  // (it mounts lazily on first visit, ADR-0022), and it must not be lost
-  // while the screen is showing the Import Draft. A newer request replaces
-  // an unconsumed one.
+  // The pending ledger jump (issue #90): a Wallet, Category, or Recurring
+  // definition row requested the Transactions ledger pre-filtered to it,
+  // and the request waits here until the Transactions screen consumes it.
+  // Shell state, not screen state: the request can arrive before the
+  // Transactions panel exists (it mounts lazily on first visit, ADR-0022),
+  // and it must not be lost while the screen is showing the Import Draft.
+  // A newer request replaces an unconsumed one.
   const [pendingLedgerRequest, setPendingLedgerRequest] =
     useState<LedgerFilterRequest | null>(null)
 
   /** Send a ledger jump: hold the request pending and switch to the
    * Transactions tab — the screen applies it on first mount (initial
    * state) or, when already mounted, through the filter-change reload.
-   * Passed to the Wallets and Categories screens; their rows fire it
-   * (issues #93/#94). */
+   * Passed to the Wallets, Categories, and Recurring screens; their rows
+   * fire it (issues #93/#94; the Recurring cards since ADR-0026). */
   const requestLedgerFilter = (request: LedgerFilterRequest) => {
     setPendingLedgerRequest(request)
     activate('transactions')
@@ -326,8 +330,9 @@ function TabButton({
  * attribute, not unmount — while another tab is active. The ledger jump
  * (issue #90) rides the same channel: the pending request and its consume
  * callback go to the Transactions screen; the request setter goes to the
- * Wallets and Categories screens, whose rows fire it (the Wallets rows
- * since #93, the Categories rows since #94). */
+ * Wallets, Categories, and Recurring screens, whose rows fire it (the
+ * Wallets rows since #93, the Categories rows since #94, the Recurring
+ * cards since ADR-0026). */
 function tabContent(
   tab: Tab,
   importState: ImportDraftController,
@@ -351,7 +356,7 @@ function tabContent(
     case 'categories':
       return <CategoriesScreen requestLedgerFilter={requestLedgerFilter} />
     case 'recurring':
-      return <RecurringScreen />
+      return <RecurringScreen requestLedgerFilter={requestLedgerFilter} />
   }
 }
 

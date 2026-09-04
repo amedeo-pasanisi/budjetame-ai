@@ -606,8 +606,9 @@ async def test_a_skipped_cost_occurrence_never_counts_in_monthly_spendable(
 ) -> None:
     """Monthly Spendable counts Occurrences by due date, paid or not — but
     a Skipped Occurrence never counts (ADR-0016): the user does not have to
-    pay it, so the Budget must not pretend the money leaves. Skipping this
-    month's Occurrence restores the month exactly."""
+    pay it, so the Budget must not pretend the money leaves. Excusing this
+    month's Occurrence (per-date write, ADR-0026) restores the month
+    exactly."""
     email = "budget-skip-cost@budjetame.dev"
     account_id = insert_foreign_account(database_url, email)
     try:
@@ -624,11 +625,13 @@ async def test_a_skipped_cost_occurrence_never_counts_in_monthly_spendable(
         after_create = await _budget(client, token)
         assert after_create["monthly_spendable"] == "-500.00"
 
-        response = await client.post(
-            f"/recurring-costs/{cost}/skip-toggle", headers=_auth(token)
+        response = await client.put(
+            f"/recurring-costs/{cost}/occurrences/{_first_day_of_current_month()}",
+            json={"skipped": True},
+            headers=_auth(token),
         )
         assert response.status_code == 200
-        assert response.json()["backlog_count"] == 0
+        assert {"date": _first_day_of_current_month(), "skipped": True} in response.json()
 
         after_skip = await _budget(client, token)
         assert after_skip["monthly_spendable"] == "0.00"
@@ -642,8 +645,8 @@ async def test_a_skipped_income_occurrence_never_counts_in_monthly_spendable(
     client: AsyncClient, database_url: str
 ) -> None:
     """The income mirror: an income the user will not receive never fills
-    the month. Skipping this month's Occurrence drops the Monthly Spendable
-    by the full amount."""
+    the month. Excusing today's Occurrence (per-date write, ADR-0026)
+    drops the Monthly Spendable by the full amount."""
     email = "budget-skip-income@budjetame.dev"
     account_id = insert_foreign_account(database_url, email)
     try:
@@ -655,11 +658,18 @@ async def test_a_skipped_income_occurrence_never_counts_in_monthly_spendable(
         after_create = await _budget(client, token)
         assert after_create["monthly_spendable"] == "3000.00"
 
-        response = await client.post(
-            f"/recurring-incomes/{income}/skip-toggle", headers=_auth(token)
+        # The monthly income's only Occurrence due in this month is k=0,
+        # on the 1st.
+        response = await client.put(
+            f"/recurring-incomes/{income}/occurrences/{_first_day_of_current_month()}",
+            json={"skipped": True},
+            headers=_auth(token),
         )
         assert response.status_code == 200
-        assert response.json()["backlog_count"] == 0
+        assert {
+            "date": _first_day_of_current_month(),
+            "skipped": True,
+        } in response.json()
 
         after_skip = await _budget(client, token)
         assert after_skip["monthly_spendable"] == "0.00"
