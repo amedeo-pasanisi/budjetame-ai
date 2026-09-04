@@ -5,6 +5,20 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.4.1] — 2026-09-03
+
+### Fixed
+
+- **No focus rectangle on trend-column taps** — tapping a column no longer
+  focuses the hit-target rect, so the browser's focus ring never appears
+  around the whole column and lingers; the tap still selects the bar
+  (darkened + value chip), and Tab + Enter/Space keep the keyboard ring
+  (#96).
+- **The trend chart's own horizontal scroll never switches tabs** — a
+  drag that starts on a wide (scrollable) chart now scrolls the columns
+  instead of counting as a tab swipe; a short range with nothing to
+  scroll still swipes tabs like anywhere else (#96).
+
 ## [v1.4.0] — 2026-09-03
 
 ### Changed
