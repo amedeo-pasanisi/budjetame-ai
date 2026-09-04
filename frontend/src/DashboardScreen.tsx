@@ -686,10 +686,41 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
             const y = TOP_PAD + plotHeight - barHeight
             return (
               <g key={bucket.month}>
+                {/* The coloured bar, a zero month's light stub. The tap
+                 * target below is painted after it (topmost), so a finger
+                 * on the bar itself hits the target, never the bar. */}
+                <rect
+                  x={x}
+                  y={y}
+                  width={BAR_WIDTH}
+                  height={Math.max(barHeight, value > 0 ? 2 : 0)}
+                  rx={3}
+                  className={
+                    selected === index
+                      ? 'fill-indigo-700'
+                      : value > 0
+                        ? 'fill-indigo-600'
+                        : 'fill-slate-200'
+                  }
+                />
+                <text
+                  x={geometry.barCenter(index)}
+                  y={CHART_HEIGHT - 5}
+                  textAnchor="middle"
+                  className="fill-slate-500 text-[9px]"
+                >
+                  {shortMonthLabel(bucket.month)}
+                </text>
                 {/* The tap target is the whole column — the bar itself is
                  * only BAR_WIDTH wide — and it doubles as the keyboard
                  * access. Its width (bar + gap) always ends at the next
                  * bar's edge (or the plot's end), in both layouts.
+                 *
+                 * It is painted LAST: an SVG tap lands on the topmost
+                 * painted element, so the target must sit above the
+                 * coloured bar — otherwise a tap on the bar would hit the
+                 * bar (no handler) and never show the value chip (issue
+                 * #97).
                  *
                  * A pointer tap must not focus the column: the browser
                  * would draw its focus rectangle around the whole column
@@ -716,28 +747,6 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
                     }
                   }}
                 />
-                <rect
-                  x={x}
-                  y={y}
-                  width={BAR_WIDTH}
-                  height={Math.max(barHeight, value > 0 ? 2 : 0)}
-                  rx={3}
-                  className={
-                    selected === index
-                      ? 'fill-indigo-700'
-                      : value > 0
-                        ? 'fill-indigo-600'
-                        : 'fill-slate-200'
-                  }
-                />
-                <text
-                  x={geometry.barCenter(index)}
-                  y={CHART_HEIGHT - 5}
-                  textAnchor="middle"
-                  className="fill-slate-500 text-[9px]"
-                >
-                  {shortMonthLabel(bucket.month)}
-                </text>
               </g>
             )
           })}

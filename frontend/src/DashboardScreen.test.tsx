@@ -359,6 +359,27 @@ describe('Dashboard trend', () => {
     await waitFor(() => expect(screen.queryByText('€42.00')).not.toBeInTheDocument())
   })
 
+  it('the column target paints above the bar, so tapping the bar itself selects', async () => {
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [{ month: '2026-03', amount: '42.00' }],
+    }))
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses Trend ·/)
+
+    // jsdom does no hit-testing, but the invariant is SVG paint order: an
+    // SVG tap lands on the topmost painted element, so the transparent
+    // column target must be the last (topmost) rect of its group — a tap
+    // on the coloured bar underneath it then hits the target (issue #97).
+    const column = screen.getByRole('button', { name: /€42.00/ })
+    const group = column.parentElement
+    expect(group).not.toBeNull()
+    const rects = group!.querySelectorAll('rect')
+    expect(rects.length).toBeGreaterThanOrEqual(2)
+    expect(rects[rects.length - 1]).toBe(column)
+  })
+
   it('a zero month\'s stub shows its €0.00 chip the same way', async () => {
     fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
       from_month: fromMonth,
