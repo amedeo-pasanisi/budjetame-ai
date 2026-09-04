@@ -5,7 +5,40 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.5.0] — 2026-09-04
+
+### Added
+
+- **Recurring cards open the ledger filtered to the definition** — tapping
+  a Recurring Cost or Recurring Income card — its name, amount, next due,
+  badge — jumps to the Transactions tab pre-filtered to that definition's
+  linked Transactions, the Wallets/Categories row pattern; a trailing ✎
+  button opens the edit modal instead. The card Skip/Un-skip button is gone
+  (ADR-0026).
+- **The edit modal gains an Occurrences section** — every non-Paid
+  Occurrence, each with its own Skip/Un-skip, in any order: the next
+  incoming one on top — skipping it greys it and surfaces the following
+  one, so a whole month can be excused in advance by tapping the top row
+  repeatedly in one sitting — then every excused row greyed in date order
+  with Un-skip, then the past rows (today first) down to the oldest. Paid
+  history stays in the ledger; skipping an occurrence never counts it as
+  unpaid, and paying one still means un-skipping first (#98).
+
+### Changed
+
+- **The red "N unpaid" badge is the only Backlog signal** — the "Overdue"
+  mark and the "X costs overdue · N unpaid occurrences" summary line are
+  gone from the Recurring screens: one fact, one signal (ADR-0025). A card
+  shows the red "{N} unpaid" badge exactly when its Backlog is non-empty —
+  an Occurrence due today stays unpaid until its linked Transaction is
+  recorded.
+- **The filtered line never wraps** — active filter chips stay on one line
+  and scroll sideways when they overflow, with a fade on each edge that
+  hides chips; **Export moved into the Filters panel**, where it sits next
+  to Clear all and always downloads the view the filters describe.
+
 ## [v1.4.2] — 2026-09-04
+
 
 ### Fixed
 
