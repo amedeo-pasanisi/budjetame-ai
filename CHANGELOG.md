@@ -5,6 +5,26 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.6.0] — 2026-09-04
+
+### Added
+
+- **Transfers crossing a Contact Wallet can carry the matching-direction
+  recurring link** — a recurring receipt from a tracked person (Chiara's
+  300 €/month) is recorded by hand as a Transfer — Contact Wallets are
+  never the Wallet of an Income — and could never mark its Occurrence
+  Paid, so the red "N unpaid" badge grew forever with no workaround.
+  Now a Transfer between exactly one own Wallet and one Contact Wallet
+  may link the matching kind: from a Contact Wallet a Recurring Income,
+  to a Contact Wallet a Recurring Cost (money-out to a tracked person
+  mirrors a linked Expense). The usual link contract applies unchanged:
+  pays the oldest Unpaid Occurrence at link time, pinned on the row and
+  never reassigned; Skipped Occurrences are never payable; unlinking or
+  deleting the Transfer frees the Occurrence; deleting the definition
+  severs it. An edit that would leave a link on a pair that no longer
+  qualifies is rejected — never silently severed — and unlinking always
+  succeeds. The form offers the picker on a Transfer only while the
+  chosen pair qualifies (ADR-0027).
 ## [v1.5.0] — 2026-09-04
 
 ### Added
