@@ -13,11 +13,39 @@ const EDGE_MARGIN = 20
  * today none live outside the modals, whose overlay stops its own touches. */
 const INTERACTIVE_SELECTOR = 'button, input, select, textarea, a'
 
+/** True when the element is a horizontally scrollable container (a wide
+ * trend chart's frame, say, whose columns overflow it). */
+function isHorizontallyScrollable(element: Element): boolean {
+  const overflowX = getComputedStyle(element).overflowX
+  return (
+    (overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'overlay') &&
+    element.scrollWidth > element.clientWidth
+  )
+}
+
+/** Would a horizontal drag starting at this element scroll one of its
+ * ancestors? The scrollable region owns the gesture (issue #96): a wide
+ * trend chart's columns scroll inside their overflow-x frame, so a drag
+ * that starts there must never switch tabs — exactly like a drag that
+ * starts on a control. The search stops at the body: a page-level
+ * horizontal scroll is the browser's own gesture. */
+function startsInsideHorizontallyScrollable(target: Element): boolean {
+  let current: Element | null = target
+  while (current !== null && current !== document.body) {
+    if (isHorizontallyScrollable(current)) {
+      return true
+    }
+    current = current.parentElement
+  }
+  return false
+}
+
 type SwipePoint = { x: number; y: number }
 
 /** Would a gesture starting on this touch have to be ignored by the tab
- * swipe? Two owners beat it: the browser's edge gestures, and the control's
- * own horizontal interactions (text selection, sliders, links). */
+ * swipe? Three owners beat it: the browser's edge gestures, the control's
+ * own horizontal interactions (text selection, sliders, links), and a
+ * horizontally scrollable region the drag would scroll (issue #96). */
 function isIgnorableStart(touch: Touch): boolean {
   const { clientX, clientY } = touch
   if (
@@ -29,7 +57,11 @@ function isIgnorableStart(touch: Touch): boolean {
     return true
   }
   const target = touch.target
-  return !(target instanceof Element) || target.closest(INTERACTIVE_SELECTOR) !== null
+  return (
+    !(target instanceof Element) ||
+    target.closest(INTERACTIVE_SELECTOR) !== null ||
+    startsInsideHorizontallyScrollable(target)
+  )
 }
 
 /**
@@ -39,9 +71,10 @@ function isIgnorableStart(touch: Touch): boolean {
  * vertically — switches the tab once, on touch end, in the gesture's
  * direction (right-to-left: next, left-to-right: previous). The switch is
  * instant; there is no finger-following. Vertical scrolls, gestures that
- * start on a control or within {@link EDGE_MARGIN}px of a screen edge, and
- * touches inside an open modal (the modal shell stops its own touches) never
- * switch. Touch events only — mouse drags do nothing.
+ * start on a control, inside a horizontally scrollable region (a wide trend
+ * chart's columns scroll there — issue #96) or within {@link EDGE_MARGIN}px
+ * of a screen edge, and touches inside an open modal (the modal shell stops
+ * its own touches) never switch. Touch events only — mouse drags do nothing.
  */
 export function useTabSwipe(onSwipe: (direction: 1 | -1) => void): Pick<
   DOMAttributes<HTMLElement>,

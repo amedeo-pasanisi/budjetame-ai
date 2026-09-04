@@ -689,7 +689,13 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
                 {/* The tap target is the whole column — the bar itself is
                  * only BAR_WIDTH wide — and it doubles as the keyboard
                  * access. Its width (bar + gap) always ends at the next
-                 * bar's edge (or the plot's end), in both layouts. */}
+                 * bar's edge (or the plot's end), in both layouts.
+                 *
+                 * A pointer tap must not focus the column: the browser
+                 * would draw its focus rectangle around the whole column
+                 * and leave it there after the tap (issue #96). Only the
+                 * focus default is stopped — the click still selects — and
+                 * Tab focus is untouched, so keyboard users keep the ring. */}
                 <rect
                   x={x}
                   y={TOP_PAD}
@@ -702,6 +708,7 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
                   aria-pressed={selected === index}
                   className="cursor-pointer"
                   onClick={() => setSelected(selected === index ? null : index)}
+                  onMouseDown={(event) => event.preventDefault()}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
