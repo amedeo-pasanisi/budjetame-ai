@@ -5,6 +5,16 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.4.2] — 2026-09-04
+
+### Fixed
+
+- **Tapping the coloured bar itself shows the value chip** — the column's
+  tap target now paints above the bar, so a tap on the bar (or a
+  zero-month stub) lands on it and floats the chip, exactly like a tap
+  on the column around it; keyboard access and the no-focus-ring-on-tap
+  rule are unchanged (#97).
+
 ## [v1.4.1] — 2026-09-03
 
 ### Fixed
