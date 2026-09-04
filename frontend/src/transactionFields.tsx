@@ -196,8 +196,11 @@ export function CategoryField({
   )
 }
 
-/** The Recurring Cost select an Expense carries (issue #57): Expenses only —
- * Income and Transfer never render it. Picking a cost signs it as paid, and
+/** The Recurring Cost select an Expense carries (issue #57) — and a
+ * Transfer whose destination is a Contact Wallet (ADR-0027): money out to
+ * a tracked person pays a Recurring Cost like an Expense does. Income
+ * never renders it, and a Transfer shows it only while the chosen pair
+ * qualifies. Picking a cost signs it as paid, and
  * the helper names the Occurrence the link will pay: `occurrenceDate` is the
  * oldest Unpaid Occurrence's own date for a new link, or the stored pin when
  * the form is editing the very link already on the Transaction (which must
@@ -241,8 +244,10 @@ export function RecurringCostField({
 }
 
 /** The Recurring Income select an Income carries (issue #61), mirroring the
- * Recurring Cost select: Incomes only — Expense and Transfer never render
- * it. Picking an income signs it as received, and the helper names the
+ * Recurring Cost select: Incomes only — Expense never renders it, and a
+ * Transfer renders it only while the pair qualifies (ADR-0027: money in
+ * from a Contact Wallet receives a Recurring Income like an Income does).
+ * Picking an income signs it as received, and the helper names the
  * Occurrence the link will pay: `occurrenceDate` is the oldest Unpaid
  * Occurrence's own date for a new link, or the stored pin when the form is
  * editing the very link already on the Transaction (which must never be

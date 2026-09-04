@@ -74,8 +74,9 @@ type TransactionFormProps = {
    * rest of the draft untouched. */
   walletToSelect: { id: number; target: WalletTarget } | null
   /** Inline entity creation (ADR-0013): opens the Recurring Cost create
-   * modal hosted by the screen, stacked on top of this one — an Expense's
-   * Recurring Cost field sentinel. */
+   * modal hosted by the screen, stacked on top of this one — the Recurring
+   * Cost field's sentinel (an Expense, or a Transfer to a Contact Wallet,
+   * ADR-0027). */
   onAddRecurringCost: () => void
   /** The freshly created Recurring Cost the screen reports back: the field
    * selects it — which per the linking contract immediately pays the new
@@ -83,8 +84,9 @@ type TransactionFormProps = {
    * untouched. */
   recurringCostToSelect: number | null
   /** Inline entity creation (ADR-0013): opens the Recurring Income create
-   * modal hosted by the screen, stacked on top of this one — an Income's
-   * Recurring Income field sentinel. */
+   * modal hosted by the screen, stacked on top of this one — the Recurring
+   * Income field's sentinel (an Income, or a Transfer from a Contact
+   * Wallet, ADR-0027). */
   onAddRecurringIncome: () => void
   /** The freshly created Recurring Income the screen reports back, mirror
    * of the cost contract: the field selects it, paying the new
@@ -188,9 +190,10 @@ export function TransactionForm({
       setWalletId(walletToSelect.id)
     }
   }, [walletToSelect])
-  // The optional Recurring Cost link (issue #57): an Expense pins one cost,
-  // paying its oldest Unpaid Occurrence. Seeded from the Transaction being
-  // edited, so an untouched link is never re-sent (and never re-pinned).
+  // The optional Recurring Cost link (issue #57, ADR-0027): an Expense —
+  // or a Transfer to a Contact Wallet — pins one cost, paying its oldest
+  // Unpaid Occurrence. Seeded from the Transaction being edited, so an
+  // untouched link is never re-sent (and never re-pinned).
   const [recurringCostId, setRecurringCostId] = useState<number | null>(
     editing?.recurring_cost_id ?? null,
   )
@@ -205,9 +208,10 @@ export function TransactionForm({
       setRecurringCostId(recurringCostToSelect)
     }
   }, [recurringCostToSelect])
-  // The optional Recurring Income link (issue #61), mirroring the cost
-  // link: an Income pins one Recurring Income, paying its oldest Unpaid
-  // Occurrence. Same seed-from-editing contract.
+  // The optional Recurring Income link (issue #61, ADR-0027), mirroring
+  // the cost link: an Income — or a Transfer from a Contact Wallet — pins
+  // one Recurring Income, paying its oldest Unpaid Occurrence. Same
+  // seed-from-editing contract.
   const [recurringIncomeId, setRecurringIncomeId] = useState<number | null>(
     editing?.recurring_income_id ?? null,
   )
@@ -297,6 +301,20 @@ export function TransactionForm({
 
   const sourceWallet = wallets.find((w) => w.id === sourceWalletId)
   const destinationWallet = wallets.find((w) => w.id === destinationWalletId)
+  const sourceIsContact = sourceWallet?.type === 'contact'
+  const destinationIsContact = destinationWallet?.type === 'contact'
+  // ADR-0027: a Transfer may carry the matching-direction recurring link
+  // only when its legs are exactly one own Wallet and one Contact Wallet —
+  // money in from a Contact Wallet (source = Contact) offers Recurring
+  // Incomes, money out to a Contact Wallet (destination = Contact) offers
+  // Recurring Costs. Own↔own, Contact↔Contact, and a missing leg never
+  // qualify. The pickers below render exactly when their side qualifies,
+  // and the payload sends null for a side that does not, so a stale draft
+  // can never ride along to the API.
+  const transferCostQualifies =
+    isTransfer && destinationIsContact && !sourceIsContact
+  const transferIncomeQualifies =
+    isTransfer && sourceIsContact && !destinationIsContact
   const selectedWallet = wallets.find((w) => w.id === walletId)
   const amountValue = Number.parseFloat(amount)
   const hasAmount = !Number.isNaN(amountValue) && amountValue > 0
@@ -390,6 +408,11 @@ export function TransactionForm({
             date,
             sourceWalletId: sourceWalletId as number,
             destinationWalletId: destinationWalletId as number,
+            // The matching-direction link rides only a qualifying pair
+            // (ADR-0027): the other side is sent null, so a draft picked
+            // for a pair that no longer qualifies never reaches the API.
+            recurringCostId: transferCostQualifies ? recurringCostId : null,
+            recurringIncomeId: transferIncomeQualifies ? recurringIncomeId : null,
             description,
             ...latLngToWire(finalLocation),
             ...placeToWire(place),
@@ -602,6 +625,31 @@ export function TransactionForm({
       )}
 
       {!isTransfer && type === 'income' && (
+        <RecurringIncomeField
+          incomes={recurringIncomes}
+          value={recurringIncomeId}
+          occurrenceDate={payingIncomeOccurrenceDate}
+          onChange={setRecurringIncomeId}
+          onAdd={onAddRecurringIncome}
+        />
+      )}
+
+      {/* ADR-0027: the same pickers ride a Transfer whose pair qualifies —
+      money out to a Contact Wallet pays a Recurring Cost, money in from a
+      Contact Wallet receives a Recurring Income — mirroring the
+      Expense/Income fields: None unlinks, the sentinel creates inline, the
+      helper names the Occurrence the link pays. */}
+      {isTransfer && transferCostQualifies && (
+        <RecurringCostField
+          costs={recurringCosts}
+          value={recurringCostId}
+          occurrenceDate={payingOccurrenceDate}
+          onChange={setRecurringCostId}
+          onAdd={onAddRecurringCost}
+        />
+      )}
+
+      {isTransfer && transferIncomeQualifies && (
         <RecurringIncomeField
           incomes={recurringIncomes}
           value={recurringIncomeId}

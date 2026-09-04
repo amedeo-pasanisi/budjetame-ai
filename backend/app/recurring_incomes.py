@@ -43,9 +43,10 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
     """The API view of a Recurring Income, with the derived state: the next
     due date (ADR-0024: an Occurrence's due date is its own date — the pure
     recurrence module owns that math), the next Unpaid Occurrence date
-    (issue #61):
-    the one a new linked Income would pay, what the transaction form's
-    picker shows — and the Backlog (issue #62): Unpaid Occurrences due today or
+    (issue #61, ADR-0027):
+    the one a new linked Income or Transfer-from-a-Contact would pay, what
+    the transaction form's picker shows — and the Backlog (issue #62):
+    Unpaid Occurrences due today or
     earlier in Europe/Rome. Skip controls live per Occurrence on the
     Occurrences read (ADR-0026), not on the definition."""
     backlog = recurring_service.backlog_count_for(session, income)

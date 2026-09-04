@@ -1,4 +1,5 @@
-"""Linking an Income to a Recurring Income — issue #61, through the HTTP seam.
+"""Linking an Income — or a Transfer from a Contact Wallet — to a Recurring
+Income — issues #61, ADR-0027, through the HTTP seam.
 
 The mirror of the Recurring Cost link (issue #57, ADR-0011): an Income may
 carry an optional Recurring Income link that pins exactly one Occurrence —
@@ -6,10 +7,12 @@ the oldest Unpaid one at link time (future Occurrences included when nothing
 earlier is Unpaid — receiving ahead). The pin is stored, never recomputed:
 later edits to the Transaction's date don't reassign it. Unlinking or
 deleting the linked Income frees the Occurrence; deleting the Recurring
-Income severs the link (the Income survives as an ordinary one). Expense and
-Transfer never carry the link; a Transaction is one type, so at most one
-link per Transaction. The recurring-incomes list exposes the next Unpaid
-Occurrence date per income — what the form's picker shows.
+Income severs the link (the Income survives as an ordinary one). Expense
+never carries the link; a Transfer carries it only when its source is a
+Contact Wallet and its destination is not (ADR-0027: money in from a tracked
+person); a Transaction is one type, so at most one link per Transaction. The
+recurring-incomes list exposes the next Unpaid Occurrence date per income —
+what the form's picker shows.
 
 Hand-worked expected dates use a far-future start date (2030-03-01, monthly),
 so the Occurrence sequence is stable regardless of when the suite runs.
@@ -312,7 +315,9 @@ async def test_deleting_a_recurring_income_severs_links(client: AsyncClient) -> 
     assert response.status_code == 403
 
 
-async def test_expense_and_transfer_reject_a_link(client: AsyncClient) -> None:
+async def test_expense_and_wrong_direction_transfer_reject_a_link(
+    client: AsyncClient,
+) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Reject Link Wallet")
     contact_id = await _create_wallet(client, token, "Inc Reject Link Contact", "contact")
@@ -331,6 +336,9 @@ async def test_expense_and_transfer_reject_a_link(client: AsyncClient) -> None:
     )
     assert expense.status_code == 422
 
+    # A Transfer to a Contact Wallet is the cost direction (ADR-0027): it
+    # may carry a Recurring Cost, never a Recurring Income. Only a Transfer
+    # FROM a Contact Wallet qualifies for the income link — exercised below.
     transfer = await client.post(
         "/transactions",
         json={
@@ -346,7 +354,7 @@ async def test_expense_and_transfer_reject_a_link(client: AsyncClient) -> None:
     assert transfer.status_code == 422
 
 
-async def test_editing_rejects_a_link_on_expense_and_transfer(
+async def test_editing_rejects_a_link_on_expense_and_wrong_direction_transfer(
     client: AsyncClient,
 ) -> None:
     token = await _login(client)
@@ -366,6 +374,8 @@ async def test_editing_rejects_a_link_on_expense_and_transfer(
     )
     assert expense_patch.status_code == 422
 
+    # The Transfer to a Contact Wallet is the cost direction: the income
+    # link is rejected on it, by edit as by create.
     transfer = await client.post(
         "/transactions",
         json={
@@ -475,3 +485,349 @@ async def test_the_pin_survives_income_definition_edits(client: AsyncClient) -> 
     body = next(item for item in items if item["id"] == linked["id"])
     assert body["recurring_income_id"] == income_id
     assert body["occurrence_date"] == "2030-03-01"
+
+
+# --- Transfer-from-a-Contact links (ADR-0027) ------------------------------
+
+async def _create_linked_transfer_from_contact(
+    client: AsyncClient,
+    token: str,
+    contact_id: int,
+    wallet_id: int,
+    income_id: int,
+    *,
+    amount: str = "300.00",
+    date: str = "2030-03-05",
+) -> dict:
+    """A Transfer Contact Wallet → own Wallet linked to `income_id`
+    (ADR-0027): money in from a tracked person is received like a linked
+    Income, asserting the create succeeded."""
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": amount,
+            "date": date,
+            "source_wallet_id": contact_id,
+            "destination_wallet_id": wallet_id,
+            "recurring_income_id": income_id,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+async def test_transfer_from_a_contact_pays_the_oldest_unpaid_occurrence(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Checking")
+    contact_id = await _create_wallet(client, token, "Inc Chiara", "contact")
+    income_id = await _create_income(client, token, name="Chiara's 300")
+
+    # The reporter's live scenario: Chiara's monthly 300 € is recorded as a
+    # Transfer Chiara → Checking with the link, so each Occurrence can be
+    # marked Paid. Each new link pays the oldest Unpaid Occurrence: the
+    # sequence is consumed in order, 2030-03-01, 2030-04-01, 2030-05-01.
+    first = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+    assert first["type"] == "transfer"
+    assert first["recurring_income_id"] == income_id
+    assert first["occurrence_date"] == "2030-03-01"
+    second = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id, date="2030-04-05"
+    )
+    assert second["occurrence_date"] == "2030-04-01"
+    third = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id, date="2030-05-05"
+    )
+    assert third["occurrence_date"] == "2030-05-01"
+
+
+async def test_transfer_link_reads_and_next_unpaid_flow_without_special_casing(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Read Transfer Wallet")
+    contact_id = await _create_wallet(client, token, "Inc Read Transfer Contact", "contact")
+    income_id = await _create_income(client, token, name="Read Transfer Salary")
+    created = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+
+    async def picker_date() -> str:
+        incomes = (await client.get("/recurring-incomes", headers=_auth(token))).json()
+        return next(
+            income["next_unpaid_occurrence_date"]
+            for income in incomes
+            if income["id"] == income_id
+        )
+
+    # The ledger row carries the pin like any linked Transaction...
+    items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
+    body = next(item for item in items if item["id"] == created["id"])
+    assert body["type"] == "transfer"
+    assert body["recurring_income_id"] == income_id
+    assert body["occurrence_date"] == "2030-03-01"
+
+    # ...the definition's ledger filter/jump finds it (issue #86)...
+    filtered = await client.get(
+        "/transactions", params={"recurring_income_id": income_id}, headers=_auth(token)
+    )
+    assert [row["id"] for row in filtered.json()["items"]] == [created["id"]]
+
+    # ...and the paid set advances: the picker's next Unpaid moves on.
+    assert await picker_date() == "2030-04-01"
+
+
+async def test_editing_the_transfer_date_does_not_reassign_the_pin(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Transfer Pin Wallet")
+    contact_id = await _create_wallet(client, token, "Inc Transfer Pin Contact", "contact")
+    income_id = await _create_income(client, token, name="Transfer Pin Salary")
+    first = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+
+    # A later date edit keeps the pin: the Transfer still covers the
+    # 2030-03-01 Occurrence, and a new link pays the next one.
+    response = await client.patch(
+        f"/transactions/{first['id']}",
+        json={"date": "2030-06-10"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    assert response.json()["occurrence_date"] == "2030-03-01"
+    assert (
+        await _create_linked_transfer_from_contact(
+            client, token, contact_id, wallet_id, income_id, date="2030-06-12"
+        )
+    )["occurrence_date"] == "2030-04-01"
+
+
+async def test_unlinking_a_transfer_frees_the_occurrence(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Transfer Unlink Wallet")
+    contact_id = await _create_wallet(client, token, "Inc Transfer Unlink Contact", "contact")
+    income_id = await _create_income(client, token, name="Transfer Unlink Salary")
+    first = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+    await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+
+    unlinked = await client.patch(
+        f"/transactions/{first['id']}",
+        json={"recurring_income_id": None},
+        headers=_auth(token),
+    )
+    assert unlinked.status_code == 200
+    assert unlinked.json()["recurring_income_id"] is None
+    assert unlinked.json()["occurrence_date"] is None
+
+    # The freed Occurrence is the oldest Unpaid again: a new link pays it.
+    assert (
+        await _create_linked_transfer_from_contact(
+            client, token, contact_id, wallet_id, income_id
+        )
+    )["occurrence_date"] == "2030-03-01"
+
+
+async def test_deleting_a_linked_transfer_frees_the_occurrence(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Transfer Delete Wallet")
+    contact_id = await _create_wallet(client, token, "Inc Transfer Delete Contact", "contact")
+    income_id = await _create_income(client, token, name="Transfer Delete Salary")
+    first = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+    await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+
+    response = await client.delete(
+        f"/transactions/{first['id']}", headers=_auth(token)
+    )
+    assert response.status_code == 200
+
+    assert (
+        await _create_linked_transfer_from_contact(
+            client, token, contact_id, wallet_id, income_id
+        )
+    )["occurrence_date"] == "2030-03-01"
+
+
+async def test_deleting_a_recurring_income_severs_a_transfer_link(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Sever Transfer Wallet")
+    contact_id = await _create_wallet(client, token, "Inc Sever Transfer Contact", "contact")
+    income_id = await _create_income(client, token, name="Sever Transfer Salary")
+    linked = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+
+    response = await client.delete(
+        f"/recurring-incomes/{income_id}", headers=_auth(token)
+    )
+    assert response.status_code == 204
+
+    # The Transfer survives as an ordinary one: the link is severed.
+    items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
+    body = next(item for item in items if item["id"] == linked["id"])
+    assert body["recurring_income_id"] is None
+    assert body["occurrence_date"] is None
+
+
+async def test_a_skipped_occurrence_is_never_pinned_by_a_transfer_link(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Transfer Skip Wallet")
+    contact_id = await _create_wallet(client, token, "Inc Transfer Skip Contact", "contact")
+    income_id = await _create_income(client, token, name="Transfer Skip Salary")
+
+    # The user excuses 2030-03-01 (ADR-0016): the link walk steps over it.
+    skipped = await client.put(
+        f"/recurring-incomes/{income_id}/occurrences/2030-03-01",
+        json={"skipped": True},
+        headers=_auth(token),
+    )
+    assert skipped.status_code == 200
+
+    # The linked Transfer pays the next Unpaid Occurrence instead — a
+    # Skipped one is never paid; un-skipping comes first.
+    linked = await _create_linked_transfer_from_contact(
+        client, token, contact_id, wallet_id, income_id
+    )
+    assert linked["occurrence_date"] == "2030-04-01"
+
+
+async def test_transfer_income_link_rules_reject_non_qualifying_pairs(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Rule Wallet")
+    other_id = await _create_wallet(client, token, "Inc Rule Other")
+    contact_id = await _create_wallet(client, token, "Inc Rule Contact", "contact")
+    other_contact_id = await _create_wallet(
+        client, token, "Inc Rule Other Contact", "contact"
+    )
+    income_id = await _create_income(client, token, name="Rule Salary")
+
+    # Own↔own, Contact↔Contact, and the wrong direction (money out to a
+    # Contact Wallet would be a Recurring Cost) never qualify (ADR-0027).
+    for source_id, destination_id, message in (
+        (wallet_id, other_id, "source is a Contact Wallet"),
+        (contact_id, other_contact_id, "between two Contact Wallets"),
+        (wallet_id, contact_id, "source is a Contact Wallet"),
+    ):
+        response = await client.post(
+            "/transactions",
+            json={
+                "type": "transfer",
+                "amount": "300.00",
+                "date": "2030-03-05",
+                "source_wallet_id": source_id,
+                "destination_wallet_id": destination_id,
+                "recurring_income_id": income_id,
+            },
+            headers=_auth(token),
+        )
+        assert response.status_code == 422, (source_id, destination_id)
+        assert message in response.json()["detail"], response.json()["detail"]
+
+
+async def test_editing_an_income_link_onto_a_transfer_follows_the_pair_rule(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Inc Edit Rule Wallet")
+    other_id = await _create_wallet(client, token, "Inc Edit Rule Other")
+    contact_id = await _create_wallet(client, token, "Inc Edit Rule Contact", "contact")
+    income_id = await _create_income(client, token, name="Edit Rule Salary")
+
+    # A plain Own↔own Transfer: setting the link is rejected with a rule
+    # error naming the problem — never silently severed.
+    plain = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "300.00",
+            "date": "2030-03-05",
+            "source_wallet_id": wallet_id,
+            "destination_wallet_id": other_id,
+        },
+        headers=_auth(token),
+    )
+    assert plain.status_code == 201
+    rejected = await client.patch(
+        f"/transactions/{plain.json()['id']}",
+        json={"recurring_income_id": income_id},
+        headers=_auth(token),
+    )
+    assert rejected.status_code == 422
+    assert "source is a Contact Wallet" in rejected.json()["detail"]
+
+    # Unlinking in the same form succeeds: clearing an absent link is a
+    # no-op, and the edit goes through.
+    unlinked = await client.patch(
+        f"/transactions/{plain.json()['id']}",
+        json={"recurring_income_id": None},
+        headers=_auth(token),
+    )
+    assert unlinked.status_code == 200
+
+    # The same rejection rides a money-out (own → Contact) Transfer: its
+    # matching kind is a Recurring Cost, not a Recurring Income.
+    outgoing = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "300.00",
+            "date": "2030-03-05",
+            "source_wallet_id": wallet_id,
+            "destination_wallet_id": contact_id,
+        },
+        headers=_auth(token),
+    )
+    assert outgoing.status_code == 201
+    wrong_direction = await client.patch(
+        f"/transactions/{outgoing.json()['id']}",
+        json={"recurring_income_id": income_id},
+        headers=_auth(token),
+    )
+    assert wrong_direction.status_code == 422
+
+    # And the matching edit lands: a plain Transfer from a Contact Wallet
+    # can take the income link on a later edit, pinning the oldest Unpaid
+    # Occurrence at that moment.
+    qualifying = await client.post(
+        "/transactions",
+        json={
+            "type": "transfer",
+            "amount": "300.00",
+            "date": "2030-03-05",
+            "source_wallet_id": contact_id,
+            "destination_wallet_id": wallet_id,
+        },
+        headers=_auth(token),
+    )
+    assert qualifying.status_code == 201
+    linked = await client.patch(
+        f"/transactions/{qualifying.json()['id']}",
+        json={"recurring_income_id": income_id},
+        headers=_auth(token),
+    )
+    assert linked.status_code == 200
+    assert linked.json()["occurrence_date"] == "2030-03-01"

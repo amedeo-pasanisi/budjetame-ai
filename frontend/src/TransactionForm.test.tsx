@@ -65,6 +65,33 @@ const frozenWallet: Wallet = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+const contactWallet: Wallet = {
+  id: 3,
+  name: 'Chiara',
+  type: 'contact',
+  balance: '0.00',
+  frozen: false,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
+const otherContactWallet: Wallet = {
+  id: 4,
+  name: 'Marco',
+  type: 'contact',
+  balance: '0.00',
+  frozen: false,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
+const checkingWallet: Wallet = {
+  id: 5,
+  name: 'Checking',
+  type: 'checking',
+  balance: '200.00',
+  frozen: false,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 const categories: Category[] = []
 
 const recurringCosts: RecurringCost[] = [
@@ -384,7 +411,8 @@ describe('TransactionForm recurring-cost link (issue #57)', () => {
       Array.from(picker.querySelectorAll('option')).map((option) => option.textContent),
     ).toEqual(['None', 'Rent', 'Insurance', '＋ Add recurring cost…'])
 
-    // Income and Transfer never carry a link: the picker hides.
+    // Income never carries it; a Transfer shows it only when the chosen
+    // pair qualifies (ADR-0027) — with only an own Wallet here, it hides.
     fireEvent.click(screen.getByRole('button', { name: 'Income' }))
     expect(screen.queryByLabelText('Recurring Cost')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
@@ -488,7 +516,9 @@ describe('TransactionForm recurring-income link (issue #61)', () => {
     // Expense is the default type: the income picker is hidden.
     expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
 
-    // Income mode shows the picker with every income; Transfer hides it.
+    // Income mode shows the picker with every income; a Transfer shows it
+    // only when the pair qualifies (ADR-0027) — with only an own Wallet
+    // here, it hides. Expense never carries it either.
     fireEvent.click(screen.getByRole('button', { name: 'Income' }))
     const picker = screen.getByLabelText('Recurring Income')
     expect(
@@ -497,7 +527,6 @@ describe('TransactionForm recurring-income link (issue #61)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
     expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
-    // Expense never carries it either.
     fireEvent.click(screen.getByRole('button', { name: 'Expense' }))
     expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
   })
@@ -583,6 +612,170 @@ describe('TransactionForm recurring-income link (issue #61)', () => {
       '',
       7,
       expect.objectContaining({ recurringIncomeId: 2 }),
+    )
+  })
+})
+
+describe('TransactionForm transfer recurring link (ADR-0027)', () => {
+  const linkedCostTransfer: Transaction = {
+    ...baseTransaction,
+    type: 'transfer',
+    wallet_id: null,
+    category_id: null,
+    source_wallet_id: 1,
+    destination_wallet_id: 3,
+    recurring_cost_id: 1,
+    occurrence_date: '2030-02-15',
+  }
+
+  it('money out to a Contact Wallet offers Recurring Costs; money in from one offers Recurring Incomes', () => {
+    renderForm(null, undefined, undefined, [wallet, contactWallet])
+
+    // The default pair is Cash → Chiara: a Transfer to a Contact Wallet
+    // qualifies for the Recurring Cost link (ADR-0027).
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    const costPicker = screen.getByLabelText('Recurring Cost')
+    expect(
+      Array.from(costPicker.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['None', 'Rent', 'Insurance', '＋ Add recurring cost…'])
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+
+    // Flipping the pair to Chiara → Cash (money in from a Contact Wallet)
+    // swaps the offered kind: Recurring Income replaces Recurring Cost.
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '3' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '1' } })
+    const incomePicker = screen.getByLabelText('Recurring Income')
+    expect(
+      Array.from(incomePicker.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['None', 'Salary', 'Rent from tenant', '＋ Add recurring income…'])
+    expect(screen.queryByLabelText('Recurring Cost')).not.toBeInTheDocument()
+  })
+
+  it('Own↔own and Contact↔Contact pairs never offer a picker', () => {
+    const first = renderForm(null, undefined, undefined, [wallet, checkingWallet])
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    expect(screen.queryByLabelText('Recurring Cost')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+    first.unmount()
+
+    const second = renderForm(null, undefined, undefined, [
+      contactWallet,
+      otherContactWallet,
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    expect(screen.queryByLabelText('Recurring Cost')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+    second.unmount()
+  })
+
+  it('create submits the cost link on a Transfer to the Contact Wallet, with the income side null', async () => {
+    renderForm(null, undefined, undefined, [wallet, contactWallet])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '300.00' } })
+    fireEvent.change(screen.getByLabelText('Recurring Cost'), {
+      target: { value: '1' },
+    })
+    expect(screen.getByText('Pays the occurrence of 2030-03-01.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({
+        type: 'transfer',
+        recurringCostId: 1,
+        recurringIncomeId: null,
+      }),
+    )
+  })
+
+  it('create submits the income link on a Transfer from the Contact Wallet, with the cost side null', async () => {
+    renderForm(null, undefined, undefined, [contactWallet, wallet])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '300.00' } })
+    fireEvent.change(screen.getByLabelText('Recurring Income'), {
+      target: { value: '1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({
+        type: 'transfer',
+        recurringCostId: null,
+        recurringIncomeId: 1,
+      }),
+    )
+  })
+
+  it('a link picked for a pair that no longer qualifies is never sent', async () => {
+    renderForm(null, undefined, undefined, [
+      wallet,
+      checkingWallet,
+      frozenWallet,
+      contactWallet,
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    // Chiara → Cash is money in from a Contact Wallet: the Recurring
+    // Income picker appears and takes a draft.
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '3' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Recurring Income'), {
+      target: { value: '2' },
+    })
+    // Flipping the legs to an Own↔own pair (Cash → Checking) hides the
+    // picker: the stale draft must not ride along to the API, where the
+    // backend would reject the write.
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '5' } })
+    expect(screen.queryByLabelText('Recurring Income')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({
+        type: 'transfer',
+        recurringCostId: null,
+        recurringIncomeId: null,
+      }),
+    )
+  })
+
+  it('editing a linked Transfer shows its pinned Occurrence and keeps untouched links off the PATCH', async () => {
+    renderForm(linkedCostTransfer, undefined, undefined, [wallet, frozenWallet, contactWallet])
+
+    expect(screen.getByLabelText('Recurring Cost')).toHaveValue('1')
+    expect(screen.getByText('Pays the occurrence of 2030-02-15.')).toBeInTheDocument()
+    expect(screen.queryByText('Pays the occurrence of 2030-03-01.')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.not.objectContaining({ recurringCostId: expect.anything() }),
+    )
+  })
+
+  it('unlinking a Transfer on edit sends recurringCostId: null, freeing the Occurrence', async () => {
+    renderForm(linkedCostTransfer, undefined, undefined, [wallet, frozenWallet, contactWallet])
+
+    fireEvent.change(screen.getByLabelText('Recurring Cost'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(updateTransactionMock).toHaveBeenCalled())
+    expect(updateTransactionMock).toHaveBeenCalledWith(
+      '',
+      7,
+      expect.objectContaining({ recurringCostId: null }),
     )
   })
 })

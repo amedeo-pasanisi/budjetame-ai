@@ -10,8 +10,9 @@ unset) — an Occurrence's due date is its own date, the due-date override is
 gone (ADR-0024).
 Occurrences and the next due date are derived, never stored — the pure
 recurrence module (app.recurrence) owns that math, reused unchanged.
-Deleting a Recurring Income is a hard delete (issue #60); linked Incomes
-(issue #61) are severed by the FK's ON DELETE SET NULL and the definition's
+Deleting a Recurring Income is a hard delete (issue #60); linked
+Transactions (issue #61, ADR-0027: an Income, or a Transfer from a Contact
+Wallet) are severed by the FK's ON DELETE SET NULL and the definition's
 skips cascade away (ADR-0016). The paid state also
 lives here: `paid_occurrence_dates` is the set of Occurrences the income's
 links cover and `oldest_unpaid_occurrence` the one a new link pays (the
@@ -321,8 +322,9 @@ def next_due_date_for(session: Session, income: RecurringIncome) -> date:
 def paid_occurrence_dates(
     session: Session, income_id: int, *, exclude_transaction_id: int | None = None
 ) -> set[date]:
-    """The Occurrence dates this income's linked Incomes cover (issue #61) —
-    the paid set, mirroring the cost side. `exclude_transaction_id` drops one
+    """The Occurrence dates this income's linked Transactions cover (issues
+    #61, ADR-0027 — an Income or a Transfer from a Contact Wallet) — the
+    paid set, mirroring the cost side. `exclude_transaction_id` drops one
     link's own pin (the Transaction being relinked judges itself as not yet
     paid, so it can re-pin the very Occurrence it already covers)."""
     stmt = select(Transaction.occurrence_date).where(
@@ -339,7 +341,7 @@ def paid_occurrence_dates(
 def backlog_count_for(session: Session, income: RecurringIncome) -> int:
     """The income's Backlog (issue #62): Unpaid Occurrences whose due date
     is today or earlier in Europe/Rome — the "N unpaid" badge. Unpaid means
-    its own date is not covered by a linked Income and its period is not
+    its own date is not covered by a linked Transaction and its period is not
     skipped: the pins are stored (issue #61) and the skips are stored
     (ADR-0016), so editing the interval or start date reshapes only the
     derived future — an Occurrence a link covers or the user excused is
@@ -365,7 +367,7 @@ def oldest_unpaid_occurrence(
 ) -> date:
     """The Occurrence a new link pays (issue #61): the oldest Unpaid one —
     the first of the derived sequence (from the start date plus the
-    interval) no linked Income covers and whose
+    interval) no linked Transaction covers and whose
     period is not skipped — a Skipped Occurrence is never paid (ADR-0016),
     un-skipping comes first. Future Occurrences are included when nothing
     earlier is Unpaid, so receiving early is natural; the sequence is

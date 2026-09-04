@@ -167,13 +167,15 @@ class Transaction(Base):
     place_id: Mapped[str | None] = mapped_column(Text)
     # The optional Recurring Cost link (issue #57, ADR-0010): an Expense may
     # pin one Recurring Cost, paying exactly one Occurrence — the oldest
-    # Unpaid one at link time. `occurrence_date` is the paid Occurrence's own
-    # date, stored and never recomputed: later edits to the Transaction's
+    # Unpaid one at link time. A Transfer whose destination is a Contact
+    # Wallet may carry the same link (ADR-0027): money leaving the user's own
+    # Wallet for a tracked person. `occurrence_date` is the paid Occurrence's
+    # own date, stored and never recomputed: later edits to the Transaction's
     # date don't reassign it, and editing the cost's definition leaves
     # already-Paid Occurrences as they were. Unlinking or deleting the
-    # Expense nulls both columns (freeing the Occurrence); deleting the
-    # Recurring Cost severs the link via ON DELETE SET NULL, the Expense
-    # surviving as an ordinary one. Income and Transfer never carry a link.
+    # Transaction nulls both columns (freeing the Occurrence); deleting the
+    # Recurring Cost severs the link via ON DELETE SET NULL, the Transaction
+    # surviving as an ordinary one. Income never carries a link.
     recurring_cost_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_costs.id", ondelete="SET NULL"), index=True
     )
@@ -184,12 +186,15 @@ class Transaction(Base):
     # The optional Recurring Income link (issue #61, ADR-0010/0011): the
     # mirror of the Recurring Cost link above — an Income may pin one
     # Recurring Income, paying exactly one Occurrence (the oldest Unpaid one
-    # at link time) via the same shared `occurrence_date` pin. The same
-    # invariants hold: the pin is stored, never recomputed; unlinking or
-    # deleting the Income nulls both columns (freeing the Occurrence);
-    # deleting the Recurring Income severs the link via ON DELETE SET NULL.
+    # at link time) via the same shared `occurrence_date` pin. A Transfer
+    # whose source is a Contact Wallet may carry the same link (ADR-0027):
+    # money arriving from a tracked person. The same invariants hold: the
+    # pin is stored, never recomputed; unlinking or deleting the Transaction
+    # nulls both columns (freeing the Occurrence); deleting the Recurring
+    # Income severs the link via ON DELETE SET NULL.
     # A Transaction is one type, so the two links never coexist: Expenses
-    # carry only recurring_cost_id, Incomes only recurring_income_id.
+    # carry only recurring_cost_id, Incomes only recurring_income_id, and a
+    # Transfer only the one its pair's direction allows (ADR-0027).
     recurring_income_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_incomes.id", ondelete="SET NULL"), index=True
     )
@@ -275,8 +280,9 @@ class RecurringCost(Base):
     for short months (app.recurrence). An Occurrence's due date is its own
     date — the due-date override is gone (ADR-0024). Every definition
     carries a start date: left empty at creation it is set to the creation
-    day. Deleting a Recurring Cost is a hard delete; linked Expenses (issue
-    #57) survive as ordinary Expenses via ON DELETE SET NULL.
+    day. Deleting a Recurring Cost is a hard delete; linked Expenses — and
+    linked Transfers to a Contact Wallet (ADR-0027) — survive as ordinary
+    Transactions via ON DELETE SET NULL.
     """
 
     __tablename__ = "recurring_costs"
@@ -316,7 +322,8 @@ class RecurringIncome(Base):
     The mirror of RecurringCost, deliberately not a generalization: the same
     field set and the same derived Occurrences, sharing the pure recurrence
     module (app.recurrence) unchanged. Deleting a Recurring Income is a hard
-    delete; linked Incomes (issue #61) survive as ordinary Incomes: the link
+    delete; linked Incomes — and linked Transfers from a Contact Wallet
+    (ADR-0027) — survive as ordinary Transactions: the link
     FK is ON DELETE SET NULL, mirroring the Recurring Cost sever (issue #57).
     """
 

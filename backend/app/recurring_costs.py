@@ -39,9 +39,10 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
     """The API view of a Recurring Cost, with the derived state: the next
     due date (ADR-0024: an Occurrence's due date is its own date — the pure
     recurrence module owns the math), the next Unpaid Occurrence date
-    (issue #57): the
-    one a new linked Expense would pay, what the transaction form's picker
-    shows — and the Backlog (issue #58): Unpaid Occurrences due today or
+    (issue #57, ADR-0027): the
+    one a new linked Expense or Transfer-to-a-Contact would pay, what the
+    transaction form's picker shows — and the Backlog (issue #58): Unpaid
+    Occurrences due today or
     earlier in Europe/Rome. Skip controls live per Occurrence on the
     Occurrences read (ADR-0026), not on the definition."""
     backlog = recurring_service.backlog_count_for(session, cost)

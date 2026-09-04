@@ -12,7 +12,10 @@ Expense may optionally link one Recurring Cost (issue #57) and an Income may Rec
 Income (issue #61), each paying exactly one Occurrence — the oldest Unpaid
 one at link time, pinned then and never reassigned; because a Transaction is
 one type, the two links can never coexist (at most one link per Transaction);
-Transfer never carries a link (ADR-0010/0011).
+a Transfer never carries a link (ADR-0010/0011) — except one crossing exactly one own
+(non-Contact) Wallet and one Contact Wallet, which may carry the matching-direction link
+(ADR-0027): a Transfer whose source is a Contact Wallet may pin a Recurring Income, a
+Transfer whose destination is a Contact Wallet may pin a Recurring Cost.
 """
 
 from decimal import Decimal
@@ -89,6 +92,54 @@ def _ensure_transaction_wallets_writable(
     for wallet in wallets.values():
         _ensure_wallet_writable(wallet)
 
+def _transfer_leg_wallets(
+    session: Session, transaction: Transaction
+) -> tuple[Wallet, Wallet]:
+    """The Source and Destination Wallet rows of a Transfer row. Wallets are
+    never hard-deleted (ADR-0002) and every write validates ownership first,
+    so both always exist."""
+    source_id, destination_id = _transfer_legs(transaction)
+    source = session.get(Wallet, source_id)
+    destination = session.get(Wallet, destination_id)
+    assert source is not None and destination is not None
+    return source, destination
+
+
+def _check_transfer_cost_link_legs(source: Wallet, destination: Wallet) -> None:
+    """ADR-0027: a Transfer may carry a Recurring Cost link only when its
+    destination is a Contact Wallet and its source is a non-Contact Wallet —
+    money leaving the user's own Wallet for a tracked person, the mirror of a
+    linked Expense. Own-to-own and Contact-to-Contact Transfers never
+    qualify. The error names the failing condition: a link on a pair that
+    does not qualify is rejected, never silently severed."""
+    if destination.type != WalletType.CONTACT.value:
+        raise TransactionRuleError(
+            "A Transfer may carry a Recurring Cost link only when its "
+            "destination is a Contact Wallet"
+        )
+    if source.type == WalletType.CONTACT.value:
+        raise TransactionRuleError(
+            "Transfers between two Contact Wallets never carry a recurring link"
+        )
+
+
+def _check_transfer_income_link_legs(source: Wallet, destination: Wallet) -> None:
+    """ADR-0027 mirror: a Transfer may carry a Recurring Income link only
+    when its source is a Contact Wallet and its destination is a non-Contact
+    Wallet — money arriving from a tracked person, the mirror of a linked
+    Income. Own-to-own and Contact-to-Contact Transfers never qualify; the
+    error names the failing condition."""
+    if source.type != WalletType.CONTACT.value:
+        raise TransactionRuleError(
+            "A Transfer may carry a Recurring Income link only when its "
+            "source is a Contact Wallet"
+        )
+    if destination.type == WalletType.CONTACT.value:
+        raise TransactionRuleError(
+            "Transfers between two Contact Wallets never carry a recurring link"
+        )
+
+
 def _check_category_matches(session: Session, account_id: int, category_id: int, type: str) -> None:
     category = owned_or_raise(session, Category, account_id, category_id)
     if category.type != type:
@@ -128,12 +179,6 @@ def _check_create_rules(
                 "Transfers use source and destination Wallets and never carry "
                 "a Category"
             )
-        if recurring_cost_id is not None:
-            raise TransactionRuleError("Transfers never carry a Recurring Cost link")
-        if recurring_income_id is not None:
-            raise TransactionRuleError(
-                "Transfers never carry a Recurring Income link"
-            )
         if source_wallet_id is None or destination_wallet_id is None:
             raise TransactionRuleError("Transfers need source and destination Wallets")
         source = owned_or_raise(session, Wallet, account_id, source_wallet_id)
@@ -144,6 +189,20 @@ def _check_create_rules(
             )
         for wallet in (source, destination):
             _ensure_wallet_writable(wallet)
+        # The pair-and-direction rule (ADR-0027): a Transfer may carry a link
+        # only when its legs are exactly one own Wallet and one Contact
+        # Wallet, and the direction picks the kind — source = Contact Wallet
+        # links a Recurring Income, destination = Contact Wallet links a
+        # Recurring Cost. The two checks are mutually exclusive, so at most
+        # one link ever rides a Transfer.
+        if recurring_cost_id is not None:
+            _check_transfer_cost_link_legs(source, destination)
+            # Foreign or absent data is indistinguishable: owned_or_raise
+            # raises NotOwned, mapped to 403 by the HTTP layer (ADR-0003).
+            owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
+        if recurring_income_id is not None:
+            _check_transfer_income_link_legs(source, destination)
+            owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
         return source, destination
     if wallet_id is None:
         raise TransactionRuleError("wallet_id is required for Expense and Income")
@@ -249,11 +308,12 @@ def create_transaction(
         recurring_cost_id=recurring_cost_id,
         recurring_income_id=recurring_income_id,
     )
-    # The link pays the oldest Unpaid Occurrence at link time (issues #57 and
-    # #61). The pin is stored on the row — never recomputed by later edits —
-    # and the partial unique index on (recurring_income_id, occurrence_date)
-    # (mirroring the cost index) guards the "one payer per Occurrence"
-    # invariant against a concurrent double-link race.
+    # The link pays the oldest Unpaid Occurrence at link time (issues #57
+    # and #61) — on a Transfer too, when its pair and direction qualify
+    # (ADR-0027). The pin is stored on the row — never recomputed by later
+    # edits — and the partial unique index on (recurring_income_id,
+    # occurrence_date) (mirroring the cost index) guards the "one payer per
+    # Occurrence" invariant against a concurrent double-link race.
     occurrence_date = None
     if recurring_cost_id is not None:
         cost = session.get(RecurringCost, recurring_cost_id)
@@ -279,6 +339,11 @@ def create_transaction(
             date=from_rome_day(date),
             source_wallet_id=source_wallet_id,
             destination_wallet_id=destination_wallet_id,
+            # A qualifying Transfer carries its link and pin exactly like an
+            # Expense or Income does (ADR-0027).
+            recurring_cost_id=recurring_cost_id,
+            recurring_income_id=recurring_income_id,
+            occurrence_date=occurrence_date,
             description=description,
             latitude=latitude,
             longitude=longitude,
@@ -335,11 +400,44 @@ def update_transaction(
         transaction.category_id = category_id
     if "recurring_cost_id" in changes:
         recurring_cost_id = changes["recurring_cost_id"]
-        if transaction.type != TransactionType.EXPENSE.value:
+        if transaction.type == TransactionType.TRANSFER.value:
+            # ADR-0027: a Transfer may carry the Recurring Cost link only
+            # when its pair qualifies — destination a Contact Wallet, source
+            # not. Unlinking is always allowed (the user unlinks in the same
+            # edit and it succeeds); a link-set on a pair that does not
+            # qualify is rejected, never silently severed. The legs are
+            # immutable on edit, so the stored legs are the pair the write
+            # leaves in place.
+            if recurring_cost_id is None:
+                if transaction.recurring_cost_id is not None:
+                    # Unlinking frees the Occurrence: the row's pin is
+                    # cleared. The pin column is shared, so the guard keeps
+                    # an income link's pin intact if one ever rode along.
+                    transaction.recurring_cost_id = None
+                    if transaction.recurring_income_id is None:
+                        transaction.occurrence_date = None
+            else:
+                source, destination = _transfer_leg_wallets(session, transaction)
+                _check_transfer_cost_link_legs(source, destination)
+                # Linking (or relinking) pays the oldest Unpaid Occurrence
+                # right now — the Transaction's own pin excluded, so it can
+                # re-pin the very Occurrence it already covers. The
+                # assignment is pinned at this moment: a later date edit
+                # never reassigns it (issue #57).
+                owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
+                cost = session.get(RecurringCost, recurring_cost_id)
+                assert cost is not None  # owned_or_raise just fetched it
+                transaction.recurring_cost_id = recurring_cost_id
+                transaction.occurrence_date = (
+                    recurring_service.oldest_unpaid_occurrence(
+                        session, cost, exclude_transaction_id=transaction.id
+                    )
+                )
+        elif transaction.type != TransactionType.EXPENSE.value:
             raise TransactionRuleError(
                 "Only Expenses can be linked to a Recurring Cost"
             )
-        if recurring_cost_id is None:
+        elif recurring_cost_id is None:
             # Unlinking frees the Occurrence: the row's pin is cleared.
             transaction.recurring_cost_id = None
             transaction.occurrence_date = None
@@ -357,11 +455,42 @@ def update_transaction(
             )
     if "recurring_income_id" in changes:
         recurring_income_id = changes["recurring_income_id"]
-        if transaction.type != TransactionType.INCOME.value:
+        if transaction.type == TransactionType.TRANSFER.value:
+            # ADR-0027 mirror: a Transfer may carry the Recurring Income link
+            # only when its pair qualifies — source a Contact Wallet,
+            # destination not. Same edit contract as the cost link above:
+            # unlinking always succeeds, a link-set on a pair that does not
+            # qualify is rejected.
+            if recurring_income_id is None:
+                if transaction.recurring_income_id is not None:
+                    # Unlinking frees the Occurrence: the row's pin is
+                    # cleared, guarded against a cost link's pin the same
+                    # way as the cost branch above.
+                    transaction.recurring_income_id = None
+                    if transaction.recurring_cost_id is None:
+                        transaction.occurrence_date = None
+            else:
+                source, destination = _transfer_leg_wallets(session, transaction)
+                _check_transfer_income_link_legs(source, destination)
+                # Linking (or relinking) pays the oldest Unpaid Occurrence
+                # right now — the Transaction's own pin excluded, so it can
+                # re-pin the very Occurrence it already covers. The
+                # assignment is pinned at this moment: a later date edit
+                # never reassigns it (issue #61).
+                owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
+                income = session.get(RecurringIncome, recurring_income_id)
+                assert income is not None  # owned_or_raise just fetched it
+                transaction.recurring_income_id = recurring_income_id
+                transaction.occurrence_date = (
+                    income_recurring_service.oldest_unpaid_occurrence(
+                        session, income, exclude_transaction_id=transaction.id
+                    )
+                )
+        elif transaction.type != TransactionType.INCOME.value:
             raise TransactionRuleError(
                 "Only Incomes can be linked to a Recurring Income"
             )
-        if recurring_income_id is None:
+        elif recurring_income_id is None:
             # Unlinking frees the Occurrence: the row's pin is cleared.
             transaction.recurring_income_id = None
             transaction.occurrence_date = None

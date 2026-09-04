@@ -13,13 +13,15 @@ export type Transaction = {
   source_wallet_id: number | null
   destination_wallet_id: number | null
   category_id: number | null
-  // The optional Recurring Cost link (issue #57): an Expense pinning one
-  // cost, with the Occurrence (its own date) the link paid at link time —
-  // stored, never reassigned by later date edits. Both null when unlinked.
+  // The optional Recurring Cost link (issue #57, ADR-0027): an Expense —
+  // or a Transfer to a Contact Wallet — pinning one cost, with the
+  // Occurrence (its own date) the link paid at link time — stored, never
+  // reassigned by later date edits. Both null when unlinked.
   recurring_cost_id: number | null
-  // The optional Recurring Income link (issue #61): an Income pinning one
-  // Recurring Income, paying the same shared `occurrence_date` pin. A
-  // Transaction is one type, so the two links never coexist.
+  // The optional Recurring Income link (issue #61, ADR-0027): an Income —
+  // or a Transfer from a Contact Wallet — pinning one Recurring Income,
+  // paying the same shared `occurrence_date` pin. A Transaction is one
+  // type, so the two links never coexist.
   recurring_income_id: number | null
   occurrence_date: string | null
   description: string | null
@@ -41,10 +43,12 @@ export type TransactionInput =
       walletId: number
       categoryId: number | null
       // The optional Recurring Cost link (issue #57): Expenses only — the
-      // form sends null for Income, and Transfers never carry the field.
+      // form sends null for Income. A Transfer may carry it only toward a
+      // Contact Wallet (ADR-0027); the form offers it there.
       recurringCostId: number | null
       // The optional Recurring Income link (issue #61): Incomes only — the
-      // form sends null for Expense, and Transfers never carry the field.
+      // form sends null for Expense. A Transfer may carry it only from a
+      // Contact Wallet (ADR-0027); the form offers it there.
       recurringIncomeId: number | null
       description: string
       latitude: string | null
@@ -58,6 +62,13 @@ export type TransactionInput =
       date: string
       sourceWalletId: number
       destinationWalletId: number
+      // The matching-direction recurring link (ADR-0027): a Transfer may
+      // carry one exactly when its legs are one own Wallet and one Contact
+      // Wallet — from a Contact Wallet a Recurring Income (money-in), to a
+      // Contact Wallet a Recurring Cost (money-out); the form sends the
+      // other side null.
+      recurringCostId: number | null
+      recurringIncomeId: number | null
       description: string
       latitude: string | null
       longitude: string | null
