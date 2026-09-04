@@ -272,12 +272,11 @@ class RecurringCost(Base):
     """A definition of a cost expected to repeat at a fixed interval (ADR-0010).
 
     Occurrences are derived, never stored: start date + k×interval, clamped
-    for short months (app.recurrence). The optional due-date override — a
-    day-of-month for month intervals, a month+day for year intervals, never
-    for day/week intervals — shifts each Occurrence's due date within its
-    month/year. An unset start date defaults to the creation date. Deleting
-    a Recurring Cost is a hard delete; linked Expenses (issue #57) survive as
-    ordinary Expenses via ON DELETE SET NULL.
+    for short months (app.recurrence). An Occurrence's due date is its own
+    date — the due-date override is gone (ADR-0024). Every definition
+    carries a start date: left empty at creation it is set to the creation
+    day. Deleting a Recurring Cost is a hard delete; linked Expenses (issue
+    #57) survive as ordinary Expenses via ON DELETE SET NULL.
     """
 
     __tablename__ = "recurring_costs"
@@ -300,14 +299,11 @@ class RecurringCost(Base):
     # The interval: every N days, weeks, months, or years.
     interval_value: Mapped[int] = mapped_column(Integer)
     interval_unit: Mapped[str] = mapped_column(String(10))
-    # The user's chosen first-Occurrence day (Europe/Rome calendar day);
-    # null means "the creation date".
-    start_date: Mapped[date | None] = mapped_column(Date)
-    # The optional due-date override (ADR-0010): due_day alone for month
-    # intervals; due_day + due_month for year intervals; both null for
-    # day/week intervals. The service enforces the per-unit combination.
-    due_day: Mapped[int | None] = mapped_column(Integer)
-    due_month: Mapped[int | None] = mapped_column(Integer)
+    # The first-Occurrence day (Europe/Rome calendar day). Every definition
+    # always carries one: left empty at creation it is set to the creation
+    # day (ADR-0024); it can be changed, never unset. An Occurrence's due
+    # date is its own date — the due-date override is gone.
+    start_date: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -344,14 +340,11 @@ class RecurringIncome(Base):
     # The interval: every N days, weeks, months, or years.
     interval_value: Mapped[int] = mapped_column(Integer)
     interval_unit: Mapped[str] = mapped_column(String(10))
-    # The user's chosen first-Occurrence day (Europe/Rome calendar day);
-    # null means "the creation date".
-    start_date: Mapped[date | None] = mapped_column(Date)
-    # The optional due-date override (ADR-0010): due_day alone for month
-    # intervals; due_day + due_month for year intervals; both null for
-    # day/week intervals. The service enforces the per-unit combination.
-    due_day: Mapped[int | None] = mapped_column(Integer)
-    due_month: Mapped[int | None] = mapped_column(Integer)
+    # The first-Occurrence day (Europe/Rome calendar day). Every definition
+    # always carries one: left empty at creation it is set to the creation
+    # day (ADR-0024); it can be changed, never unset. An Occurrence's due
+    # date is its own date — the due-date override is gone.
+    start_date: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

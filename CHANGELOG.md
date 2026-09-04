@@ -5,6 +5,87 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.4.2] — 2026-09-04
+
+### Fixed
+
+- **Tapping the coloured bar itself shows the value chip** — the column's
+  tap target now paints above the bar, so a tap on the bar (or a
+  zero-month stub) lands on it and floats the chip, exactly like a tap
+  on the column around it; keyboard access and the no-focus-ring-on-tap
+  rule are unchanged (#97).
+
+## [v1.4.1] — 2026-09-03
+
+### Fixed
+
+- **No focus rectangle on trend-column taps** — tapping a column no longer
+  focuses the hit-target rect, so the browser's focus ring never appears
+  around the whole column and lingers; the tap still selects the bar
+  (darkened + value chip), and Tab + Enter/Space keep the keyboard ring
+  (#96).
+- **The trend chart's own horizontal scroll never switches tabs** — a
+  drag that starts on a wide (scrollable) chart now scrolls the columns
+  instead of counting as a tab swipe; a short range with nothing to
+  scroll still swipes tabs like anywhere else (#96).
+
+## [v1.4.0] — 2026-09-03
+
+### Changed
+
+- **Trend chart fills the card, even with few bars** — the plot's content
+  width is max(fixed geometry, the card's inner width): a short From/To
+  range now spreads its bars evenly across the whole card (bar widths
+  unchanged, the gaps grown symmetrically, gridlines spanning the whole
+  plot), while a wide range keeps the fixed layout and scrolls (#95).
+- **Tapped bars show a value chip** — tapping a column (the whole column
+  is the target) darkens the bar and floats a small chip just above it
+  with that month's exact amount alone ("€42.50"; zero months "€0.00" the
+  same way), clamped inside the chart's edges; tapping the same column
+  again hides it. The old "Month · €amount" readout line above the chart
+  is gone (#95).
+
+## [v1.3.0] — 2026-09-03
+
+### Changed
+
+- **Recurring definitions carry one date** — the optional Due day / Due
+  date override is gone (ADR-0024): an Occurrence's due date is its own
+  date, and the start date is the definition's only date. Left empty at
+  creation it becomes the creation day; afterwards it can be changed, never
+  unset — a definition can no longer silently snap back to its creation day.
+  Existing definitions that used an override migrate with their schedule
+  preserved: the start date is rewritten to the override's day, and paid and
+  skipped occurrences stay paid and skipped.
+- **Recurring forms speak plainly** — the interval row reads "Repeats every
+  N months" (the unit turns singular when N is 1), the start date is
+  explained as "The first occurrence. Leave empty to start today." when
+  creating, and editing requires the date.
+
+## [v1.2.0] — 2026-09-03
+
+### Added
+
+- **Ledger jump** — tapping a Wallet row or a Category row opens the
+  Transactions tab with the ledger pre-filtered to that Wallet or Category
+  (filter state replaced, search cleared). Wallet rows keep Edit and
+  Unfreeze as trailing buttons; frozen-wallet taps land on the read-only
+  ledger (#90, #93, #94).
+- **Place names** — transaction cards with a Place now read
+  `📍 <place name>` next to the pin instead of a bare pin; cards whose
+  location has coordinates only keep the bare pin (#91).
+
+### Changed
+
+- **Transactions tab chrome** — the redundant "All transactions" heading
+  is gone; the toolbar pairs the search box with a Filters toggle; active
+  filters appear as chips under the toolbar, each removable with its own
+  ✕, plus Clear all and Export; Import is a muted text link beside New
+  transaction; the Filters panel footer gained Clear all filters (#92).
+- **Toolbar polish** — the Filters toggle no longer counts active filters
+  (the chips already say it), the search bar gap matches the other tabs,
+  and Export is labeled "Export to Excel".
+
 ## [v1.1.1] — 2026-09-02
 
 ### Added

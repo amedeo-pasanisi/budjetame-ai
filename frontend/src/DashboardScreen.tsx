@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import {
   TOKEN_KEY,
@@ -17,6 +17,7 @@ import {
 } from './api'
 import { useDataVersion } from './api/dataVersion'
 import { todayInRome } from './transactions'
+import { chipLeftForBar, chipTopForBar, trendChartGeometry } from './trendChart'
 
 /** The Dashboard: Net Worth, the Budget card for the current month, the
  * reference month's category pies and its monthly trend over a user-picked
@@ -518,129 +519,241 @@ function TrendCard({
           {monthLabel(fromMonth)} and {monthLabel(toMonth)}.
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <TrendChart months={trend.data.months} kind={kind} />
-        </div>      )}
+        <TrendChart months={trend.data.months} kind={kind} />
+      )}
     </section>
   )
 }
 
-/** A dependency-free SVG bar chart: one bar per month, scaled to the
- * tallest, with a Y-axis (gridlines + € labels) so the euro magnitude is
+/** The trend chart's geometry and palette, mirrored from the Android
+ * app's TrendChart (bar widths, gaps, padding, and the indigo colors). */
+const BAR_WIDTH = 22
+const BAR_GAP = 12
+const LEFT_PAD = 30
+const TOP_PAD = 20
+const LABEL_HEIGHT = 16
+const CHART_HEIGHT = 150
+
+/** The tapped bar's value chip floats this high above the bar's top. */
+const CHIP_GAP = 4
+
+/** The Y axis gridlines at 0/¼/½/¾/1 of the tallest bar. */
+const GRIDLINE_FRACTIONS = [0, 0.25, 0.5, 0.75, 1]
+
+/**
+ * A dependency-free SVG bar chart: one bar per month, scaled to the
+ * tallest, with a Y axis (gridlines + € labels) so the euro magnitude is
  * readable at a glance (T12 AC: X months, Y totals). Wide ranges scroll
  * horizontally so every month stays readable.
  *
- * The bars carry no labels: an always-on amount above every column was
+ * The plot always fills the card's inner width (issue #95): the content
+ * width is max(fixed geometry, measured card width). A short range
+ * spreads its bars evenly across the full plot — bar widths unchanged,
+ * the gaps grown symmetrically, gridlines spanning the whole plot —
+ * while a wide range keeps the fixed geometry and scrolls, exactly as
+ * before. Drawing and the tap columns share one TrendChartGeometry, so
+ * the hit targets always move with the bars.
+ *
+ * The bars carry no always-on labels: an amount above every column was
  * wider than its column on a phone, so neighbouring labels collided. The
- * exact amount is read on demand — tap (or keyboard-activate) a column and
- * the readout above the chart shows the month and its total. */
+ * exact amount is read on demand (issue #95): tap (or keyboard-activate)
+ * a column — the whole column is the target — and a value chip floats
+ * just above that bar: the amount alone (zero months read "€0.00" the
+ * same way), its bottom CHIP_GAP above the bar's top and clamped inside
+ * the chart's edges by the pure rules in trendChart.ts (a
+ * near-full-height bar's chip never clips above the chart). Tapping the
+ * same column again hides it; the chip handles no pointers itself, so
+ * clicks pass through to the columns underneath.
+ */
 function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }) {
   const [selected, setSelected] = useState<number | null>(null)
+  // The card's measured inner width: the plot fills it when it is wider
+  // than the fixed geometry (issue #95). Null until the first measure —
+  // and forever in tests, which have no layout — so the chart then keeps
+  // the fixed geometry.
+  const [availableWidth, setAvailableWidth] = useState<number | null>(null)
+  const frameRef = useRef<HTMLDivElement | null>(null)
+  // The chip's own measured size: its placement rules (trendChart.ts)
+  // clamp it inside the chart using its real width and height.
+  const [chipSize, setChipSize] = useState<{ width: number; height: number } | null>(null)
+  const chipRef = useRef<HTMLParagraphElement | null>(null)
   const values = months.map((bucket) => Number.parseFloat(bucket.amount))
   const max = Math.max(...values, 1)
-  const barWidth = 22
-  const gap = 12
-  const leftPad = 30
-  const topPad = 20
-  const labelHeight = 16
-  const height = 150
-  const plotHeight = height - topPad - labelHeight
-  const plotWidth = months.length * (barWidth + gap)
-  const gridlines = [0, 0.25, 0.5, 0.75, 1]
-  const selectedBucket = selected !== null ? months[selected] : null
+  // The content width is max(fixed geometry, measured card width): a
+  // short range spreads its bars across the whole card, a wide one keeps
+  // the fixed geometry and scrolls horizontally.
+  const fixedWidth = LEFT_PAD + months.length * (BAR_WIDTH + BAR_GAP)
+  const contentWidth = Math.max(fixedWidth, availableWidth ?? 0)
+  const geometry = trendChartGeometry({
+    count: months.length,
+    barWidth: BAR_WIDTH,
+    barGap: BAR_GAP,
+    leftPad: LEFT_PAD,
+    contentWidth,
+  })
+  const plotHeight = CHART_HEIGHT - TOP_PAD - LABEL_HEIGHT
+  const selectedBucket =
+    selected !== null && selected < months.length ? months[selected] : null
+  const chipAmount = selectedBucket !== null ? formatEuros(selectedBucket.amount) : null
+
+  // Measure the scroll frame once laid out and again whenever it resizes
+  // (ResizeObserver; jsdom has no layout, so tests keep fixed geometry).
+  useLayoutEffect(() => {
+    const frame = frameRef.current
+    if (frame === null) return
+    const update = () =>
+      setAvailableWidth(frame.clientWidth > 0 ? frame.clientWidth : null)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(frame)
+    return () => observer.disconnect()
+  }, [])
+
+  // The chip positions itself from its measured size: measure whenever
+  // its content (the amount) renders or changes.
+  useLayoutEffect(() => {
+    const chip = chipRef.current
+    if (chip === null) return
+    setChipSize({ width: chip.offsetWidth, height: chip.offsetHeight })
+  }, [chipAmount])
+
+  // The value chip over the selected bar: its bottom floats CHIP_GAP
+  // above the bar's top, centered on the bar and clamped inside the
+  // chart's edges (a near-full-height bar's chip never clips above the
+  // chart). It handles no pointers — taps land on the columns under it.
+  let chip: ReactNode = null
+  if (selectedBucket !== null && selected !== null) {
+    const barHeight = (Number.parseFloat(selectedBucket.amount) / max) * plotHeight
+    const barTop = TOP_PAD + plotHeight - barHeight
+    const size = chipSize ?? { width: 0, height: 0 }
+    chip = (
+      <p
+        ref={chipRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute rounded-[3px] bg-indigo-700 px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-white"
+        style={{
+          top: chipTopForBar(barTop, size.height, CHIP_GAP),
+          left: chipLeftForBar(geometry.barCenter(selected), size.width, contentWidth),
+        }}
+      >
+        {chipAmount}
+      </p>
+    )
+  }
 
   return (
-    <>
-      {selectedBucket !== null && (
-        <p className="mb-2 text-sm font-medium text-slate-900" aria-live="polite">
-          {monthLabel(selectedBucket.month)} · {formatEuros(selectedBucket.amount)}
-        </p>
-      )}
-      <svg
-        viewBox={`0 0 ${leftPad + gap + plotWidth} ${height}`}
-        style={{ minWidth: `${leftPad + months.length * 40}px` }}
-        className="block"
-        role="img"
-        aria-label={`Monthly ${kind === 'expense' ? 'expenses' : 'incomes'} trend`}
-      >
-        {gridlines.map((frac) => {
-          const y = topPad + plotHeight * (1 - frac)
-          return (
-            <g key={frac}>
-              <line
-                x1={leftPad}
-                x2={leftPad + plotWidth}
-                y1={y}
-                y2={y}
-                className="stroke-slate-200"
-                strokeDasharray="3 3"
-              />
-              <text
-                x={leftPad - 4}
-                y={y + 3}
-                textAnchor="end"
-                className="fill-slate-400 text-[8px]"
-              >
-                {frac === 0 ? '0' : `€${Math.round(max * frac)}`}
-              </text>
-            </g>
-          )
-        })}
-        {months.map((bucket, index) => {
-          const value = Number.parseFloat(bucket.amount)
-          const barHeight = (value / max) * plotHeight
-          const x = leftPad + gap + index * (barWidth + gap)
-          const y = topPad + plotHeight - barHeight
-          return (
-            <g key={bucket.month}>
-              {/* The tap target is the whole column — the bar itself is only
-               * 22px wide — and it doubles as the keyboard access. */}
-              <rect
-                x={x}
-                y={topPad}
-                width={barWidth + gap}
-                height={plotHeight}
-                fill="transparent"
-                role="button"
-                tabIndex={0}
-                aria-label={`${monthLabel(bucket.month)}: ${formatEuros(bucket.amount)}`}
-                aria-pressed={selected === index}
-                className="cursor-pointer"
-                onClick={() => setSelected(selected === index ? null : index)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    setSelected(selected === index ? null : index)
+    <div ref={frameRef} className="mt-4 overflow-x-auto">
+      {/* The wrapper is as wide as the plot, so the chip's coordinates —
+       * the svg's content pixels — line up with it, and both scroll
+       * together when a wide range overflows the card. */}
+      <div className="relative" style={{ width: contentWidth }}>
+        <svg
+          viewBox={`0 0 ${contentWidth} ${CHART_HEIGHT}`}
+          width={contentWidth}
+          height={CHART_HEIGHT}
+          className="block"
+          role="img"
+          aria-label={`Monthly ${kind === 'expense' ? 'expenses' : 'incomes'} trend`}
+        >
+          {GRIDLINE_FRACTIONS.map((fraction) => {
+            const y = TOP_PAD + plotHeight * (1 - fraction)
+            return (
+              <g key={fraction}>
+                <line
+                  x1={LEFT_PAD}
+                  x2={contentWidth}
+                  y1={y}
+                  y2={y}
+                  className="stroke-slate-200"
+                  strokeDasharray="3 3"
+                />
+                <text
+                  x={LEFT_PAD - 4}
+                  y={y + 3}
+                  textAnchor="end"
+                  className="fill-slate-400 text-[8px]"
+                >
+                  {fraction === 0 ? '0' : `€${Math.round(max * fraction)}`}
+                </text>
+              </g>
+            )
+          })}
+          {months.map((bucket, index) => {
+            const value = Number.parseFloat(bucket.amount)
+            const barHeight = (value / max) * plotHeight
+            const x = geometry.barLeft(index)
+            const y = TOP_PAD + plotHeight - barHeight
+            return (
+              <g key={bucket.month}>
+                {/* The coloured bar, a zero month's light stub. The tap
+                 * target below is painted after it (topmost), so a finger
+                 * on the bar itself hits the target, never the bar. */}
+                <rect
+                  x={x}
+                  y={y}
+                  width={BAR_WIDTH}
+                  height={Math.max(barHeight, value > 0 ? 2 : 0)}
+                  rx={3}
+                  className={
+                    selected === index
+                      ? 'fill-indigo-700'
+                      : value > 0
+                        ? 'fill-indigo-600'
+                        : 'fill-slate-200'
                   }
-                }}
-              />
-              <rect
-                x={x}
-                y={y}
-                width={barWidth}
-                height={Math.max(barHeight, value > 0 ? 2 : 0)}
-                rx={3}
-                className={
-                  selected === index
-                    ? 'fill-indigo-700'
-                    : value > 0
-                      ? 'fill-indigo-600'
-                      : 'fill-slate-200'
-                }
-              />
-              <text
-                x={x + barWidth / 2}
-                y={height - 5}
-                textAnchor="middle"
-                className="fill-slate-500 text-[9px]"
-              >
-                {shortMonthLabel(bucket.month)}
-              </text>
-            </g>
-          )
-        })}
-      </svg>
-    </>
+                />
+                <text
+                  x={geometry.barCenter(index)}
+                  y={CHART_HEIGHT - 5}
+                  textAnchor="middle"
+                  className="fill-slate-500 text-[9px]"
+                >
+                  {shortMonthLabel(bucket.month)}
+                </text>
+                {/* The tap target is the whole column — the bar itself is
+                 * only BAR_WIDTH wide — and it doubles as the keyboard
+                 * access. Its width (bar + gap) always ends at the next
+                 * bar's edge (or the plot's end), in both layouts.
+                 *
+                 * It is painted LAST: an SVG tap lands on the topmost
+                 * painted element, so the target must sit above the
+                 * coloured bar — otherwise a tap on the bar would hit the
+                 * bar (no handler) and never show the value chip (issue
+                 * #97).
+                 *
+                 * A pointer tap must not focus the column: the browser
+                 * would draw its focus rectangle around the whole column
+                 * and leave it there after the tap (issue #96). Only the
+                 * focus default is stopped — the click still selects — and
+                 * Tab focus is untouched, so keyboard users keep the ring. */}
+                <rect
+                  x={x}
+                  y={TOP_PAD}
+                  width={geometry.barStep}
+                  height={plotHeight}
+                  fill="transparent"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${monthLabel(bucket.month)}: ${formatEuros(bucket.amount)}`}
+                  aria-pressed={selected === index}
+                  className="cursor-pointer"
+                  onClick={() => setSelected(selected === index ? null : index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setSelected(selected === index ? null : index)
+                    }
+                  }}
+                />
+              </g>
+            )
+          })}
+        </svg>
+        {chip}
+      </div>
+    </div>
   )
 }
 

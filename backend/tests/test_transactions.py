@@ -957,6 +957,7 @@ async def test_list_foreign_or_missing_recurring_filter_is_forbidden(
                 amount=Decimal("10.00"),
                 interval_value=1,
                 interval_unit="months",
+                start_date=date(2030, 1, 1),
             )
             session.add(cost)
             session.commit()

@@ -2,7 +2,7 @@
 
 Recurring Costs are tracking-only definitions: the user records each payment by hand as a linked Expense, and the paid state is occurrence-based — Occurrences derived from a start date plus interval, each Paid by exactly one linked Expense (the oldest Unpaid one, pinned at link time). This deliberately deviates from the app's everywhere-else month bucketing (dashboard stats, search): the user cares how far behind a cost is, not which month a payment landed in, so the Backlog badge counts Unpaid Occurrences whose due date has passed.
 
-A Recurring Cost carries no Wallet and no Category: the definition is name + amount + interval (+ optional start date and due-date override). The Wallet and Category of a linked Expense are chosen at Transaction creation time, so the definition's copies would be redundant state — two places to keep in sync for a value the Budget and the Occurrence math never read.
+A Recurring Cost carries no Wallet and no Category: the definition is name + amount + interval + start date. (ADR-0024: the optional due-date override is gone — an Occurrence is due on its own date.) The Wallet and Category of a linked Expense are chosen at Transaction creation time, so the definition's copies would be redundant state — two places to keep in sync for a value the Budget and the Occurrence math never read.
 
 ## Considered Options
 

@@ -262,6 +262,56 @@ describe('AppShell swipe navigation', () => {
     expect(screen.queryByRole('button', { name: 'New wallet' })).not.toBeInTheDocument()
   })
 
+  it('a swipe starting on a wide chart scrolls it — never changes the tab', async () => {
+    // A wide trend range overflows its overflow-x-auto frame: the frame is
+    // horizontally scrollable, so it owns the gesture (issue #96) — the
+    // drag scrolls the columns, the tab stays put.
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [
+        { month: '2026-03', amount: '42.00' },
+        { month: '2026-04', amount: '30.00' },
+        { month: '2026-05', amount: '55.00' },
+        { month: '2026-06', amount: '20.00' },
+        { month: '2026-07', amount: '48.00' },
+        { month: '2026-08', amount: '33.00' },
+      ],
+    }))
+    await renderShell()
+    const column = await screen.findByRole('button', { name: /€42.00/ })
+    // jsdom has no layout: make the chart's frame look overflowed.
+    const frame = column.closest('.overflow-x-auto')
+    expect(frame).not.toBeNull()
+    const scrollFrame = frame as HTMLElement
+    scrollFrame.style.overflowX = 'auto'
+    Object.defineProperty(scrollFrame, 'scrollWidth', { value: 800 })
+    Object.defineProperty(scrollFrame, 'clientWidth', { value: 300 })
+
+    swipe(column, { x: 400, y: 200 }, { x: 280, y: 205 })
+    expect(screen.getByText('Net Worth')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New wallet' })).not.toBeInTheDocument()
+  })
+
+  it('a swipe starting on a chart with nothing to scroll still switches tabs', async () => {
+    // The owner rule is the scrollable region, not the whole chart: a
+    // short range fits its frame, so a horizontal drag on it is a tab
+    // swipe like anywhere else on the screen (issue #96).
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [{ month: '2026-03', amount: '42.00' }],
+    }))
+    await renderShell()
+    const column = await screen.findByRole('button', { name: /€42.00/ })
+    const frame = column.closest('.overflow-x-auto')
+    expect(frame).not.toBeNull()
+    // jsdom has no layout: scrollWidth == clientWidth == 0 — not overflowed.
+
+    swipe(column, { x: 400, y: 200 }, { x: 280, y: 205 })
+    await expectTab('wallets')
+  })
+
   it('a swipe starting within 20px of a screen edge never changes the tab', async () => {
     await renderShell()
     const main = screen.getByRole('main')

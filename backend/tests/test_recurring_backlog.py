@@ -1,10 +1,8 @@
-"""The Backlog, Overdue flag, and the state read — issue #58, through the
-HTTP seam.
+"""The Backlog and the state read — issue #58, through the HTTP seam.
 
 Every Recurring Cost read exposes its derived state: `backlog_count` (Unpaid
 Occurrences whose due date is today or earlier in Europe/Rome — the "N
-unpaid" badge), `overdue` (Backlog non-empty), and the existing
-`next_due_date`. The count is derived on the fly from the definition and the
+unpaid" badge) and the existing `next_due_date`. The count is derived on the fly from the definition and the
 stored link pins (issue #57): paying an Occurrence drops the count by one,
 and editing a cost's interval or start date reshapes only the derived future
 — an Occurrence covered by a link is never counted back in, and the pin on
@@ -36,13 +34,21 @@ def _days(offset: int) -> str:
 
 def _month_15(offset: int) -> str:
     """The 15th of the month `offset` months before today's month — the
-    start of the override test's monthly cost. The month arithmetic is
+    start of the monthly Backlog tests (own-date judging, ADR-0024). The
+    month arithmetic is
     plain calendar stepping, matching how the pure module walks months."""
     today = _today()
     total = today.month - 1 - offset
     year = today.year + total // 12
     month = total % 12 + 1
     return date(year, month, 15).isoformat()
+
+
+def _month_1(offset: int) -> str:
+    """The 1st of the month `offset` months before today's month — always
+    due on or before today, whatever the day of the month the suite runs
+    on."""
+    return _month_15(offset)[:8] + "01"
 
 
 async def _login(client: AsyncClient) -> str:
@@ -73,7 +79,6 @@ async def _create_cost(
     start_date: str,
     interval_value: int = 1,
     interval_unit: str = "days",
-    due_day: int | None = None,
 ) -> int:
     payload: dict[str, object] = {
         "name": name,
@@ -82,8 +87,6 @@ async def _create_cost(
         "interval_unit": interval_unit,
         "start_date": start_date,
     }
-    if due_day is not None:
-        payload["due_day"] = due_day
     response = await client.post(
         "/recurring-costs", json=payload, headers=_auth(token)
     )
@@ -129,9 +132,8 @@ async def test_a_daily_cost_missed_for_ten_days_reads_ten_unpaid(
 ) -> None:
     """The original question made concrete: a daily cost starting nine days
     ago has ten Occurrences due today or earlier — the first ten days of its
-    life — all Unpaid, so the badge reads "10 unpaid" and the cost is
-    Overdue. Today's Occurrence is due today, so it is both the Backlog's
-    newest item and the next due date."""
+    life — all Unpaid, so the badge reads "10 unpaid". Today's Occurrence is due
+    today, so it is both the Backlog's newest item and the next due date."""
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Backlog Wallet")
     cost_id = await _create_cost(
@@ -140,7 +142,6 @@ async def test_a_daily_cost_missed_for_ten_days_reads_ten_unpaid(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 10
-    assert state["overdue"] is True
     assert state["next_due_date"] == _days(0)
 
 
@@ -159,15 +160,13 @@ async def test_paying_one_occurrence_drops_the_count_to_nine(
     assert first_pin == _days(-9)
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 9
-    assert state["overdue"] is True
 
     await _link_expense(client, token, wallet_id, cost_id)
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 8
-    assert state["overdue"] is True
 
 
-async def test_paying_the_whole_backlog_clears_overdue(
+async def test_paying_the_whole_backlog_clears_the_badge(
     client: AsyncClient,
 ) -> None:
     token = await _login(client)
@@ -181,7 +180,6 @@ async def test_paying_the_whole_backlog_clears_overdue(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 0
-    assert state["overdue"] is False
 
 
 async def test_future_occurrences_are_never_counted_as_unpaid(
@@ -199,14 +197,12 @@ async def test_future_occurrences_are_never_counted_as_unpaid(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 0
-    assert state["overdue"] is False
     assert state["next_due_date"] == _days(5)
 
     pin = await _link_expense(client, token, wallet_id, cost_id)
     assert pin == _days(5)
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 0
-    assert state["overdue"] is False
 
 
 async def test_an_occurrence_due_today_counts_in_the_backlog(
@@ -222,44 +218,39 @@ async def test_an_occurrence_due_today_counts_in_the_backlog(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 1
-    assert state["overdue"] is True
 
     await _link_expense(client, token, wallet_id, cost_id)
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 0
-    assert state["overdue"] is False
 
 
-async def test_the_override_shifts_which_occurrences_are_due(
+async def test_a_monthly_cost_backlog_reads_its_own_occurrence_dates(
     client: AsyncClient,
 ) -> None:
-    """The rent example: Occurrences on the 15th, due on the 1st. The due
-    date — not the Occurrence's own date — decides the Backlog: with today
-    inside month M, the Occurrences of M-3, M-2, M-1, and M are all due on
-    or before today (the M one due the 1st, ahead of its own date)."""
+    """The Backlog judges each Occurrence by its own date (ADR-0024: a due
+    date is the occurrence date). A monthly cost starting on the 1st of the
+    month M-3: with today inside month M, the Occurrences of M-3, M-2, M-1,
+    and M are all due on or before today (the M one on the 1st)."""
     token = await _login(client)
-    wallet_id = await _create_wallet(client, token, "B58 Override Wallet")
+    wallet_id = await _create_wallet(client, token, "B58 Own-date Wallet")
     cost_id = await _create_cost(
         client,
         token,
-                name="Override Rent",
-        start_date=_month_15(3),
+        name="Rent on the 1st",
+        start_date=_month_1(3),
         interval_unit="months",
-        due_day=1,
     )
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 4
-    assert state["overdue"] is True
 
     # Paying the oldest two (the M-3 and M-2 Occurrences) leaves two.
     first_pin = await _link_expense(client, token, wallet_id, cost_id)
-    assert first_pin == _month_15(3)
+    assert first_pin == _month_1(3)
     second_pin = await _link_expense(client, token, wallet_id, cost_id)
-    assert second_pin == _month_15(2)
+    assert second_pin == _month_1(2)
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 2
-    assert state["overdue"] is True
 
 
 async def test_editing_interval_or_start_date_never_unpays(
@@ -279,7 +270,6 @@ async def test_editing_interval_or_start_date_never_unpays(
 
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 4
-    assert state["overdue"] is True
 
     # Start date pushed further back: the sequence now covers ten days, the
     # pinned one still paid — 10 minus 1.
@@ -291,7 +281,6 @@ async def test_editing_interval_or_start_date_never_unpays(
     assert response.status_code == 200
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 9
-    assert state["overdue"] is True
 
     # Interval widened to every 2 days: the sequence is now 10 days ago, 8,
     # 6, 4, 2 — the pinned day (4 days ago) fell out of it entirely, so the
@@ -304,7 +293,6 @@ async def test_editing_interval_or_start_date_never_unpays(
     assert response.status_code == 200
     state = await _cost_state(client, token, cost_id)
     assert state["backlog_count"] == 5
-    assert state["overdue"] is True
 
     # The linked Expense still pins the same Occurrence — never reassigned.
     items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
@@ -318,8 +306,8 @@ async def test_editing_interval_or_start_date_never_unpays(
 async def test_the_list_exposes_the_state_read_per_cost(
     client: AsyncClient,
 ) -> None:
-    """The state read is per cost in the list — what the screen's summary
-    line ("X costs overdue · N unpaid occurrences") adds up from."""
+    """The state read is per cost in the list — what the screen's per-card
+    badge adds up from."""
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "B58 Summary Wallet")
     behind_id = await _create_cost(
@@ -333,8 +321,4 @@ async def test_the_list_exposes_the_state_read_per_cost(
     behind = await _cost_state(client, token, behind_id)
     ahead = await _cost_state(client, token, ahead_id)
     assert behind["backlog_count"] == 3
-    assert behind["overdue"] is True
     assert ahead["backlog_count"] == 0
-    assert ahead["overdue"] is False
-    # What the screen's summary line adds up from these two: one cost
-    # overdue, three unpaid occurrences.

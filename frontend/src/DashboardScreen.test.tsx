@@ -74,13 +74,10 @@ const cost: RecurringCost = {
   amount: '850.00',
   interval_value: 1,
   interval_unit: 'months',
-  start_date: null,
-  due_day: 1,
-  due_month: null,
+  start_date: '2026-09-01',
   next_due_date: '2026-09-01',
   next_unpaid_occurrence_date: '2026-09-01',
   backlog_count: 0,
-  overdue: false,
   next_skip_action: 'skip',
   created_at: createdAt,
 }
@@ -91,13 +88,10 @@ const income: RecurringIncome = {
   amount: '2100.00',
   interval_value: 1,
   interval_unit: 'months',
-  start_date: null,
-  due_day: 27,
-  due_month: null,
+  start_date: '2026-09-01',
   next_due_date: '2026-09-27',
   next_unpaid_occurrence_date: '2026-09-27',
   backlog_count: 0,
-  overdue: false,
   next_skip_action: 'skip',
   created_at: createdAt,
 }
@@ -309,7 +303,7 @@ describe('Dashboard category pie', () => {
 })
 
 describe('Dashboard trend', () => {
-  it('fetches the expense trend and shows the tapped month\'s total', async () => {
+  it("fetches the expense trend; tapping a bar floats its amount chip above it", async () => {
     fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
       from_month: fromMonth,
       to_month: toMonth,
@@ -321,9 +315,11 @@ describe('Dashboard trend', () => {
     expect(fetchTrendMock).toHaveBeenCalledWith('', 'expense', trendFromMonth, currentMonth)
 
     // The bars carry no always-on labels (they crowded the chart): the
-    // exact amount is read by tapping the column.
+    // exact amount is read by tapping the column — the value chip shows
+    // the amount alone, never the old "Month · €amount" readout line.
     fireEvent.click(screen.getByRole('button', { name: /€42.00/ }))
-    expect(await screen.findByText(/€42.00/)).toBeInTheDocument()
+    expect(await screen.findByText('€42.00')).toBeInTheDocument()
+    expect(screen.queryByText('March 2026 · €42.00')).not.toBeInTheDocument()
   })
 
   it('toggles to the income trend and refetches with the new kind', async () => {
@@ -342,10 +338,10 @@ describe('Dashboard trend', () => {
     expect(fetchTrendMock).toHaveBeenCalledWith('', 'income', trendFromMonth, currentMonth)
     // The income bar's total is read on tap, like the expense side's.
     fireEvent.click(screen.getByRole('button', { name: /€77.00/ }))
-    expect(await screen.findByText(/€77.00/)).toBeInTheDocument()
+    expect(await screen.findByText('€77.00')).toBeInTheDocument()
   })
 
-  it('tapping the same column again hides the readout', async () => {
+  it('tapping the same column again hides the chip', async () => {
     fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
       from_month: fromMonth,
       to_month: toMonth,
@@ -356,9 +352,46 @@ describe('Dashboard trend', () => {
 
     const bar = screen.getByRole('button', { name: /€42.00/ })
     fireEvent.click(bar)
-    expect(await screen.findByText(/€42.00/)).toBeInTheDocument()
+    expect(await screen.findByText('€42.00')).toBeInTheDocument()
     fireEvent.click(bar)
-    await waitFor(() => expect(screen.queryByText(/€42.00/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('€42.00')).not.toBeInTheDocument())
+  })
+
+  it('the column target paints above the bar, so tapping the bar itself selects', async () => {
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [{ month: '2026-03', amount: '42.00' }],
+    }))
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses Trend ·/)
+
+    // jsdom does no hit-testing, but the invariant is SVG paint order: an
+    // SVG tap lands on the topmost painted element, so the transparent
+    // column target must be the last (topmost) rect of its group — a tap
+    // on the coloured bar underneath it then hits the target (issue #97).
+    const column = screen.getByRole('button', { name: /€42.00/ })
+    const group = column.parentElement
+    expect(group).not.toBeNull()
+    const rects = group!.querySelectorAll('rect')
+    expect(rects.length).toBeGreaterThanOrEqual(2)
+    expect(rects[rects.length - 1]).toBe(column)
+  })
+
+  it('a zero month\'s stub shows its €0.00 chip the same way', async () => {
+    fetchTrendMock.mockImplementation(async (_token, _kind, fromMonth, toMonth) => ({
+      from_month: fromMonth,
+      to_month: toMonth,
+      months: [
+        { month: '2026-03', amount: '42.00' },
+        { month: '2026-04', amount: '0.00' },
+      ],
+    }))
+    render(<DashboardScreen />)
+    await screen.findByText(/Expenses Trend ·/)
+
+    fireEvent.click(screen.getByRole('button', { name: /April 2026: €0.00/ }))
+    expect(await screen.findByText('€0.00')).toBeInTheDocument()
   })
 
   it('shows an error state on a failed trend load', async () => {

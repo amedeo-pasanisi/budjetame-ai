@@ -31,11 +31,12 @@ def _owned_cost_or_403(
 
 def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
     """The API view of a Recurring Cost, with the derived state: the next
-    due date (override applied, clamping included — the pure recurrence
-    module owns that math), the next Unpaid Occurrence date (issue #57): the
+    due date (ADR-0024: an Occurrence's due date is its own date — the pure
+    recurrence module owns the math), the next Unpaid Occurrence date
+    (issue #57): the
     one a new linked Expense would pay, what the transaction form's picker
     shows — the Backlog (issue #58): Unpaid Occurrences due today or
-    earlier in Europe/Rome, with the Overdue flag — and `next_skip_action`,
+    earlier in Europe/Rome — and `next_skip_action`,
     what the Skip/Un-skip button reads (ADR-0016)."""
     backlog = recurring_service.backlog_count_for(session, cost)
     return RecurringCostOut(
@@ -44,15 +45,12 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
         amount=cost.amount,
         interval_value=cost.interval_value,
         interval_unit=IntervalUnit(cost.interval_unit),
-        start_date=cost.start_date.isoformat() if cost.start_date is not None else None,
-        due_day=cost.due_day,
-        due_month=cost.due_month,
+        start_date=cost.start_date.isoformat(),
         next_due_date=recurring_service.next_due_date_for(session, cost).isoformat(),
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, cost
         ).isoformat(),
         backlog_count=backlog,
-        overdue=backlog > 0,
         next_skip_action=recurring_service.next_skip_action(session, cost),
         created_at=cost.created_at,
     )
@@ -99,8 +97,6 @@ def create_recurring_cost(
             interval_value=payload.interval_value,
             interval_unit=payload.interval_unit,
             start_date=payload.start_date,
-            due_day=payload.due_day,
-            due_month=payload.due_month,
         )
     except recurring_service.RecurringCostRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -121,7 +117,7 @@ def toggle_recurring_cost_skip(
     oldest Skipped one instead (the front of the queue — only the oldest
     Unpaid Occurrence is reachable, exactly like the link contract). The
     response is the refreshed definition with its derived state, so the
-    card can re-render the badge, the Overdue mark, and the next due date."""
+    card can re-render the badge and the next due date."""
     cost = _owned_cost_or_403(session, account, cost_id)
     cost = recurring_service.toggle_skip(session, cost)
     return _cost_out(session, cost)

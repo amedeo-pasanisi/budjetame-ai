@@ -12,15 +12,12 @@ import {
   type RecurringCostInput,
 } from './api'
 
-const UNIT_OPTIONS: { value: IntervalUnit; label: string }[] = [
-  { value: 'days', label: 'Days' },
-  { value: 'weeks', label: 'Weeks' },
-  { value: 'months', label: 'Months' },
-  { value: 'years', label: 'Years' },
+const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
+  { value: 'days', one: 'Day', many: 'Days' },
+  { value: 'weeks', one: 'Week', many: 'Weeks' },
+  { value: 'months', one: 'Month', many: 'Months' },
+  { value: 'years', one: 'Year', many: 'Years' },
 ]
-
-const DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1)
-const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1)
 
 type RecurringCostFormProps = {
   cost?: RecurringCost
@@ -31,13 +28,16 @@ type RecurringCostFormProps = {
 
 /** The create/edit/delete form for a Recurring Cost, hosted in the modal
  * shell (RecurringCostModal). Fields: Name, Amount, the interval
- * (every N days/weeks/months/years), an optional
- * start date (unset defaults to the creation date), and the due-date
- * override that follows the interval unit — a day-of-month for months, a
- * month+day for years, nothing for days/weeks (ADR-0010). The Wallet and
- * Category of a linked Expense are chosen at Transaction creation time, so
- * the definition itself never carries them. Cancel — like the shell's
- * backdrop and Escape — abandons the draft without saving. */
+ * ("Repeats every N days/weeks/months/years" — the unit reads singular when
+ * N is 1), and the start date: the first Occurrence, the one date the
+ * definition carries (ADR-0024). Left empty at creation it becomes the
+ * creation day — so "start today" needs no typing — while editing always
+ * shows a date, and an empty one blocks the save: the date can be changed,
+ * never unset. Occurrences repeat on the start date's day from there on
+ * (29–31 clamp to the last day of shorter months). The Wallet and Category
+ * of a linked Expense are chosen at Transaction creation time, so the
+ * definition itself never carries them. Cancel — like the shell's backdrop
+ * and Escape — abandons the draft without saving. */
 export function RecurringCostForm({
   cost,
   onSaved,
@@ -55,45 +55,27 @@ export function RecurringCostForm({
     cost?.interval_unit ?? 'months',
   )
   const [startDate, setStartDate] = useState(cost?.start_date ?? '')
-  const [dueDay, setDueDay] = useState<number | ''>(cost?.due_day ?? '')
-  const [dueMonth, setDueMonth] = useState<number | ''>(cost?.due_month ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
-  // The year interval's override is a month+day pair: half a pair blocks the
-  // save instead of silently dropping the override.
-  const yearOverrideIncomplete =
-    intervalUnit === 'years' && (dueDay === '') !== (dueMonth === '')
   const intervalNumber = Number.parseInt(intervalValue, 10)
   const amountNumber = Number.parseFloat(amount)
   const canSave =
     name.trim() !== '' &&
     amountNumber > 0 &&
     intervalNumber >= 1 &&
-    !yearOverrideIncomplete
+    // The start date is only optional at creation (empty = today); an
+    // existing definition always carries one (ADR-0024).
+    (!editing || startDate !== '')
 
-  const buildInput = (): RecurringCostInput => {
-    let finalDueDay: number | null = null
-    let finalDueMonth: number | null = null
-    if (intervalUnit === 'months') {
-      finalDueDay = dueDay === '' ? null : dueDay
-    } else if (intervalUnit === 'years') {
-      if (dueDay !== '' && dueMonth !== '') {
-        finalDueDay = dueDay
-        finalDueMonth = dueMonth
-      }
-    }
-    return {
-      name: name.trim(),
-      amount,
-      intervalValue: intervalNumber,
-      intervalUnit,
-      startDate: startDate === '' ? null : startDate,
-      dueDay: finalDueDay,
-      dueMonth: finalDueMonth,
-    }
-  }
+  const buildInput = (): RecurringCostInput => ({
+    name: name.trim(),
+    amount,
+    intervalValue: intervalNumber,
+    intervalUnit,
+    startDate: startDate === '' ? null : startDate,
+  })
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -186,7 +168,9 @@ export function RecurringCostForm({
       </div>
 
       <div>
-        <span className="block text-sm font-medium text-slate-700">Repeats</span>
+        <label htmlFor="recurring-cost-interval" className="block text-sm font-medium text-slate-700">
+          Repeats every
+        </label>
         <div className="mt-1 flex gap-2">
           <input
             id="recurring-cost-interval"
@@ -208,7 +192,7 @@ export function RecurringCostForm({
           >
             {UNIT_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {intervalNumber === 1 ? option.one : option.many}
               </option>
             ))}
           </select>
@@ -217,97 +201,22 @@ export function RecurringCostForm({
 
       <div>
         <label htmlFor="recurring-cost-start" className="block text-sm font-medium text-slate-700">
-          Start date (optional)
+          Start date
         </label>
         <input
           id="recurring-cost-start"
           type="date"
+          required={editing}
           value={startDate}
           onChange={(event) => setStartDate(event.target.value)}
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
         />
-        <p className="mt-1 text-xs text-slate-500">
-          The first occurrence. Unset means today.
-        </p>
+        {!editing && (
+          <p className="mt-1 text-xs text-slate-500">
+            The first occurrence. Leave empty to start today.
+          </p>
+        )}
       </div>
-
-      {intervalUnit === 'months' && (
-        <div>
-          <label htmlFor="recurring-cost-due-day" className="block text-sm font-medium text-slate-700">
-            Due day (optional)
-          </label>
-          <select
-            id="recurring-cost-due-day"
-            value={dueDay}
-            onChange={(event) =>
-              setDueDay(event.target.value === '' ? '' : Number(event.target.value))
-            }
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-          >
-            <option value="">None</option>
-            {DAY_OPTIONS.map((day) => (
-              <option key={day} value={day}>
-                {day}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-slate-500">
-            Due on this day of the month instead of the occurrence date. Days
-            29–31 fall on the last day of shorter months.
-          </p>
-        </div>
-      )}
-
-      {intervalUnit === 'years' && (
-        <div>
-          <span className="block text-sm font-medium text-slate-700">
-            Due date (optional)
-          </span>
-          <div className="mt-1 flex gap-2">
-            <select
-              id="recurring-cost-due-month"
-              value={dueMonth}
-              onChange={(event) =>
-                setDueMonth(event.target.value === '' ? '' : Number(event.target.value))
-              }
-              aria-label="Due month"
-              className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-            >
-              <option value="">Month</option>
-              {MONTH_OPTIONS.map((month) => (
-                <option key={month} value={month}>
-                  {month}
-                </option>
-              ))}
-            </select>
-            <select
-              id="recurring-cost-due-day"
-              value={dueDay}
-              onChange={(event) =>
-                setDueDay(event.target.value === '' ? '' : Number(event.target.value))
-              }
-              aria-label="Due day"
-              className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-            >
-              <option value="">Day</option>
-              {DAY_OPTIONS.map((day) => (
-                <option key={day} value={day}>
-                  {day}
-                </option>
-              ))}
-            </select>
-          </div>
-          {yearOverrideIncomplete && (
-            <p className="mt-1 text-xs text-amber-600">
-              Pick both the month and the day, or leave both unset.
-            </p>
-          )}
-          <p className="mt-1 text-xs text-slate-500">
-            Due on this month and day of each year. Days 29–31 fall on the
-            last day of shorter months.
-          </p>
-        </div>
-      )}
 
       {error !== null && <p className="text-sm text-red-600">{error}</p>}
 

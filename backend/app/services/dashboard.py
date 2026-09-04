@@ -30,7 +30,7 @@ from app.models import (
     Transaction,
     TransactionType,
 )
-from app.recurrence import occurrences_in_window, period_of, rome_day_of, rome_today
+from app.recurrence import occurrences_in_window, period_of, rome_today
 
 from app.services.wallets import wallet_balances
 
@@ -169,7 +169,7 @@ def monthly_budget(session: Session, account_id: int) -> dict:
     the Recurring Income Occurrences due in the month minus the Recurring
     Cost Occurrences due in it, counted by due date whether paid or not — a
     late-paid Occurrence counts in its due month, not the payment month —
-    with all intervals and overrides and the 29–31 clamping, per the pure
+    with the 29–31 clamping, per the pure
     walker. Spendable Today is the allowance accrued from the 1st through
     today minus the Discretionary Expenses dated in that span: only Expense
     Transactions with no Recurring Cost link drain, and only once their date
@@ -221,7 +221,7 @@ def _due_amount(
 ) -> Decimal:
     """One definition's contribution to the Monthly Spendable: its amount
     per Occurrence due inside the window (an unset start date defaults to
-    the creation date, ADR-0010). A Skipped Occurrence never counts
+    the start date, ADR-0024). A Skipped Occurrence never counts
     (ADR-0016): the user does not have to pay it, so the Budget must not
     pretend the money leaves (or arrives).
 
@@ -229,11 +229,6 @@ def _due_amount(
     (`period_of`), so a skip travels with its Occurrence across definition
     edits — the Budget re-derives on every read, exactly like every other
     input (ADR-0001)."""
-    start = (
-        definition.start_date
-        if definition.start_date is not None
-        else rome_day_of(definition.created_at)
-    )
     if isinstance(definition, RecurringCost):
         stored = session.scalars(
             select(RecurringSkip.occurrence_date).where(
@@ -248,11 +243,9 @@ def _due_amount(
         ).all()
     skipped = {period_of(value, definition.interval_unit) for value in stored}
     due_dates = occurrences_in_window(
-        start,
+        definition.start_date,
         definition.interval_value,
         definition.interval_unit,
-        definition.due_day,
-        definition.due_month,
         first_day,
         last_day,
         skipped,

@@ -137,6 +137,29 @@ export function TransactionsScreen({
   // apply-then-refetch. The jump's other resets (dates, recurring, search,
   // the bar itself) are the fresh-mount defaults anyway.
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // The chip strip's scroll state (filtered line, issue #92): the chips
+  // never wrap — when they overflow, the strip scrolls sideways with the
+  // scrollbar hidden and a fade on each edge that has hidden chips under
+  // it. The fades re-measure after every render (a chip appears, a name
+  // finishes loading, the window resizes) and on the strip's own scroll.
+  const stripRef = useRef<HTMLDivElement | null>(null)
+  const [stripFades, setStripFades] = useState({ left: false, right: false })
+  const refreshStripFades = useCallback(() => {
+    const strip = stripRef.current
+    if (strip === null) return
+    const next = {
+      left: strip.scrollLeft > 0,
+      right: strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1,
+    }
+    setStripFades((current) =>
+      current.left === next.left && current.right === next.right ? current : next,
+    )
+  }, [])
+  useEffect(() => {
+    refreshStripFades()
+    window.addEventListener('resize', refreshStripFades)
+    return () => window.removeEventListener('resize', refreshStripFades)
+  })
   const [filterWalletId, setFilterWalletId] = useState<number | undefined>(
     () =>
       pendingLedgerRequest !== null && pendingLedgerRequest.kind === 'wallet'
@@ -665,44 +688,50 @@ export function TransactionsScreen({
           {/* Filtered line (issue #92): visible only when at least one of
               the five panel filters is set — search text never lands here
               (the box shows it, with its own native ✕). A chip's ✕ removes
-              just that filter; Clear all also clears the search; Export to
-              Excel downloads the current view without opening the panel. */}
+              just that filter; Clear all also clears the search. The chips
+              never wrap: the strip is one line and scrolls sideways when
+              they overflow — the scrollbar is hidden, and the edge fades
+              show which side holds hidden chips. Export lives only inside
+              the Filters panel below. */}
           {panelFiltersActive && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                {activeSegments.map((segment) => (
-                  <span
-                    key={segment.key}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700"
-                  >
-                    {segment.label}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${segment.label} filter`}
-                      onClick={segment.clear}
-                      className="text-slate-400 hover:text-slate-700"
+            <div className="mt-3 flex items-center gap-x-4">
+              <div className="relative min-w-0 flex-1">
+                {stripFades.left && (
+                  <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-slate-50 to-transparent" />
+                )}
+                <div
+                  ref={stripRef}
+                  onScroll={refreshStripFades}
+                  className="flex items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  {activeSegments.map((segment) => (
+                    <span
+                      key={segment.key}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700"
                     >
-                      ✕
-                    </button>
-                  </span>
-                ))}
+                      <span className="max-w-[12rem] truncate">{segment.label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${segment.label} filter`}
+                        onClick={segment.clear}
+                        className="text-slate-400 hover:text-slate-700"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                {stripFades.right && (
+                  <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-slate-50 to-transparent" />
+                )}
               </div>
-              <div className="flex items-center gap-4 text-xs font-medium">
-                <button
-                  type="button"
-                  onClick={clearFiltersAndSearch}
-                  className="text-slate-600 hover:text-slate-900"
-                >
-                  Clear all
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExport}
-                  className="text-slate-600 hover:text-slate-900"
-                >
-                  Export to Excel
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={clearFiltersAndSearch}
+                className="shrink-0 text-xs font-medium text-slate-600 hover:text-slate-900"
+              >
+                Clear all
+              </button>
             </div>
           )}
 

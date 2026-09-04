@@ -270,13 +270,10 @@ const rentCost: RecurringCost = {
   amount: '850.00',
   interval_value: 1,
   interval_unit: 'months',
-  start_date: null,
-  due_day: null,
-  due_month: null,
+  start_date: '2026-09-01',
   next_due_date: '2026-08-01',
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
-  overdue: false,
   next_skip_action: 'skip',
   created_at: '2026-08-01T10:00:00Z'
 }
@@ -288,13 +285,10 @@ const salaryIncome: RecurringIncome = {
   amount: '2100.00',
   interval_value: 1,
   interval_unit: 'months',
-  start_date: null,
-  due_day: null,
-  due_month: null,
+  start_date: '2026-09-01',
   next_due_date: '2026-08-01',
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
-  overdue: false,
   next_skip_action: 'skip',
   created_at: '2026-08-01T10:00:00Z'
 }
@@ -2025,8 +2019,9 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
 
     // One chip per filter — wallet, category, the two dates merged into a
-    // single range chip, recurring — each carrying its own ✕, plus the
-    // Clear all and Export links on the right.
+    // single range chip, recurring — each carrying its own ✕, with Clear
+    // all on the right. Export never rides the line: it lives only inside
+    // the Filters panel (closed here).
     expect(
       screen.getByRole('button', { name: 'Remove Old Card filter' }),
     ).toBeInTheDocument()
@@ -2036,7 +2031,9 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Remove Rent filter' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clear all' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Export to Excel' }),
+    ).not.toBeInTheDocument()
 
     // The chips read in the spec's order: wallet, category, dates, recurring.
     const chips = ['Old Card', 'Food', '2026-01-01 – 2026-01-31', 'Rent'].map(
@@ -2228,9 +2225,9 @@ describe('TransactionsScreen chrome (issue #92)', () => {
       }),
     )
 
-    // Footer: Clear all filters on the left, Export on the right — Export
-    // is always there while the panel is open (with the wallet filter set
-    // the filtered line shows its own Export too, hence the scoping).
+    // Footer: Clear all filters on the left, Export on the right — the
+    // filtered line above carries Clear all only, so the footer is
+    // Export's one home, always there while the panel is open.
     const clearFilters = screen.getByRole('button', { name: 'Clear all filters' })
     const footer = clearFilters.parentElement as HTMLElement
     expect(within(footer).getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument()
@@ -2308,7 +2305,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
     vi.stubGlobal('URL', realURL)
   })
 
-  it('downloads the current filtered view from the filtered line, without opening the panel', async () => {
+  it('downloads the current filtered view from the panel footer', async () => {
     // Frozen Wallets are fetched explicitly so the dropdown can offer them;
     // override before render, so the select has the option when the change
     // fires.
@@ -2324,9 +2321,8 @@ describe('TransactionsScreen export (US 7.3)', () => {
     await waitFor(() =>
       expect(fetchTransactionsMock).toHaveBeenCalledWith('', { walletId: 2 }),
     )
-    // ...then close it: the filtered line's Export downloads the view the
-    // ledger shows, panel or no panel.
-    fireEvent.click(screen.getByRole('button', { name: 'Filters ▾' }))
+    // ...and export from the footer while it stays open: the only Export,
+    // with the panel closed the filtered line offers none (covered above).
     fireEvent.click(screen.getByRole('button', { name: 'Export to Excel' }))
 
     await waitFor(() =>

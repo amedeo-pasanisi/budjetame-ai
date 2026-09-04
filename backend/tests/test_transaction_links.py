@@ -13,6 +13,8 @@ Hand-worked expected dates use a far-future start date (2030-03-01, monthly),
 so the Occurrence sequence is stable regardless of when the suite runs.
 """
 
+from datetime import date
+
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
@@ -398,9 +400,7 @@ async def test_foreign_or_missing_cost_link_is_rejected(
                 amount="10.00",
                 interval_value=1,
                 interval_unit="months",
-                start_date=None,
-                due_day=None,
-                due_month=None,
+                start_date=date(2030, 1, 1),
             )
             session.add(cost)
             session.commit()

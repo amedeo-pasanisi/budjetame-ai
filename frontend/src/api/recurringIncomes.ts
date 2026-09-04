@@ -13,13 +13,11 @@ export type RecurringIncome = {
   amount: string
   interval_value: number
   interval_unit: IntervalUnit
-  /** The stored start date ("YYYY-MM-DD"); null when unset — the creation
-   * date is used instead (backend derivation). */
-  start_date: string | null
-  due_day: number | null
-  due_month: number | null
-  /** The next Occurrence's due date, derived on the backend (override
-   * applied, clamping included). */
+  /** The stored start date ("YYYY-MM-DD") — every definition always
+   * carries one: left empty at creation it is set to the creation day
+   * (ADR-0024), and an Occurrence's due date is its own date. */
+  start_date: string
+  /** The next Occurrence's own date, derived on the backend. */
   next_due_date: string
   /** The next Occurrence a new linked Income would receive — the oldest
    * Unpaid one's own date (issue #61): what the transaction form's picker
@@ -29,8 +27,6 @@ export type RecurringIncome = {
    * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
    * from the definition and the stored link pins, never stored. */
   backlog_count: number
-  /** True exactly when the Backlog is non-empty — the Overdue mark. */
-  overdue: boolean
   /** What the Skip/Un-skip button reads (ADR-0016), mirroring the Costs
    * side: "skip" when the oldest Unpaid Occurrence is unskipped, "unskip"
    * when it is already Skipped. */
@@ -38,19 +34,18 @@ export type RecurringIncome = {
   created_at: string
 }
 
-/** The fields the create/edit form edits. Null means "unset": an unset start
- * date defaults to the creation date; the due-date override is dropped when
- * the unit or an incomplete pair doesn't carry it. The Wallet and Category
- * of a linked Income are chosen at Transaction creation time — the
- * definition itself never carries them. */
+/** The fields the create/edit form edits. An empty start date is only ever
+ * a creation-time convenience: the backend sets it to the creation day, and
+ * afterwards the definition always carries one — the form treats the date
+ * as required when editing (ADR-0024). The Wallet and Category of a linked
+ * Income are chosen at Transaction creation time — the definition itself
+ * never carries them. */
 export type RecurringIncomeInput = {
   name: string
   amount: string
   intervalValue: number
   intervalUnit: IntervalUnit
   startDate: string | null
-  dueDay: number | null
-  dueMonth: number | null
 }
 
 function toPayload(input: RecurringIncomeInput) {
@@ -60,8 +55,6 @@ function toPayload(input: RecurringIncomeInput) {
     interval_value: input.intervalValue,
     interval_unit: input.intervalUnit,
     start_date: input.startDate,
-    due_day: input.dueDay,
-    due_month: input.dueMonth,
   }
 }
 
