@@ -64,6 +64,10 @@ _Avoid_: daily amount, per-day budget, daily rate
 The Budget bucket right now: the Daily Allowances accrued from the 1st through today minus the Discretionary Expenses dated in that span. It may go negative — future accruals repay the debt — and while negative it is shown as 0. Resets to 0 on the 1st of each month.
 _Avoid_: available today, remaining budget, balance left
 
+**Remaining Monthly Spendable**:
+The part of the Monthly Spendable still spendable in the current month: the Monthly Spendable minus the Discretionary Expenses dated from the 1st through today. It includes today's unspent bucket and every future day's accrual, and it may go negative when the month's spending already exceeds the whole frame; a future-dated Discretionary Expense reduces it only once its date arrives.
+_Avoid_: remaining budget, money left, unspent
+
 **Discretionary Expense**:
 An Expense that does not pay a Recurring Cost Occurrence — i.e. it is not linked to a Recurring Cost. The only thing that drains Spendable Today.
 _Avoid_: free spending, unlinked expense, fun spending
@@ -154,6 +158,7 @@ _Avoid_: transactions filtering on card tap, row-tap filter, filter shortcut
 - The Budget is always derived, never stored: editing a Recurring definition, a Transaction, or a link recomputes Monthly Spendable, Daily Allowance, and Spendable Today retroactively from the 1st of the month.
 - Monthly Spendable counts Occurrences by due date, paid or not — Skipped ones never count; Expenses linked to a Recurring Cost never drain Spendable Today, and one-off Incomes never fill it.
 - Each month's Budget starts fresh at 0; Spendable Today may go negative within the month and is displayed as 0 until future accruals repay it.
+- Remaining Monthly Spendable is the Monthly Spendable minus the Discretionary Expenses dated from the 1st through today; it may be negative, and a future-dated Discretionary Expense reduces it only once its date arrives.
 - Imports never set the link.
 - An Export never carries the link either: an exported row has no Recurring link and no Place — coordinates only — and Opening Balance Transactions are not exported.
 - All data is scoped to its owning Account; foreign data gets a 403.
