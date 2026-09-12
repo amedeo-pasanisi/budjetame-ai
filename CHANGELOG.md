@@ -5,6 +5,23 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.7.0] — 2026-09-11
+
+### Added
+
+- **The Budget card shows what's left of the month** — the frame line now
+  reads "€500.00 this month (€16.60 per day)" and under it there is
+  "€333.40 left this month": the Remaining Monthly Spendable — the Monthly
+  Spendable minus the Discretionary Expenses dated from the 1st through
+  today — so "how much can I still spend before the month ends" is answered
+  on the card, next to the day's bucket. It counts today's unspent bucket
+  and every future day's accrual, and a future-dated Expense reduces it
+  only once its date arrives, like Spendable Today. When the whole frame is
+  spent the figure goes negative and the line replaces the bucket's
+  "€433.40 over today's budget" note with "€100.00 over this month's
+  budget" — the month's bottom line, the debt no future accrual repays
+  (#100).
+
 ## [v1.6.0] — 2026-09-04
 
 ### Added
