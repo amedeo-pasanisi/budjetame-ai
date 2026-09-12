@@ -199,15 +199,19 @@ export function DashboardScreen() {
 }
 
 
-/** The Budget card (issue #66): Spendable Today for the current Europe/Rome
- * month — the big number, the "X per day · Y this month" explanation line,
- * and a small "you're X € over" note when the bucket is negative (the big
- * number then shows 0: future accruals repay the debt). It ignores the
- * pie card's month selector and is hidden entirely when the account has no
- * Recurring definitions at all — a "0,00 € per day" card would be noise.
- * Everything is rendered from GET /dashboard/budget, no computation on the
- * client; loading and error states match the other Dashboard cards, and a
- * failed load never looks like an empty Budget. */
+/** The Budget card (issues #66, #100): Spendable Today for the current
+ * Europe/Rome month — the big number, the frame line "Y this month (X per
+ * day)" (Monthly Spendable · Daily Allowance), a red "X over today's
+ * budget" note when the bucket is negative (the big number then shows 0:
+ * future accruals repay the debt), and the Remaining Monthly Spendable
+ * line "X left this month", muted below. When the whole frame is spent the
+ * Remaining Monthly Spendable is negative and its line replaces the bucket
+ * note: a red "X over this month's budget", never two over-notes at once.
+ * It ignores the pie card's month selector and is hidden entirely when the
+ * account has no Recurring definitions at all — an all-zero card would be
+ * noise. Everything is rendered from GET /dashboard/budget, no computation
+ * on the client; loading and error states match the other Dashboard cards,
+ * and a failed load never looks like an empty Budget. */
 function BudgetCard({
   budget,
   error,
@@ -221,6 +225,10 @@ function BudgetCard({
     return null
   }
   const negative = budget !== null && budget.spendable_today.startsWith('-')
+  // The month's bottom line: when the whole frame is spent the bucket
+  // over-note gives way to the month's overage (see the card doc above).
+  const monthNegative =
+    budget !== null && budget.remaining_monthly_spendable.startsWith('-')
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       {error !== null ? (
@@ -235,15 +243,24 @@ function BudgetCard({
           <p className="mt-1 text-3xl font-semibold text-slate-900">
             {negative ? formatEuros('0.00') : formatEuros(budget.spendable_today)}
           </p>
-          {negative && (
+          <p className="mt-1 text-xs text-slate-500">
+            {formatEuros(budget.monthly_spendable)} this month ({formatEuros(budget.daily_allowance)} per day)
+          </p>
+          {negative && !monthNegative && (
             <p className="mt-1 text-xs text-red-600">
-              You're {formatEuros(budget.spendable_today.slice(1))} over
+              {formatEuros(budget.spendable_today.slice(1))} over today's budget
             </p>
           )}
-          <p className="mt-1 text-xs text-slate-500">
-            {formatEuros(budget.daily_allowance)} per day ·{' '}
-            {formatEuros(budget.monthly_spendable)} this month
-          </p>
+          {monthNegative ? (
+            <p className="mt-1 text-xs text-red-600">
+              {formatEuros(budget.remaining_monthly_spendable.slice(1))} over this
+              month's budget
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-slate-500">
+              {formatEuros(budget.remaining_monthly_spendable)} left this month
+            </p>
+          )}
         </>
       )}
     </section>

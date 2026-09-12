@@ -39,13 +39,18 @@ export type Trend = {
 
 /** The Budget card (issue #66): the current Europe/Rome month's frame —
  * deliberately no month parameter, the Budget is current-month-only by
- * product decision. `spendable_today` is sent raw and may be negative;
- * the card renders it as 0 until future accruals repay the debt. */
+ * product decision. `spendable_today` and `remaining_monthly_spendable`
+ * are sent raw and may be negative: the card renders the bucket as 0
+ * until future accruals repay the debt. */
 export type BudgetView = {
   month: string
   monthly_spendable: string
   daily_allowance: string
   spendable_today: string
+  /** The part of the month's frame not drained yet (issue #100): the
+   * Monthly Spendable minus the Discretionary Expenses dated from the 1st
+   * through today. Raw, may be negative. */
+  remaining_monthly_spendable: string
 }
 
 export async function fetchBudget(token: string): Promise<BudgetView> {

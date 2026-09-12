@@ -1,7 +1,8 @@
 """Dashboard Budget card — issue #65, through the HTTP seam.
 
 GET /dashboard/budget returns the current Europe/Rome month's Budget:
-monthly_spendable, daily_allowance, spendable_today. Deliberately no month
+monthly_spendable, daily_allowance, spendable_today, and
+remaining_monthly_spendable (issue #100). Deliberately no month
 parameter: the Budget is current-month-only by product decision (the summary
 endpoint stays month-parameterized and untouched). Everything is derived,
 nothing stored (ADR-0001): Monthly Spendable sums the Recurring Income
@@ -11,6 +12,9 @@ and Spendable Today is the allowance accrued from the 1st through today minus
 the Discretionary Expenses dated in that span: linked Expenses never drain,
 one-off Incomes never fill, Transfers and Opening Balances never touch it,
 and an Expense dated later in the month doesn't drain until its date arrives.
+Remaining Monthly Spendable is the same Discretionary Expenses subtracted
+from the whole month's frame instead of today's accrual, so it follows every
+one of those rules and may be negative.
 
 Tests share one Postgres database and one seeded Account, so assertions are
 delta-based: each test reads the budget before creating its data and asserts
@@ -255,6 +259,7 @@ async def test_dashboard_budget_shape_and_empty_state_for_a_fresh_account(
         assert budget["monthly_spendable"] == "0.00"
         assert budget["daily_allowance"] == "0.00"
         assert budget["spendable_today"] == "0.00"
+        assert budget["remaining_monthly_spendable"] == "0.00"
     finally:
         delete_account(database_url, account_id)
 
@@ -545,6 +550,80 @@ async def test_an_expense_later_in_the_month_does_not_drain_until_its_date(
     ) + Decimal("-50.00")
 
 
+async def test_remaining_monthly_spendable_is_the_monthly_spendable_minus_spending(
+    client: AsyncClient,
+) -> None:
+    """Remaining Monthly Spendable (issue #100) is the part of the month's
+    frame not drained yet: the Monthly Spendable minus the Discretionary
+    Expenses dated 1st→today — the same `spent` figure Spendable Today
+    subtracts from its accrual, so the same rules hold. A cost's Occurrence
+    lowers it before any payment (due or not); paying that cost with a
+    linked Expense never lowers it further; an unlinked Expense lowers it
+    euro for euro."""
+    token = await _login(client)
+    before = await _budget(client, token)
+    wallet = await _create_wallet(client, token, "Remaining Wallet")
+    # A monthly cost anchored on the 15th of last month: exactly one
+    # Occurrence due this month, unpaid — it counts whether paid or not.
+    cost = await _create_recurring_cost(client, token, name="Remaining Rent")
+    after_cost = await _budget(client, token)
+    assert Decimal(after_cost["remaining_monthly_spendable"]) == Decimal(
+        before["remaining_monthly_spendable"]
+    ) + Decimal("-500.00")
+    # The linked Expense pays the cost: Remaining Monthly Spendable ignores
+    # it — the Occurrence already counted, and linked Expenses never drain.
+    await _create_expense(
+        client, token, wallet, "500.00", _today(), recurring_cost_id=cost
+    )
+    after_link = await _budget(client, token)
+    assert (
+        after_link["remaining_monthly_spendable"]
+        == after_cost["remaining_monthly_spendable"]
+    )
+    # A Discretionary Expense drains it euro for euro.
+    await _create_expense(client, token, wallet, "100.00", _today())
+    after_drain = await _budget(client, token)
+    assert Decimal(after_drain["remaining_monthly_spendable"]) == Decimal(
+        after_link["remaining_monthly_spendable"]
+    ) + Decimal("-100.00")
+    # An unlinked Expense on a Contact Wallet — consumption the contact
+    # paid for (ADR-0017) — is a Discretionary Expense too, so it drains.
+    contact = await _create_wallet(client, token, "Remaining Marco", "contact")
+    await _create_expense(client, token, contact, "30.00", _today())
+    after_contact = await _budget(client, token)
+    assert Decimal(after_contact["remaining_monthly_spendable"]) == Decimal(
+        after_drain["remaining_monthly_spendable"]
+    ) + Decimal("-30.00")
+
+
+async def test_a_future_dated_expense_does_not_reduce_remaining_until_its_date(
+    client: AsyncClient,
+) -> None:
+    """Remaining Monthly Spendable subtracts the Discretionary Expenses
+    dated from the 1st through today only: an unlinked Expense dated later
+    in the month reduces it only once its date arrives, like Spendable
+    Today (issue #100)."""
+    today = date.fromisoformat(_today())
+    if today.day == _days_in_current_month():
+        pytest.skip("today is the last day of the month: no later day exists")
+    token = await _login(client)
+    before = await _budget(client, token)
+    wallet = await _create_wallet(client, token, "Remaining Future Wallet")
+    later = today + timedelta(days=1)
+    await _create_expense(client, token, wallet, "50.00", later.isoformat())
+    after_future = await _budget(client, token)
+    assert (
+        after_future["remaining_monthly_spendable"]
+        == before["remaining_monthly_spendable"]
+    )
+    # The same amount dated today does reduce it.
+    await _create_expense(client, token, wallet, "50.00", _today())
+    after_today = await _budget(client, token)
+    assert Decimal(after_today["remaining_monthly_spendable"]) == Decimal(
+        before["remaining_monthly_spendable"]
+    ) + Decimal("-50.00")
+
+
 async def test_spendable_today_is_sent_raw_and_can_be_negative(
     client: AsyncClient, database_url: str
 ) -> None:
@@ -564,6 +643,7 @@ async def test_spendable_today_is_sent_raw_and_can_be_negative(
         assert budget["monthly_spendable"] == "0.00"
         assert budget["daily_allowance"] == "0.00"
         assert budget["spendable_today"] == "-1000.00"
+        assert budget["remaining_monthly_spendable"] == "-1000.00"
     finally:
         delete_account(database_url, account_id)
 
@@ -592,9 +672,13 @@ async def test_a_negative_month_floors_the_daily_allowance_at_zero(
         assert budget["monthly_spendable"] == "-1000.00"
         assert budget["daily_allowance"] == "0.00"
         assert budget["spendable_today"] == "0.00"
-        # Spending still drains, going further below zero.
+        # The month's frame is negative before any spending, and spending
+        # drains Remaining Monthly Spendable further below zero.
+        assert budget["remaining_monthly_spendable"] == "-1000.00"
         await _create_expense(client, token, wallet, "25.00", _today())
-        assert (await _budget(client, token))["spendable_today"] == "-25.00"
+        after_spend = await _budget(client, token)
+        assert after_spend["spendable_today"] == "-25.00"
+        assert after_spend["remaining_monthly_spendable"] == "-1025.00"
     finally:
         delete_account(database_url, account_id)
 
@@ -697,6 +781,9 @@ async def test_editing_a_recurring_definition_recomputes_the_month(
     assert Decimal(after_create["monthly_spendable"]) == Decimal(
         before["monthly_spendable"]
     ) + Decimal("-500.00")
+    assert Decimal(after_create["remaining_monthly_spendable"]) == Decimal(
+        before["remaining_monthly_spendable"]
+    ) + Decimal("-500.00")
 
     response = await client.patch(
         f"/recurring-costs/{cost}",
@@ -707,6 +794,9 @@ async def test_editing_a_recurring_definition_recomputes_the_month(
     after_amount = await _budget(client, token)
     assert Decimal(after_amount["monthly_spendable"]) == Decimal(
         before["monthly_spendable"]
+    ) + Decimal("-700.00")
+    assert Decimal(after_amount["remaining_monthly_spendable"]) == Decimal(
+        before["remaining_monthly_spendable"]
     ) + Decimal("-700.00")
 
     # Moving the start date to next month removes every Occurrence due this
@@ -719,6 +809,10 @@ async def test_editing_a_recurring_definition_recomputes_the_month(
     assert response.status_code == 200
     after_move = await _budget(client, token)
     assert after_move["monthly_spendable"] == before["monthly_spendable"]
+    assert (
+        after_move["remaining_monthly_spendable"]
+        == before["remaining_monthly_spendable"]
+    )
 
     # Deleting the definition changes nothing further — it was already gone
     # from the month — and its linked expenses (none here) would survive as
@@ -742,6 +836,9 @@ async def test_editing_or_deleting_a_transaction_recomputes_the_month(
     assert Decimal(after_create["spendable_today"]) == Decimal(
         before["spendable_today"]
     ) + Decimal("-100.00")
+    assert Decimal(after_create["remaining_monthly_spendable"]) == Decimal(
+        before["remaining_monthly_spendable"]
+    ) + Decimal("-100.00")
 
     response = await client.patch(
         f"/transactions/{expense}",
@@ -753,7 +850,15 @@ async def test_editing_or_deleting_a_transaction_recomputes_the_month(
     assert Decimal(after_amount["spendable_today"]) == Decimal(
         before["spendable_today"]
     ) + Decimal("-150.00")
+    assert Decimal(after_amount["remaining_monthly_spendable"]) == Decimal(
+        before["remaining_monthly_spendable"]
+    ) + Decimal("-150.00")
 
     response = await client.delete(f"/transactions/{expense}", headers=_auth(token))
     assert response.status_code == 200
-    assert (await _budget(client, token))["spendable_today"] == before["spendable_today"]
+    after_delete = await _budget(client, token)
+    assert after_delete["spendable_today"] == before["spendable_today"]
+    assert (
+        after_delete["remaining_monthly_spendable"]
+        == before["remaining_monthly_spendable"]
+    )

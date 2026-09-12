@@ -162,8 +162,9 @@ def _month_range(from_month: Month, to_month: Month) -> list[Month]:
 
 def monthly_budget(session: Session, account_id: int) -> dict:
     """The Budget card (issue #65): the current Europe/Rome month's Monthly
-    Spendable, Daily Allowance, and Spendable Today — deliberately no month
-    parameter, the Budget is current-month-only by product decision.
+    Spendable, Daily Allowance, Spendable Today, and Remaining Monthly
+    Spendable (issue #100) — deliberately no month parameter, the Budget is
+    current-month-only by product decision.
 
     Everything derived, nothing stored (ADR-0001). Monthly Spendable sums
     the Recurring Income Occurrences due in the month minus the Recurring
@@ -174,7 +175,11 @@ def monthly_budget(session: Session, account_id: int) -> dict:
     today minus the Discretionary Expenses dated in that span: only Expense
     Transactions with no Recurring Cost link drain, and only once their date
     has arrived; one-off Incomes never fill, Transfers and Opening Balances
-    never touch it.
+    never touch it. Remaining Monthly Spendable is the same subtraction
+    against the whole month's frame — Monthly Spendable minus the
+    Discretionary Expenses dated 1st through today — sent raw and possibly
+    negative, the part of the month still spendable once every future day's
+    accrual is counted in (CONTEXT.md).
     """
     month = Month.current()
     today = rome_today()
@@ -190,6 +195,7 @@ def monthly_budget(session: Session, account_id: int) -> dict:
         "spendable_today": budget.spendable_today(
             monthly_spendable, month, today, spent
         ),
+        "remaining_monthly_spendable": monthly_spendable - spent,
     }
 
 

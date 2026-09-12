@@ -176,6 +176,7 @@ beforeEach(() => {
     monthly_spendable: '0.00',
     daily_allowance: '0.00',
     spendable_today: '0.00',
+    remaining_monthly_spendable: '0.00',
   })
 })
 

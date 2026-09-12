@@ -1,6 +1,8 @@
-/** Dashboard cards: the Budget card (issue #66) — the big Spendable Today,
- * the "per day · this month" line, the 0 + "you're X € over" note when the
- * bucket is negative, the hide-when-no-Recurring-definitions rule — plus the
+/** Dashboard cards: the Budget card (issues #66, #100) — the big Spendable
+ * Today, the "Y this month (X per day)" frame line, the "X left this month"
+ * line, the 0 + "X over today's budget" note when the bucket is negative
+ * (the month's own over-note replaces it when the whole frame is blown), the
+ * hide-when-no-Recurring-definitions rule — plus the
  * category pie and the trend, each toggling between Expenses and Incomes.
  * Loading and error states never look like an empty card. The API client is
  * mocked; the cards only render what the endpoints return — no computation
@@ -64,6 +66,7 @@ const budget: BudgetView = {
   monthly_spendable: '500.00',
   daily_allowance: '16.60',
   spendable_today: '49.80',
+  remaining_monthly_spendable: '333.40',
 }
 
 const createdAt = '2026-08-20T10:00:00Z'
@@ -150,20 +153,57 @@ afterEach(() => {
 })
 
 describe('Dashboard Budget card', () => {
-  it('renders the big Spendable Today and the per-day line from the endpoint', async () => {
+  it('renders the big Spendable Today and the frame line from the endpoint', async () => {
     render(<DashboardScreen />)
 
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
-    expect(screen.getByText('€16.60 per day · €500.00 this month')).toBeInTheDocument()
+    expect(screen.getByText('€500.00 this month (€16.60 per day)')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledWith('')
   })
 
-  it('shows 0 and a "you\'re X € over" note when the bucket is negative', async () => {
+  it('renders the Remaining Monthly Spendable line from the endpoint', async () => {
+    render(<DashboardScreen />)
+
+    expect(await screen.findByText('€333.40 left this month')).toBeInTheDocument()
+  })
+
+  it('shows 0 and an "over today\'s budget" note when the bucket is negative', async () => {
     fetchBudgetMock.mockResolvedValue({ ...budget, spendable_today: '-12.34' })
     render(<DashboardScreen />)
 
     expect(await screen.findByText('€0.00')).toBeInTheDocument()
-    expect(screen.getByText("You're €12.34 over")).toBeInTheDocument()
+    expect(screen.getByText("€12.34 over today's budget")).toBeInTheDocument()
+  })
+
+  it("shows the month's overage instead of the bucket note when the month is negative", async () => {
+    fetchBudgetMock.mockResolvedValue({
+      ...budget,
+      spendable_today: '-433.40',
+      remaining_monthly_spendable: '-100.00',
+    })
+    render(<DashboardScreen />)
+
+    expect(
+      await screen.findByText("€100.00 over this month's budget"),
+    ).toBeInTheDocument()
+    // The bucket's own over-note is transient — future accruals repay part
+    // of it — so when the whole month is blown the month's bottom line
+    // replaces it, never both. The big number still floors at 0.
+    expect(screen.getByText('€0.00')).toBeInTheDocument()
+    expect(screen.queryByText("€433.40 over today's budget")).not.toBeInTheDocument()
+    expect(screen.queryByText(/left this month/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the bucket note when only the bucket is negative', async () => {
+    fetchBudgetMock.mockResolvedValue({
+      ...budget,
+      spendable_today: '-33.40',
+      remaining_monthly_spendable: '300.00',
+    })
+    render(<DashboardScreen />)
+
+    expect(await screen.findByText("€33.40 over today's budget")).toBeInTheDocument()
+    expect(screen.getByText('€300.00 left this month')).toBeInTheDocument()
   })
 
   it('is hidden when the account has no Recurring definitions at all', async () => {
@@ -172,7 +212,7 @@ describe('Dashboard Budget card', () => {
     render(<DashboardScreen />)
 
     await screen.findByText('Net Worth')
-    // The card must not render — not even a "0,00 € per day" shell.
+    // The card must not render — not even an all-zero shell.
     await waitFor(() => {
       expect(screen.queryByText('Spendable Today')).not.toBeInTheDocument()
     })
@@ -231,7 +271,7 @@ describe('Dashboard Budget card', () => {
 
     // The card keeps its data and the endpoint is not asked again.
     expect(screen.getByText('€49.80')).toBeInTheDocument()
-    expect(screen.getByText('€16.60 per day · €500.00 this month')).toBeInTheDocument()
+    expect(screen.getByText('€500.00 this month (€16.60 per day)')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledTimes(1)
   })
 })

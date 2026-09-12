@@ -396,14 +396,24 @@ class BudgetView(BaseModel):
     negative (ADR-0012); `spendable_today` is the allowance accrued from
     the 1st through today minus the Discretionary Expenses dated in that
     span — sent raw, possibly negative, the card renders it as 0 until
-    future accruals repay it (issue #63, story 12)."""
+    future accruals repay it (issue #63, story 12);
+    `remaining_monthly_spendable` (issue #100) is the Monthly Spendable
+    minus the Discretionary Expenses dated from the 1st through today —
+    the part of the frame still spendable in the month, sent raw and
+    possibly negative."""
 
     month: str
     monthly_spendable: Decimal
     daily_allowance: Decimal
     spendable_today: Decimal
+    remaining_monthly_spendable: Decimal
 
-    @field_validator("monthly_spendable", "daily_allowance", "spendable_today")
+    @field_validator(
+        "monthly_spendable",
+        "daily_allowance",
+        "spendable_today",
+        "remaining_monthly_spendable",
+    )
     @classmethod
     def _euros(cls, value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.01"))
