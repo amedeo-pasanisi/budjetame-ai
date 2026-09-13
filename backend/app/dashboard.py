@@ -113,16 +113,20 @@ def _trend(
 
 @router.get("/budget", response_model=BudgetView)
 def dashboard_budget(
+    month: str | None = None,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
 ) -> BudgetView:
-    """The Budget card (issue #65): the current Europe/Rome month's Monthly
-    Spendable, Daily Allowance, Spendable Today, and Remaining Monthly
-    Spendable (issue #100) — deliberately no month parameter: the Budget is
-    current-month-only by product decision (the summary endpoint stays
-    month-parameterized and untouched). Everything is derived, nothing
-    stored (ADR-0001): editing a Recurring definition, a Transaction, or a
-    link recomputes the month retroactively from the 1st. `spendable_today`
-    and `remaining_monthly_spendable` are sent raw and possibly negative —
+    """The Budget card (issue #65): the requested Europe/Rome month's
+    Monthly Spendable, recurring component totals, Daily Allowance,
+    Spendable Today, and Remaining Monthly Spendable (issue #100) —
+    defaults to the current month when `?month=YYYY-MM` is absent
+    (backward-compatible). When a non-current month is selected, "today"
+    in the accrual and spending computation is the last day of that month,
+    so `spendable_today` and `remaining_monthly_spendable` reflect the
+    full month's final state. Everything is derived, nothing
+    stored (ADR-0001). `spendable_today` and
+    `remaining_monthly_spendable` are sent raw and possibly negative —
     rendering is the frontend's job."""
-    return BudgetView(**dashboard_service.monthly_budget(session, account.id))
+    ref_month = _month_or_422(month) if month is not None else Month.current()
+    return BudgetView(**dashboard_service.monthly_budget(session, account.id, ref_month))

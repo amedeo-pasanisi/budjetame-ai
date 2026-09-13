@@ -160,29 +160,41 @@ def _month_range(from_month: Month, to_month: Month) -> list[Month]:
     return months
 
 
-def monthly_budget(session: Session, account_id: int) -> dict:
-    """The Budget card (issue #65): the current Europe/Rome month's Monthly
-    Spendable, Daily Allowance, Spendable Today, and Remaining Monthly
-    Spendable (issue #100) — deliberately no month parameter, the Budget is
-    current-month-only by product decision.
+def monthly_budget(session: Session, account_id: int, month: Month | None = None) -> dict:
+    """The Budget card (issue #65): the requested Europe/Rome month's
+    Budget frame — defaults to the current month when `month` is None.
 
     Everything derived, nothing stored (ADR-0001). Monthly Spendable sums
     the Recurring Income Occurrences due in the month minus the Recurring
     Cost Occurrences due in it, counted by due date whether paid or not — a
     late-paid Occurrence counts in its due month, not the payment month —
     with the 29–31 clamping, per the pure
-    walker. Spendable Today is the allowance accrued from the 1st through
-    today minus the Discretionary Expenses dated in that span: only Expense
-    Transactions with no Recurring Cost link drain, and only once their date
-    has arrived; one-off Incomes never fill, Transfers and Opening Balances
-    never touch it. Remaining Monthly Spendable is the same subtraction
-    against the whole month's frame — Monthly Spendable minus the
-    Discretionary Expenses dated 1st through today — sent raw and possibly
-    negative, the part of the month still spendable once every future day's
-    accrual is counted in (CONTEXT.md).
+    walker. `recurring_incomes_total` and `recurring_costs_total` are the
+    component totals (their difference is `monthly_spendable`).
+
+    Spendable Today is the allowance accrued from the 1st through today
+    minus the Discretionary Expenses dated in that span: only Expense
+    Transactions with no Recurring Cost link drain, and only once their
+    date has arrived; one-off Incomes never fill, Transfers and Opening
+    Balances never touch it. For the current month, "today" is the actual
+    calendar day; for past or future months, "today" is the last day of
+    the selected month, so `spendable_today` and
+    `remaining_monthly_spendable` are computed against the full month's
+    spending.
+
+    Remaining Monthly Spendable is the same subtraction against the whole
+    month's frame — Monthly Spendable minus the Discretionary Expenses
+    dated 1st through today (or the month's last day) — sent raw and
+    possibly negative, the part of the month still spendable once every
+    future day's accrual is counted in (CONTEXT.md).
     """
-    month = Month.current()
-    today = rome_today()
+    if month is None:
+        month = Month.current()
+    is_current = month == Month.current()
+    today = rome_today() if is_current else date(
+        month.year, month.month,
+        calendar.monthrange(month.year, month.month)[1]
+    )
     first_day = date(month.year, month.month, 1)
     last_day = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
     income, costs = _occurrence_totals(session, account_id, first_day, last_day)
@@ -191,6 +203,8 @@ def monthly_budget(session: Session, account_id: int) -> dict:
     return {
         "month": month.iso,
         "monthly_spendable": monthly_spendable,
+        "recurring_incomes_total": income,
+        "recurring_costs_total": costs,
         "daily_allowance": budget.daily_allowance(monthly_spendable, month),
         "spendable_today": budget.spendable_today(
             monthly_spendable, month, today, spent

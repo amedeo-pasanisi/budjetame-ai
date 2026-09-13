@@ -35,6 +35,7 @@ export function DashboardScreen() {
   // The category pie's reference month: the selector lives inside the pie
   // card (US27); Net Worth never depends on it — balances are current.
   const [pieMonth, setPieMonth] = useState(currentMonth)
+  const [budgetMonth, setBudgetMonth] = useState(currentMonth)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [budget, setBudget] = useState<BudgetView | null>(null)
@@ -94,25 +95,24 @@ export function DashboardScreen() {
 
   useEffect(() => {
     let cancelled = false
-    // The Budget card always shows the current month (issue #66): unlike
-    // the summary, the endpoint takes no month parameter and the card
-    // ignores the pie card's month selector — so this effect depends on the
-    // token and the cache clock only, and a month change never refetches it.
-    // A failed load must never look like an empty Budget, so the error is
-    // its own state.
+    // The Budget card now supports a month selector (like the pie card):
+    // pass the selected month to the endpoint so the user can browse
+    // previous and future months' Budget frames. For non-current months
+    // the backend computes spendable_today and remaining against the last
+    // day of that month, so the card shows the full month's final state.
+    // A failed load must never look like an empty Budget, so the error
+    // is its own state.
     setBudgetError(null)
-    fetchBudget(token)
+    fetchBudget(token, budgetMonth)
       .then((data) => {
         if (!cancelled) setBudget(data)
       })
       .catch(() => {
         if (!cancelled) setBudgetError('Could not load the budget.')
       })
-    // The card hides entirely when the account has no Recurring definitions
-    // at all — an all-zero Budget can't tell "no definitions" from a month
-    // that nets to zero, so the Dashboard asks the two Recurring lists.
-    // Failure is silent and keeps the card visible: a failed load must
-    // never look like an empty Budget.
+    // The hasDefinitions check stays on token only (not budgetMonth): it
+    // checks whether the account has any definitions at all, and doesn't
+    // need to re-run on month change.
     Promise.all([fetchRecurringCosts(token), fetchRecurringIncomes(token)])
       .then(([costs, incomes]) => {
         if (!cancelled) {
@@ -123,7 +123,7 @@ export function DashboardScreen() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, budgetMonth, dataVersion])
 
   useEffect(() => {
     let cancelled = false
@@ -173,7 +173,13 @@ export function DashboardScreen() {
         </p>
       </section>
 
-      <BudgetCard budget={budget} error={budgetError} hasDefinitions={hasDefinitions} />
+      <BudgetCard
+        budget={budget}
+        error={budgetError}
+        hasDefinitions={hasDefinitions}
+        month={budgetMonth}
+        onMonthChange={setBudgetMonth}
+      />
 
       {/* While the new pie month's summary is in flight, the loaded data is
        * still the previous month's — never title the pie with the new month
@@ -199,27 +205,34 @@ export function DashboardScreen() {
 }
 
 
-/** The Budget card (issues #66, #100): Spendable Today for the current
- * Europe/Rome month — the big number, the frame line "Y this month (X per
- * day)" (Monthly Spendable · Daily Allowance), a red "X over today's
- * budget" note when the bucket is negative (the big number then shows 0:
- * future accruals repay the debt), and the Remaining Monthly Spendable
- * line "X left this month", muted below. When the whole frame is spent the
- * Remaining Monthly Spendable is negative and its line replaces the bucket
- * note: a red "X over this month's budget", never two over-notes at once.
- * It ignores the pie card's month selector and is hidden entirely when the
- * account has no Recurring definitions at all — an all-zero card would be
- * noise. Everything is rendered from GET /dashboard/budget, no computation
- * on the client; loading and error states match the other Dashboard cards,
- * and a failed load never looks like an empty Budget. */
+/** The Budget card (issues #66, #100): Spendable Today for the selected
+ * Europe/Rome month — defaulting to the current month, with a month
+ * selector so the user can browse previous and future months' Budget
+ * frames. The big number, the frame line "Y this month (X income − Z
+ * costs) · W per day" (Monthly Spendable, its recurring breakdown, Daily
+ * Allowance), a red "X over today's budget" note when the bucket is
+ * negative (the big number then shows 0: future accruals repay the
+ * debt), and the Remaining Monthly Spendable line "X left this month",
+ * muted below. When the whole frame is spent the Remaining Monthly
+ * Spendable is negative and its line replaces the bucket note: a red "X
+ * over this month's budget", never two over-notes at once. It is hidden
+ * entirely when the account has no Recurring definitions at all — an
+ * all-zero card would be noise. Everything is rendered from GET
+ * /dashboard/budget, no computation on the client; loading and error
+ * states match the other Dashboard cards, and a failed load never looks
+ * like an empty Budget. */
 function BudgetCard({
   budget,
   error,
   hasDefinitions,
+  month,
+  onMonthChange,
 }: {
   budget: BudgetView | null
   error: string | null
   hasDefinitions: boolean | null
+  month: string
+  onMonthChange: (month: string) => void
 }) {
   if (hasDefinitions === false) {
     return null
@@ -237,14 +250,29 @@ function BudgetCard({
         <p className="text-sm text-slate-500">Loading…</p>
       ) : (
         <>
-          <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-            Spendable Today
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+              Spendable Today
+            </p>
+            <label className="sr-only" htmlFor="budget-month">
+              Month
+            </label>
+            <input
+              id="budget-month"
+              type="month"
+              value={month}
+              onChange={(event) => onMonthChange(event.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
           <p className="mt-1 text-3xl font-semibold text-slate-900">
             {negative ? formatEuros('0.00') : formatEuros(budget.spendable_today)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {formatEuros(budget.monthly_spendable)} this month ({formatEuros(budget.daily_allowance)} per day)
+            {formatEuros(budget.monthly_spendable)} this month
+            ({formatEuros(budget.recurring_incomes_total)} income −{' '}
+            {formatEuros(budget.recurring_costs_total)} costs) ·{' '}
+            {formatEuros(budget.daily_allowance)} per day
           </p>
           {negative && !monthNegative && (
             <p className="mt-1 text-xs text-red-600">

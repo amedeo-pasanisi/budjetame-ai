@@ -386,30 +386,37 @@ class Trend(BaseModel):
 
 
 class BudgetView(BaseModel):
-    """The Dashboard's Budget card (issue #65): the current Europe/Rome
-    month's frame — no month parameter, the Budget is current-month-only by
-    product decision (the summary endpoint stays month-parameterized and
-    untouched). `monthly_spendable` is the Recurring Income Occurrences due
-    in the month minus the Recurring Cost Occurrences due in it, counted by
-    due date whether paid or not; `daily_allowance` divides it by the days
-    of the month, floored to the cent, and floors at 0 when the month is
-    negative (ADR-0012); `spendable_today` is the allowance accrued from
-    the 1st through today minus the Discretionary Expenses dated in that
-    span — sent raw, possibly negative, the card renders it as 0 until
-    future accruals repay it (issue #63, story 12);
-    `remaining_monthly_spendable` (issue #100) is the Monthly Spendable
-    minus the Discretionary Expenses dated from the 1st through today —
-    the part of the frame still spendable in the month, sent raw and
-    possibly negative."""
+    """The Dashboard's Budget card (issue #65): a month's Budget frame —
+    optionally parameterised by `?month=YYYY-MM` (defaults to the current
+    Europe/Rome month). `monthly_spendable` is the Recurring Income
+    Occurrences due in the month minus the Recurring Cost Occurrences due
+    in it, counted by due date whether paid or not;
+    `recurring_incomes_total` and `recurring_costs_total` are the
+    component totals (their difference is `monthly_spendable`).
+    `daily_allowance` divides `monthly_spendable` by the days of the
+    month, floored to the cent, and floors at 0 when the month is negative
+    (ADR-0012). `spendable_today` is the allowance accrued from the 1st
+    through today (or the last day of the month for past/future months)
+    minus the Discretionary Expenses dated in that span — sent raw,
+    possibly negative, the card renders it as 0 until future accruals
+    repay it (issue #63, story 12). `remaining_monthly_spendable` (issue
+    #100) is the Monthly Spendable minus the Discretionary Expenses dated
+    from the 1st through today (or the month's last day for
+    non-current months) — the part of the frame still spendable, sent raw
+    and possibly negative."""
 
     month: str
     monthly_spendable: Decimal
+    recurring_incomes_total: Decimal
+    recurring_costs_total: Decimal
     daily_allowance: Decimal
     spendable_today: Decimal
     remaining_monthly_spendable: Decimal
 
     @field_validator(
         "monthly_spendable",
+        "recurring_incomes_total",
+        "recurring_costs_total",
         "daily_allowance",
         "spendable_today",
         "remaining_monthly_spendable",

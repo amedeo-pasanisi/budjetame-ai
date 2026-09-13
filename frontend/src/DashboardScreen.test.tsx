@@ -59,11 +59,14 @@ const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 /** The card always shows the current Europe/Rome month (issue #66). */
 const currentMonth = todayInRome().slice(0, 7)
 
-/** A positive Budget: 500 € monthly spendable, 16,60 € per day, 49,80 € in
- * the bucket — the card renders these values back as-is. */
+/** A positive Budget: 500 € monthly spendable (2,100 € income − 850 €
+ * costs), 16,60 € per day, 49,80 € in the bucket — the card renders
+ * these values back as-is. */
 const budget: BudgetView = {
   month: currentMonth,
   monthly_spendable: '500.00',
+  recurring_incomes_total: '2100.00',
+  recurring_costs_total: '850.00',
   daily_allowance: '16.60',
   spendable_today: '49.80',
   remaining_monthly_spendable: '333.40',
@@ -153,12 +156,14 @@ afterEach(() => {
 })
 
 describe('Dashboard Budget card', () => {
-  it('renders the big Spendable Today and the frame line from the endpoint', async () => {
+  it('renders the big Spendable Today and the frame line with recurring breakdown from the endpoint', async () => {
     render(<DashboardScreen />)
 
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
-    expect(screen.getByText('€500.00 this month (€16.60 per day)')).toBeInTheDocument()
-    expect(fetchBudgetMock).toHaveBeenCalledWith('')
+    expect(
+      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs) · €16.60 per day'),
+    ).toBeInTheDocument()
+    expect(fetchBudgetMock).toHaveBeenCalledWith('', currentMonth)
   })
 
   it('renders the Remaining Monthly Spendable line from the endpoint', async () => {
@@ -262,16 +267,19 @@ describe('Dashboard Budget card', () => {
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
   })
 
-  it('ignores the pie-month selector — the card is current-month-only', async () => {
+  it('ignores the pie-month selector — the budget card has its own month selector', async () => {
     render(<DashboardScreen />)
     await screen.findByText('€49.80')
 
-    const monthInput = document.getElementById('pie-month') as HTMLInputElement
-    fireEvent.change(monthInput, { target: { value: '2020-01' } })
+    const pieMonthInput = document.getElementById('pie-month') as HTMLInputElement
+    fireEvent.change(pieMonthInput, { target: { value: '2020-01' } })
 
-    // The card keeps its data and the endpoint is not asked again.
+    // The budget card keeps its data and is not asked again just because
+    // the pie month changed — only its own selector refetches it.
     expect(screen.getByText('€49.80')).toBeInTheDocument()
-    expect(screen.getByText('€500.00 this month (€16.60 per day)')).toBeInTheDocument()
+    expect(
+      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs) · €16.60 per day'),
+    ).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledTimes(1)
   })
 })

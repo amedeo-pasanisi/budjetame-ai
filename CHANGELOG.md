@@ -5,6 +5,19 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+
+- **Dashboard** — the Budget card now supports a **month selector** (just
+  like the Pie card's): you can browse any month's Budget frame, not just
+  the current one. For past/future months, Spendable Today and Remaining
+  Monthly Spendable are computed against the month's last day, so you see
+  the final state. The frame line also breaks the Monthly Spendable into
+  its components: "€500.00 this month (€2100.00 income − €850.00 costs) ·
+  €16.60 per day" — you can see at a glance what's coming in, what's going
+  out, and what's left.
+
 ## [v1.7.0] — 2026-09-11
 
 ### Added

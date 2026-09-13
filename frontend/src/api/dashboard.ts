@@ -37,24 +37,38 @@ export type Trend = {
   months: MonthBucket[]
 }
 
-/** The Budget card (issue #66): the current Europe/Rome month's frame —
- * deliberately no month parameter, the Budget is current-month-only by
- * product decision. `spendable_today` and `remaining_monthly_spendable`
- * are sent raw and may be negative: the card renders the bucket as 0
- * until future accruals repay the debt. */
+/** The Budget card (issue #66): a month's Budget frame — optionally
+ * parameterised by `?month=YYYY-MM` (defaults to the current Europe/Rome
+ * month). `monthly_spendable` is the Recurring Income Occurrences due in
+ * the month minus the Recurring Cost Occurrences due in it, counted by
+ * due date whether paid or not; `recurring_incomes_total` and
+ * `recurring_costs_total` are the component totals (their difference is
+ * `monthly_spendable`). `spendable_today` and
+ * `remaining_monthly_spendable` are sent raw and may be negative: the
+ * card renders the bucket as 0 until future accruals repay the debt. For
+ * non-current months, "today" in the accrual and spending computation is
+ * the last day of that month, so `spendable_today` and
+ * `remaining_monthly_spendable` reflect the full month's final state. */
 export type BudgetView = {
   month: string
   monthly_spendable: string
+  recurring_incomes_total: string
+  recurring_costs_total: string
   daily_allowance: string
   spendable_today: string
   /** The part of the month's frame not drained yet (issue #100): the
    * Monthly Spendable minus the Discretionary Expenses dated from the 1st
-   * through today. Raw, may be negative. */
+   * through today (or the month's last day for non-current months). Raw,
+   * may be negative. */
   remaining_monthly_spendable: string
 }
 
-export async function fetchBudget(token: string): Promise<BudgetView> {
-  const response = await request('/dashboard/budget', {
+export async function fetchBudget(
+  token: string,
+  month?: string,
+): Promise<BudgetView> {
+  const query = month !== undefined ? `?month=${month}` : ''
+  const response = await request(`/dashboard/budget${query}`, {
     token,
     errorMessage: 'Could not load the budget',
   })
