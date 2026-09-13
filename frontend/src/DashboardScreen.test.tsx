@@ -161,8 +161,9 @@ describe('Dashboard Budget card', () => {
 
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
     expect(
-      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs) · €16.60 per day'),
+      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs)'),
     ).toBeInTheDocument()
+    expect(screen.getByText('€16.60 per day')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledWith('', currentMonth)
   })
 
@@ -278,8 +279,9 @@ describe('Dashboard Budget card', () => {
     // the pie month changed — only its own selector refetches it.
     expect(screen.getByText('€49.80')).toBeInTheDocument()
     expect(
-      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs) · €16.60 per day'),
+      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs)'),
     ).toBeInTheDocument()
+    expect(screen.getByText('€16.60 per day')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledTimes(1)
   })
 })
@@ -436,7 +438,7 @@ describe('Dashboard trend', () => {
     render(<DashboardScreen />)
     await screen.findByText(/Expenses Trend ·/)
 
-    fireEvent.click(screen.getByRole('button', { name: /April 2026: €0.00/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Apr 2026: €0.00/ }))
     expect(await screen.findByText('€0.00')).toBeInTheDocument()
   })
 

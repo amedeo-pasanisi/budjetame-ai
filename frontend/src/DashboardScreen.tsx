@@ -250,13 +250,13 @@ function BudgetCard({
         <p className="text-sm text-slate-500">Loading…</p>
       ) : (
         <>
+          <label className="sr-only" htmlFor="budget-month">
+            Month
+          </label>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
               Spendable Today
             </p>
-            <label className="sr-only" htmlFor="budget-month">
-              Month
-            </label>
             <input
               id="budget-month"
               type="month"
@@ -271,7 +271,9 @@ function BudgetCard({
           <p className="mt-1 text-xs text-slate-500">
             {formatEuros(budget.monthly_spendable)} this month
             ({formatEuros(budget.recurring_incomes_total)} income −{' '}
-            {formatEuros(budget.recurring_costs_total)} costs) ·{' '}
+            {formatEuros(budget.recurring_costs_total)} costs)
+          </p>
+          <p className="text-xs text-slate-500">
             {formatEuros(budget.daily_allowance)} per day
           </p>
           {negative && !monthNegative && (
@@ -803,20 +805,20 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
 }
 
 /** "2026-08" → "Aug"; January bars also carry the year so long ranges stay
- * readable ("Jan ’26"). */
+ * readable ("Jan '26"). Always uses abbreviated English month names. */
 function shortMonthLabel(month: string): string {
   const [year, monthIndex] = month.split('-').map(Number)
-  const short = new Date(year, monthIndex - 1, 1).toLocaleDateString(undefined, {
+  const short = new Date(year, monthIndex - 1, 1).toLocaleDateString('en', {
     month: 'short',
   })
-  return monthIndex === 1 ? `${short} ’${String(year).slice(2)}` : short
+  return monthIndex === 1 ? `${short} '${String(year).slice(2)}` : short
 }
 
-/** "2026-08" → "August 2026", rendered in the user's locale. */
+/** "2026-08" → "Aug 2026", always uses abbreviated English month names. */
 function monthLabel(month: string): string {
   const [year, monthIndex] = month.split('-').map(Number)
-  return new Date(year, monthIndex - 1, 1).toLocaleDateString(undefined, {
-    month: 'long',
+  return new Date(year, monthIndex - 1, 1).toLocaleDateString('en', {
+    month: 'short',
     year: 'numeric',
   })
 }
