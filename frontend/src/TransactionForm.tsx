@@ -31,13 +31,9 @@ import { projectBalance, projectTransfer } from './balanceProjection'
 import {
   formatLocation,
   getGpsPosition,
-  gpsPrefillAvailable,
   latLngFromWire,
   latLngToWire,
-  locationOptOutActive,
   mapLink,
-  markGpsGranted,
-  markLocationOptOut,
   placeFromWire,
   placeToWire,
   type LatLng,
@@ -250,14 +246,6 @@ export function TransactionForm({
     placeFromWire(editing?.place_name ?? null, editing?.place_id ?? null),
   )
   const [showingPicker, setShowingPicker] = useState(false)
-  // Set once the user removes the location: the first-save prompt must not
-  // silently re-attach a position the user opted out of (consent, US7/T9).
-  // Seeded from the session flag (issue #25) so the opt-out survives the tab
-  // switch that unmounts the form; manual add paths never consult it.
-  const [locationOptedOut, setLocationOptedOut] = useState(() => locationOptOutActive())
-  // Set once the user changes the location themselves, so a pending GPS prefill
-  // cannot overwrite an explicit choice.
-  const locationTouched = useRef(false)
   // GPS feedback (issue #35): true while the "Use my location" lookup runs,
   // so the button can disable and show "Locating…" instead of failing silently.
   const [locating, setLocating] = useState(false)
@@ -359,29 +347,7 @@ export function TransactionForm({
     cashAfter !== null &&
     cashAfter < 0
 
-  // GPS prefill (US18 / T9): when creating a Transaction and device-location
-  // permission is already granted, pre-fill the location from the current
-  // position so recording takes one tap. The browser never prompts here — it
-  // only prompts on the first save (below). A user-chosen or user-removed
-  // location is never overwritten by a pending prefill.
-  useEffect(() => {
-    if (isEditing || locationOptedOut) {
-      return
-    }
-    let cancelled = false
-    gpsPrefillAvailable().then((available) => {
-      if (!available || cancelled) return
-      getGpsPosition().then((position) => {
-        if (position !== null && !cancelled && !locationTouched.current) {
-          setLocation(position)
-          markGpsGranted()
-        }
-      })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [isEditing, locationOptedOut])
+
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -489,13 +455,11 @@ export function TransactionForm({
     try {
       const position = await getGpsPosition()
       if (position !== null) {
-        locationTouched.current = true
         setLocation(position)
         // A GPS pick is coordinates-only and clears any stored Place
         // (ADR-0005): the name must always match the coordinates.
         setPlace(null)
         setShowingPicker(false)
-        markGpsGranted()
       } else {
         // Denied, timed out, or unavailable: say so instead of failing
         // silently, with the map picker still one tap away (issue #35).
@@ -682,19 +646,11 @@ export function TransactionForm({
             <button
               type="button"
               onClick={() => {
-                locationTouched.current = true
                 setLocation(null)
                 // Removing the location removes its Place with it (ADR-0005):
                 // a Place never survives without coordinates.
                 setPlace(null)
-                setLocationOptedOut(true)
                 setGpsError(null)
-                // The opt-out is a create-form decision (issue #25): removing
-                // a location on a new Transaction disables the GPS prefill
-                // for the session; editing is unaffected.
-                if (!isEditing) {
-                  markLocationOptOut()
-                }
                 setShowingPicker(false)
               }}
               className="rounded px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 active:bg-red-100"
@@ -710,7 +666,6 @@ export function TransactionForm({
             <MapPicker
               position={location}
               onPick={(picked, pickedPlace) => {
-                locationTouched.current = true
                 setLocation(picked)
                 // A pick that carries a Place sets it; a coordinates-only
                 // pick (bare-map/Leaflet tap, GPS, failed lookup) clears it.

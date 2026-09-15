@@ -170,9 +170,6 @@ const baseTransaction: Transaction = {
 }
 
 beforeEach(() => {
-  // A fresh session keeps the GPS prefill quiet: markGpsGranted from earlier
-  // tests would otherwise arm it for create-form tests and consume the mock.
-  sessionStorage.clear()
   picker.onPick = null
   getGpsPositionMock.mockReset()
   getGpsPositionMock.mockResolvedValue(null)
