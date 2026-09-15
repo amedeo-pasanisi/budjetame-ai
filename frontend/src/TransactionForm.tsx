@@ -389,18 +389,7 @@ export function TransactionForm({
     setError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
-      // First-save permission (US7 / T9): when creating without a location, ask
-      // for device-location permission — the browser prompts exactly once — and
-      // attach the position when granted. A location the user removed
-      // (locationOptedOut) or picked explicitly is never overridden.
-      let finalLocation = location
-      if (!isEditing && finalLocation === null && !locationOptedOut) {
-        finalLocation = await getGpsPosition()
-        if (finalLocation !== null) {
-          setLocation(finalLocation)
-          markGpsGranted()
-        }
-      }
+      const finalLocation = location
       const input: TransactionInput = isTransfer
         ? {
             type: 'transfer',
