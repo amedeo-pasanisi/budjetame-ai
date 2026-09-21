@@ -7,6 +7,25 @@ is the sum of all Wallet balances.
 Domain vocabulary lives in [`CONTEXT.md`](CONTEXT.md); architectural decisions in
 [`docs/adr/`](docs/adr/). Product work is tracked as GitHub issues.
 
+## Documentation
+
+All documentation lives at the repo root or under `docs/`. Read them in this
+order to understand the project:
+
+| File / Directory | What it contains |
+|---|---|
+| [`CONTEXT.md`](CONTEXT.md) | Domain glossary — every term and business rule, in precise language |
+| [`docs/adr/`](docs/adr/) | Architecture Decision Records, numbered `0001-` upwards. Read in order. |
+| [`README.md`](README.md) (this file) | Project overview, stack, local dev, deployment, conventions |
+| [`CHANGELOG.md`](CHANGELOG.md) | User-facing change history from the first release onward |
+| [`product_backlog.md`](product_backlog.md) | Product roadmap and feature backlog |
+| [`docs/deploy-oracle.md`](docs/deploy-oracle.md) | Oracle Cloud Always Free deployment record |
+| [`docs/agents/`](docs/agents/) | Agent workflow policies (issue tracker, triage labels, domain docs conventions) |
+| [`AGENTS.md`](AGENTS.md) | Agent skills index — links into `docs/agents/` |
+
+The directories above are conventions — new files added under `docs/adr/` or
+`docs/agents/` are automatically discoverable by their naming pattern.
+
 ## Stack
 
 - **Backend**: FastAPI + SQLAlchemy + Alembic + PostgreSQL (`backend/`)
