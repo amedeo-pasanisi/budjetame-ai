@@ -52,7 +52,6 @@ import {
   ApiError,
   createRecurringCost,
   freezeRecurringCost,
-  unfreezeRecurringCost,
   fetchRecurringCostOccurrences,
   fetchRecurringCosts,
   updateRecurringCost,
@@ -117,7 +116,7 @@ const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const createRecurringCostMock = vi.mocked(createRecurringCost)
 const updateRecurringCostMock = vi.mocked(updateRecurringCost)
 const freezeRecurringCostMock = vi.mocked(freezeRecurringCost)
-const unfreezeRecurringCostMock = vi.mocked(unfreezeRecurringCost)
+
 const fetchRecurringCostOccurrencesMock = vi.mocked(fetchRecurringCostOccurrences)
 
 beforeEach(() => {
@@ -221,6 +220,7 @@ describe('RecurringCostsScreen create flow', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
+      frozen: false,
       created_at: createdAt,
     })
     render(<RecurringCostsScreen />)
@@ -405,6 +405,7 @@ describe('RecurringCostsScreen backlog badge', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
+      frozen: false,
       created_at: createdAt,
     })
     render(<RecurringCostsScreen />)

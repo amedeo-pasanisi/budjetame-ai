@@ -70,11 +70,13 @@ vi.mock('./api', async () => {
     fetchRecurringCosts: vi.fn(),
     createRecurringCost: vi.fn(),
     updateRecurringCost: vi.fn(),
-    deleteRecurringCost: vi.fn(),
+    freezeRecurringCost: vi.fn(),
+    unfreezeRecurringCost: vi.fn(),
     fetchRecurringIncomes: vi.fn(),
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
-    deleteRecurringIncome: vi.fn(),
+    freezeRecurringIncome: vi.fn(),
+    unfreezeRecurringIncome: vi.fn(),
   }
 })
 
@@ -641,6 +643,7 @@ describe('AppShell recurring ledger jump (ADR-0026)', () => {
       next_due_date: '2026-09-01',
       next_unpaid_occurrence_date: '2026-09-01',
       backlog_count: 0,
+      frozen: false,
       created_at: createdAt,
     },
   ]
@@ -655,6 +658,7 @@ describe('AppShell recurring ledger jump (ADR-0026)', () => {
       next_due_date: '2026-09-01',
       next_unpaid_occurrence_date: '2026-09-01',
       backlog_count: 0,
+      frozen: false,
       created_at: createdAt,
     },
   ]

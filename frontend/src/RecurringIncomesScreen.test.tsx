@@ -53,7 +53,6 @@ import {
   ApiError,
   createRecurringIncome,
   freezeRecurringIncome,
-  unfreezeRecurringIncome,
   fetchRecurringIncomeOccurrences,
   fetchRecurringIncomes,
   updateRecurringIncome,
@@ -117,7 +116,7 @@ const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 const createRecurringIncomeMock = vi.mocked(createRecurringIncome)
 const updateRecurringIncomeMock = vi.mocked(updateRecurringIncome)
 const freezeRecurringIncomeMock = vi.mocked(freezeRecurringIncome)
-const unfreezeRecurringIncomeMock = vi.mocked(unfreezeRecurringIncome)
+
 const fetchRecurringIncomeOccurrencesMock = vi.mocked(fetchRecurringIncomeOccurrences)
 
 beforeEach(() => {
@@ -224,6 +223,7 @@ describe('RecurringIncomesScreen create flow', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
+      frozen: false,
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)
@@ -407,6 +407,7 @@ describe('RecurringIncomesScreen backlog badge', () => {
       next_due_date: '2026-08-24',
       next_unpaid_occurrence_date: '2026-08-24',
       backlog_count: 1,
+      frozen: false,
       created_at: createdAt,
     })
     render(<RecurringIncomesScreen />)

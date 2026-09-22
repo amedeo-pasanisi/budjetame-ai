@@ -84,6 +84,7 @@ const cost: RecurringCost = {
   next_due_date: '2026-09-01',
   next_unpaid_occurrence_date: '2026-09-01',
   backlog_count: 0,
+  frozen: false,
   created_at: createdAt,
 }
 
@@ -97,6 +98,7 @@ const income: RecurringIncome = {
   next_due_date: '2026-09-27',
   next_unpaid_occurrence_date: '2026-09-27',
   backlog_count: 0,
+  frozen: false,
   created_at: createdAt,
 }
 

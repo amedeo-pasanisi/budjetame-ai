@@ -274,6 +274,7 @@ const rentCost: RecurringCost = {
   next_due_date: '2026-08-01',
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
+  frozen: false,
   created_at: '2026-08-01T10:00:00Z'
 }
 
@@ -288,6 +289,7 @@ const salaryIncome: RecurringIncome = {
   next_due_date: '2026-08-01',
   next_unpaid_occurrence_date: '2026-08-01',
   backlog_count: 0,
+  frozen: false,
   created_at: '2026-08-01T10:00:00Z'
 }
 
