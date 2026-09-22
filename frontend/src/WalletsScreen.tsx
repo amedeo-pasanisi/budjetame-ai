@@ -122,9 +122,14 @@ export function WalletsScreen({
           ? current
           : current.map((existing) => (existing.id === unfrozen.id ? unfrozen : existing)),
       )
+      setModal(null)
     } catch {
       setUnfreezeError('Could not unfreeze the wallet.')
     }
+  }
+
+  const handleUnfrozenFromModal = (wallet: Wallet) => {
+    handleUnfrozen(wallet)
   }
 
   // The sections are derived at render time: group by type in the fixed
@@ -272,13 +277,6 @@ export function WalletsScreen({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleUnfrozen(wallet)}
-                      className="h-9 shrink-0 px-1 text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                    >
-                      Unfreeze
-                    </button>
-                    <button
-                      type="button"
                       aria-label={`Edit ${wallet.name}`}
                       onClick={() => setModal({ kind: 'edit', wallet })}
                       className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
@@ -301,6 +299,7 @@ export function WalletsScreen({
           wallet={modal.kind === 'edit' ? modal.wallet : undefined}
           onSaved={handleSaved}
           onFrozen={handleFrozen}
+          onUnfrozen={handleUnfrozenFromModal}
           onClose={() => setModal(null)}
         />
       )}

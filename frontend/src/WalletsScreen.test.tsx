@@ -372,14 +372,16 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
     expect(screen.queryByText('Old Card')).not.toBeInTheDocument()
   })
 
-  it('one tap on the Unfreeze button unfreezes a frozen row: it lands in its type section at its sorted position and the footer row disappears', async () => {
+  it('unfreezes from the edit modal: lands in its type section at its sorted position and the footer row disappears', async () => {
     unfreezeWalletMock.mockResolvedValue({ ...frozenWallet, frozen: false })
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
     render(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Unfreeze' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Old Card' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unfreeze wallet' }))
 
     await waitFor(() => expect(unfreezeWalletMock).toHaveBeenCalledWith('', 7))
     const cards = rowTapButtons(screen.getByRole('region', { name: 'Credit Cards' })).map(
@@ -398,7 +400,9 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
     expect(screen.queryByRole('region', { name: 'Cash' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Unfreeze' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Drawer' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unfreeze wallet' }))
 
     await waitFor(() => expect(unfreezeWalletMock).toHaveBeenCalledWith('', 8))
     expect(screen.getByRole('region', { name: 'Cash' })).toBeInTheDocument()

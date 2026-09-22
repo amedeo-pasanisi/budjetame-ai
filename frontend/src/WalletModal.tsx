@@ -15,20 +15,24 @@ type WalletModalProps = {
   prefillName?: string
   onSaved: (wallet: Wallet) => void
   onFrozen?: (walletId: number) => void
+  onUnfrozen?: (wallet: Wallet) => void
   onClose: () => void
 }
 
 /** The create/edit/freeze Wallet form inside the shared modal shell
  * (issue #49). Create and edit share this one modal: the Type selector and
  * Opening balance only appear while creating, and the tap-again freeze
- * confirmation only while editing. The shell adds the dismissal paths —
- * backdrop click, Cancel, and Escape all abandon the draft without saving. */
+ * or one-tap unfreeze confirmation only while editing. The shell adds the
+ * dismissal paths — backdrop click, Cancel, and Escape all abandon the
+ * draft without saving. Frozen wallets show an indigo Unfreeze button
+ * instead of the red Freeze button (ADR-0028). */
 export function WalletModal({
   wallet,
   allowedTypes,
   prefillName,
   onSaved,
   onFrozen,
+  onUnfrozen,
   onClose,
 }: WalletModalProps) {
   const editing = wallet !== undefined
@@ -41,6 +45,7 @@ export function WalletModal({
         prefillName={prefillName}
         onSaved={onSaved}
         onFrozen={onFrozen}
+        onUnfrozen={onUnfrozen}
         onCancel={onClose}
       />
     </ModalShell>

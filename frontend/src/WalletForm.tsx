@@ -7,6 +7,7 @@ import {
   createWallet,
   formatEuros,
   freezeWallet,
+  unfreezeWallet,
   renameWallet,
   type Wallet,
   type WalletType,
@@ -36,6 +37,7 @@ type WalletFormProps = {
   prefillName?: string
   onSaved: (wallet: Wallet) => void
   onFrozen?: (walletId: number) => void
+  onUnfrozen?: (wallet: Wallet) => void
   onCancel: () => void
 }
 
@@ -53,6 +55,7 @@ export function WalletForm({
   prefillName,
   onSaved,
   onFrozen,
+  onUnfrozen,
   onCancel,
 }: WalletFormProps) {
   const editing = wallet !== undefined
@@ -120,6 +123,22 @@ export function WalletForm({
           ? 'A wallet can only be frozen when its balance is exactly €0.00.'
           : 'Could not freeze the wallet.',
       )
+      setFreezing(false)
+    }
+  }
+
+  const handleUnfreeze = async () => {
+    if (wallet === undefined || !wallet.frozen) {
+      return
+    }
+    setFreezing(true)
+    setFreezeError(null)
+    try {
+      const token = localStorage.getItem(TOKEN_KEY) ?? ''
+      await unfreezeWallet(token, wallet.id)
+      onUnfrozen?.(wallet)
+    } catch {
+      setFreezeError('Could not unfreeze the wallet.')
       setFreezing(false)
     }
   }
@@ -226,7 +245,23 @@ export function WalletForm({
         </button>
       </div>
 
-      {editing && (
+      {editing && wallet?.frozen ? (
+        <div className="border-t border-slate-100 pt-4">
+          <h3 className="text-sm font-medium text-slate-900">Unfreeze wallet</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Restore this wallet: it will accept transactions again and reappear in
+            its type section.
+          </p>
+          <button
+            type="button"
+            onClick={handleUnfreeze}
+            disabled={freezing || submitting}
+            className="mt-3 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {freezing ? 'Unfreezing…' : 'Unfreeze wallet'}
+          </button>
+        </div>
+      ) : editing && (
         <div className="border-t border-slate-100 pt-4">
           <h3 className="text-sm font-medium text-slate-900">Freeze wallet</h3>
           <p className="mt-1 text-xs text-slate-500">
