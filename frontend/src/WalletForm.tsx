@@ -59,6 +59,7 @@ export function WalletForm({
   onCancel,
 }: WalletFormProps) {
   const editing = wallet !== undefined
+  const readOnly = wallet?.frozen === true
   const [name, setName] = useState(wallet?.name ?? prefillName ?? '')
   const [type, setType] = useState<WalletType>(
     wallet?.type ?? (allowedTypes !== undefined && !allowedTypes.includes('checking')
@@ -158,19 +159,23 @@ export function WalletForm({
       )}
 
       <div>
-        <label htmlFor="wallet-name" className="block text-sm font-medium text-slate-700">
+        <label htmlFor={readOnly ? undefined : "wallet-name"} className="block text-sm font-medium text-slate-700">
           Name
         </label>
-        <input
-          id="wallet-name"
-          type="text"
-          required
-          maxLength={80}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="e.g. Intesa checking"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
-        />
+        {readOnly ? (
+          <p className="mt-1 text-sm text-slate-900">{name}</p>
+        ) : (
+          <input
+            id="wallet-name"
+            type="text"
+            required
+            maxLength={80}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="e.g. Intesa checking"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+          />
+        )}
       </div>
 
       {!editing && (
@@ -227,41 +232,48 @@ export function WalletForm({
 
       {error !== null && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={submitting || name.trim() === ''}
-          className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
-        >
-          {submitting ? 'Saving…' : editing ? 'Save' : 'Create wallet'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={submitting}
-          className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
-        >
-          Cancel
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-3">
+          <button
+            type="submit"
+            disabled={submitting || name.trim() === ''}
+            className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
+          >
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create wallet'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
-      {editing && wallet?.frozen ? (
-        <div className="border-t border-slate-100 pt-4">
-          <h3 className="text-sm font-medium text-slate-900">Unfreeze wallet</h3>
-          <p className="mt-1 text-xs text-slate-500">
-            Restore this wallet: it will accept transactions again and reappear in
-            its type section.
-          </p>
+      {editing && readOnly && (
+        <div className="flex gap-3">
           <button
             type="button"
             onClick={handleUnfreeze}
             disabled={freezing || submitting}
-            className="mt-3 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
           >
             {freezing ? 'Unfreezing…' : 'Unfreeze wallet'}
           </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
+          >
+            Cancel
+          </button>
         </div>
-      ) : editing && (
+      )}
+
+      {editing && !readOnly && (
         <div className="border-t border-slate-100 pt-4">
           <h3 className="text-sm font-medium text-slate-900">Freeze wallet</h3>
           <p className="mt-1 text-xs text-slate-500">

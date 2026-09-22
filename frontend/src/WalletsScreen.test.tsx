@@ -464,7 +464,13 @@ describe('WalletsScreen trailing row buttons (issue #93)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit Old Card' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
 
-    expect(within(dialog).getByLabelText('Name')).toHaveValue('Old Card')
+    // A frozen wallet is read-only: the name renders as text, no input,
+    // and only the Unfreeze action is offered.
+    expect(within(dialog).getByText('Old Card')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Name')).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('button', { name: 'Unfreeze wallet' }),
+    ).toBeInTheDocument()
     expect(requestLedgerFilter).not.toHaveBeenCalled()
     expect(unfreezeWalletMock).not.toHaveBeenCalled()
   })

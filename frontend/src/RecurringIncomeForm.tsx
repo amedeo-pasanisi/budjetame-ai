@@ -15,6 +15,7 @@ import {
   type RecurringIncomeInput,
   type RecurringOccurrence,
 } from './api'
+import { intervalText } from './recurringIncomes'
 
 const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
   { value: 'days', one: 'Day', many: 'Days' },
@@ -61,6 +62,7 @@ export function RecurringIncomeForm({
   onCancel,
 }: RecurringIncomeFormProps) {
   const editing = income !== undefined
+  const readOnly = income?.frozen === true
 
   const [name, setName] = useState(income?.name ?? '')
   const [amount, setAmount] = useState(income?.amount ?? '')
@@ -131,6 +133,7 @@ export function RecurringIncomeForm({
   const intervalNumber = Number.parseInt(intervalValue, 10)
   const amountNumber = Number.parseFloat(amount)
   const canSave =
+    !readOnly &&
     name.trim() !== '' &&
     amountNumber > 0 &&
     intervalNumber >= 1 &&
@@ -233,67 +236,81 @@ export function RecurringIncomeForm({
       </div>
 
       <div>
-        <label htmlFor="recurring-income-amount" className="block text-sm font-medium text-slate-700">
+        <label htmlFor={readOnly ? undefined : "recurring-income-amount"} className="block text-sm font-medium text-slate-700">
           Amount
         </label>
-        <input
-          id="recurring-income-amount"
-          type="number"
-          step="0.01"
-          min="0.01"
-          inputMode="decimal"
-          required
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
-          placeholder="0.00"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
-        />
+        {readOnly ? (
+          <p className="mt-1 text-sm text-slate-900">{amount}</p>
+        ) : (
+          <input
+            id="recurring-income-amount"
+            type="number"
+            step="0.01"
+            min="0.01"
+            inputMode="decimal"
+            required
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            placeholder="0.00"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+          />
+        )}
       </div>
 
       <div>
-        <label htmlFor="recurring-income-interval" className="block text-sm font-medium text-slate-700">
+        <label htmlFor={readOnly ? undefined : "recurring-income-interval"} className="block text-sm font-medium text-slate-700">
           Repeats every
         </label>
-        <div className="mt-1 flex gap-2">
-          <input
-            id="recurring-income-interval"
-            type="number"
-            min="1"
-            step="1"
-            required
-            value={intervalValue}
-            onChange={(event) => setIntervalValue(event.target.value)}
-            aria-label="Every N"
-            className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-          />
-          <select
-            id="recurring-income-unit"
-            value={intervalUnit}
-            onChange={(event) => setIntervalUnit(event.target.value as IntervalUnit)}
-            aria-label="Interval unit"
-            className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-          >
-            {UNIT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {intervalNumber === 1 ? option.one : option.many}
-              </option>
-            ))}
-          </select>
-        </div>
+        {readOnly ? (
+          <p className="mt-1 text-sm text-slate-900">
+            {intervalText(intervalNumber, intervalUnit)}
+          </p>
+        ) : (
+          <div className="mt-1 flex gap-2">
+            <input
+              id="recurring-income-interval"
+              type="number"
+              min="1"
+              step="1"
+              required
+              value={intervalValue}
+              onChange={(event) => setIntervalValue(event.target.value)}
+              aria-label="Every N"
+              className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+            />
+            <select
+              id="recurring-income-unit"
+              value={intervalUnit}
+              onChange={(event) => setIntervalUnit(event.target.value as IntervalUnit)}
+              aria-label="Interval unit"
+              className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+            >
+              {UNIT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {intervalNumber === 1 ? option.one : option.many}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div>
-        <label htmlFor="recurring-income-start" className="block text-sm font-medium text-slate-700">
+        <label htmlFor={readOnly ? undefined : "recurring-income-start"} className="block text-sm font-medium text-slate-700">
           Start date
         </label>
-        <input
-          id="recurring-income-start"
-          type="date"
-          required={editing}
-          value={startDate}
-          onChange={(event) => setStartDate(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
-        />
+        {readOnly ? (
+          <p className="mt-1 text-sm text-slate-900">{startDate}</p>
+        ) : (
+          <input
+            id="recurring-income-start"
+            type="date"
+            required={editing}
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
+          />
+        )}
         {!editing && (
           <p className="mt-1 text-xs text-slate-500">
             The first occurrence. Leave empty to start today.
@@ -301,14 +318,9 @@ export function RecurringIncomeForm({
         )}
       </div>
 
-      {/* The Occurrences section (ADR-0026) — edit mode only: a definition
-          under creation has no id yet. Rows are the definition's non-Paid
-          Occurrences, newest first, in the order the read returns: the
-          next incoming Unpaid one on top, then every excused future row,
-          then the past rows (today first) down to the oldest. Skipped
-          rows stay greyed with Un-skip, so every excused Occurrence stays
-          reachable; a row's own toggle works in any order. */}
-      {editing && (
+      {/* The Occurrences section — hidden for frozen definitions: there
+          are no unpaid occurrences to skip. */}
+      {editing && !readOnly && (
         <div className="space-y-2">
           <h3 className="text-sm font-medium text-slate-700">Occurrences</h3>
           {occurrencesError !== null && (
@@ -363,36 +375,48 @@ export function RecurringIncomeForm({
 
       {error !== null && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={submitting || !canSave}
-          className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
-        >
-          {submitting ? 'Saving…' : editing ? 'Save' : 'Create recurring income'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={submitting}
-          className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
-        >
-          Cancel
-        </button>
-      </div>
-
-      {editing && income?.frozen && onUnfreeze !== undefined && (
-        <button
-          type="button"
-          onClick={handleUnfreeze}
-          disabled={submitting}
-          className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
-        >
-          {submitting ? 'Unfreezing…' : 'Unfreeze recurring income'}
-        </button>
+      {!readOnly && (
+        <div className="flex gap-3">
+          <button
+            type="submit"
+            disabled={submitting || !canSave}
+            className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
+          >
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create recurring income'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
+          >
+            Cancel
+          </button>
+        </div>
       )}
 
-      {editing && !income?.frozen && onFreeze !== undefined && (
+      {editing && readOnly && onUnfreeze !== undefined && (
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={handleUnfreeze}
+            disabled={submitting}
+            className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
+          >
+            {submitting ? 'Unfreezing…' : 'Unfreeze recurring income'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {editing && !readOnly && onFreeze !== undefined && (
         <button
           type="button"
           onClick={handleFreeze}
