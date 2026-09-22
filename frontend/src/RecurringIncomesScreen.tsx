@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { LedgerFilterRequest } from './App'
 import {
@@ -47,13 +47,26 @@ export function RecurringIncomesScreen({
   const [incomes, setIncomes] = useState<RecurringIncome[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalDraft | null>(null)
+  const [frozenExpanded, setFrozenExpanded] = useState(false)
   // The cache clock (ADR-0022): a write anywhere re-fetches this list in
   // the background, so the tab is never stale when switched back to.
   const dataVersion = useDataVersion()
 
+  // Active and frozen definitions, split from the fetched set
+  // (include_frozen=true on the fetch for the collapsed Frozen Recurring
+  // section, ADR-0028).
+  const activeIncomes = useMemo(
+    () => incomes?.filter((i) => !i.frozen) ?? null,
+    [incomes],
+  )
+  const frozenIncomes = useMemo(
+    () => incomes?.filter((i) => i.frozen) ?? null,
+    [incomes],
+  )
+
   useEffect(() => {
     let cancelled = false
-    fetchRecurringIncomes(token)
+    fetchRecurringIncomes(token, true)
       .then((loadedIncomes) => {
         if (cancelled) return
         setIncomes(sortByNextDue(loadedIncomes))
@@ -127,60 +140,108 @@ export function RecurringIncomesScreen({
 
       {incomes === null ? (
         <p className="mt-3 text-sm text-slate-500">Loading recurring incomes…</p>
-      ) : incomes.length === 0 ? (
+      ) : activeIncomes !== null && activeIncomes.length === 0 && frozenIncomes?.length === 0 ? (
         <p className="mt-3 text-sm text-slate-500">
           No recurring incomes yet. Add your first one to track what&apos;s due.
         </p>
       ) : (
-        <ul className="mt-4 space-y-2">
-          {incomes.map((income) => (
-            <li key={income.id}>
-              {/* A row is a tap surface plus a sibling trailing ✎ (ADR-0026):
-                  the card holds the surface and the ✎ side by side — nested
-                  buttons are illegal. The whole surface (name, amount, next
-                  due, badge) is the ledger jump to this definition's linked
-                  Transactions; ✎ opens the edit modal, where the
-                  per-Occurrence Skip/Un-skip controls live. */}
-              <div className="flex items-center rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <button
-                  type="button"
-                  onClick={() =>
-                    requestLedgerFilter?.({ kind: 'recurring-income', id: income.id })
-                  }
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4 pr-2 text-left"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-slate-900">
-                      {income.name}
-                    </span>
-                    <span className="block truncate text-xs text-slate-500">
-                      {intervalText(income.interval_value, income.interval_unit)} · next
-                      due {income.next_due_date}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-right">
-                    <span className="block font-semibold text-slate-900">
-                      {formatEuros(income.amount)}
-                    </span>
-                    {income.backlog_count > 0 && (
-                      <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
-                        {income.backlog_count} unpaid
+        <>
+          {activeIncomes !== null && activeIncomes.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {activeIncomes.map((income) => (
+                <li key={income.id}>
+                  <div className="flex items-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        requestLedgerFilter?.({ kind: 'recurring-income', id: income.id })
+                      }
+                      className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4 pr-2 text-left"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-slate-900">
+                          {income.name}
+                        </span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {intervalText(income.interval_value, income.interval_unit)} · next
+                          due {income.next_due_date}
+                        </span>
                       </span>
-                    )}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Edit ${income.name}`}
-                  onClick={() => setModal({ kind: 'edit', income })}
-                  className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
-                >
-                  ✎
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                      <span className="shrink-0 text-right">
+                        <span className="block font-semibold text-slate-900">
+                          {formatEuros(income.amount)}
+                        </span>
+                        {income.backlog_count > 0 && (
+                          <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                            {income.backlog_count} unpaid
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Edit ${income.name}`}
+                      onClick={() => setModal({ kind: 'edit', income })}
+                      className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
+                    >
+                      ✎
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {frozenIncomes !== null && frozenIncomes.length > 0 && (
+            <div className="mt-5">
+              <button
+                type="button"
+                aria-expanded={frozenExpanded}
+                onClick={() => setFrozenExpanded((open) => !open)}
+                className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
+              >
+                Frozen recurring incomes ({frozenIncomes.length})
+              </button>
+              {frozenExpanded && (
+                <ul className="mt-2 space-y-3">
+                  {frozenIncomes.map((income) => (
+                    <li key={income.id}>
+                      <div className="flex items-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            requestLedgerFilter?.({ kind: 'recurring-income', id: income.id })
+                          }
+                          className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4 pr-2 text-left"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-slate-900">
+                              {income.name}
+                            </span>
+                            <span className="block text-xs text-slate-500">
+                              {intervalText(income.interval_value, income.interval_unit)} · Frozen
+                            </span>
+                          </span>
+                          <span className="shrink-0 font-semibold text-slate-900">
+                            {formatEuros(income.amount)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Edit ${income.name}`}
+                          onClick={() => setModal({ kind: 'edit', income })}
+                          className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
+                        >
+                          ✎
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {modal !== null && (
