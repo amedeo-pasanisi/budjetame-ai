@@ -12,9 +12,11 @@ import type { LatLng, Place } from './location'
 export function MapPicker({
   position,
   onPick,
+  onLookingUpChange,
 }: {
   position: LatLng | null
   onPick: (position: LatLng, place?: Place) => void
+  onLookingUpChange?: (lookingUp: boolean) => void
 }) {
   let config: MapConfig
   try {
@@ -27,7 +29,14 @@ export function MapPicker({
     )
   }
   if (config.provider === 'google') {
-    return <GoogleMapPicker apiKey={config.apiKey} position={position} onPick={onPick} />
+    return (
+      <GoogleMapPicker
+        apiKey={config.apiKey}
+        position={position}
+        onPick={onPick}
+        onLookingUpChange={onLookingUpChange}
+      />
+    )
   }
   return <LeafletMapPicker position={position} onPick={onPick} />
 }

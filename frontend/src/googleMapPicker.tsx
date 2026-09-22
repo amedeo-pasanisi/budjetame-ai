@@ -77,10 +77,12 @@ export function GoogleMapPicker({
   apiKey,
   position,
   onPick,
+  onLookingUpChange,
 }: {
   apiKey: string
   position: LatLng | null
   onPick: (position: LatLng, place?: Place) => void
+  onLookingUpChange?: (lookingUp: boolean) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
@@ -98,6 +100,12 @@ export function GoogleMapPicker({
   // True while a tap's place name is being fetched (issue #34): the map is
   // covered with "Looking up…" so the lookup is visible to the user.
   const [lookingUp, setLookingUp] = useState(false)
+
+  // Report lookingUp changes up to the form so it can disable the save
+  // button while the Place name lookup is in flight.
+  useEffect(() => {
+    onLookingUpChange?.(lookingUp)
+  }, [lookingUp, onLookingUpChange])
 
   useEffect(() => {
     let cancelled = false

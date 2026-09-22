@@ -249,9 +249,15 @@ export function TransactionForm({
   // GPS feedback (issue #35): true while the "Use my location" lookup runs,
   // so the button can disable and show "Locating…" instead of failing silently.
   const [locating, setLocating] = useState(false)
+  // Place-name lookup on a map-tap (issue #34): true while the Places API
+  // fetch runs, so the save button is disabled during the "Looking up…"
+  // overlay — the user is still "searching for a location".
   // Inline failure message for the GPS lookup (denied, timeout, unavailable),
   // cleared by a successful GPS pick, a map pick, or a Remove.
   const [gpsError, setGpsError] = useState<string | null>(null)
+  // True while the Google map's Places API looks up a tapped POI's name,
+  // propagated from GoogleMapPicker via MapPicker's onLookingUpChange.
+  const [lookingUpForPlace, setLookingUpForPlace] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -673,6 +679,7 @@ export function TransactionForm({
                 setShowingPicker(false)
                 setGpsError(null)
               }}
+              onLookingUpChange={setLookingUpForPlace}
             />
             <button
               type="button"
@@ -723,6 +730,8 @@ export function TransactionForm({
           type="submit"
           disabled={
             submitting ||
+            locating ||
+            lookingUpForPlace ||
             !hasAmount ||
             (isTransfer
               ? sourceWalletId === undefined ||
