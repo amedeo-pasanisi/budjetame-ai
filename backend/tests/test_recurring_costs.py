@@ -369,18 +369,112 @@ async def test_edit_requires_a_change(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_delete_recurring_cost(client: AsyncClient) -> None:
+async def test_freeze_recurring_cost(client: AsyncClient) -> None:
+    """Freeze replaces delete: the definition stays in the database with
+    frozen=True, its links intact, and hidden from the default list."""
     token = await _login(client)
     created = await client.post(
-        "/recurring-costs", json=_cost(name="Deletable Rent"), headers=_auth(token)
+        "/recurring-costs", json=_cost(name="Freezable Rent"), headers=_auth(token)
     )
     cost_id = created.json()["id"]
 
-    response = await client.delete(f"/recurring-costs/{cost_id}", headers=_auth(token))
+    response = await client.post(
+        f"/recurring-costs/{cost_id}/freeze", headers=_auth(token)
+    )
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["frozen"] is True
+    assert response.json()["backlog_count"] == 0
+    assert response.json()["next_due_date"] is None
+    assert response.json()["next_unpaid_occurrence_date"] is None
+
+    # Hidden from the default list.
     listed = await client.get("/recurring-costs", headers=_auth(token))
     assert cost_id not in [cost["id"] for cost in listed.json()]
+
+    # Visible with include_frozen.
+    with_frozen = await client.get(
+        "/recurring-costs?include_frozen=true", headers=_auth(token)
+    )
+    assert cost_id in [cost["id"] for cost in with_frozen.json()]
+
+
+async def test_freeze_is_idempotent(client: AsyncClient) -> None:
+    """Freezing an already-frozen definition is a no-op."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-costs", json=_cost(name="Idempotent Rent"), headers=_auth(token)
+    )
+    cost_id = created.json()["id"]
+
+    await client.post(f"/recurring-costs/{cost_id}/freeze", headers=_auth(token))
+    second = await client.post(
+        f"/recurring-costs/{cost_id}/freeze", headers=_auth(token)
+    )
+    assert second.status_code == 200
+    assert second.json()["frozen"] is True
+
+
+async def test_frozen_cost_cannot_be_edited(client: AsyncClient) -> None:
+    """Frozen definitions are read-only — PATCH is rejected (ADR-0028)."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-costs",
+        json=_cost(name="Frozen Edit Rent"),
+        headers=_auth(token),
+    )
+    cost_id = created.json()["id"]
+    await client.post(f"/recurring-costs/{cost_id}/freeze", headers=_auth(token))
+
+    response = await client.patch(
+        f"/recurring-costs/{cost_id}",
+        json={"name": "Should Not Work"},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_unfreeze_recurring_cost(client: AsyncClient) -> None:
+    """Unfreeze restores the definition to active: frozen=False, derived
+    fields come back, it reappears in the default list."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-costs",
+        json=_cost(name="Unfreezable Rent", start_date="2030-03-15"),
+        headers=_auth(token),
+    )
+    cost_id = created.json()["id"]
+    await client.post(f"/recurring-costs/{cost_id}/freeze", headers=_auth(token))
+
+    response = await client.post(
+        f"/recurring-costs/{cost_id}/unfreeze", headers=_auth(token)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["frozen"] is False
+    assert body["next_due_date"] == "2030-03-15"
+    assert body["next_unpaid_occurrence_date"] == "2030-03-15"
+
+    # Back in the default list.
+    listed = await client.get("/recurring-costs", headers=_auth(token))
+    assert cost_id in [cost["id"] for cost in listed.json()]
+
+
+async def test_unfreeze_is_idempotent(client: AsyncClient) -> None:
+    """Unfreezing an already-active definition is a no-op."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-costs", json=_cost(name="Always Active"), headers=_auth(token)
+    )
+    cost_id = created.json()["id"]
+
+    response = await client.post(
+        f"/recurring-costs/{cost_id}/unfreeze", headers=_auth(token)
+    )
+    assert response.status_code == 200
+    assert response.json()["frozen"] is False
 
 
 async def test_foreign_recurring_cost_returns_403(
@@ -416,11 +510,15 @@ async def test_foreign_recurring_cost_returns_403(
             json={"name": "Hijacked"},
             headers=_auth(token),
         )
-        delete = await client.delete(
-            f"/recurring-costs/{cost_id}", headers=_auth(token)
+        freeze = await client.post(
+            f"/recurring-costs/{cost_id}/freeze", headers=_auth(token)
+        )
+        unfreeze = await client.post(
+            f"/recurring-costs/{cost_id}/unfreeze", headers=_auth(token)
         )
         assert patch.status_code == 403
-        assert delete.status_code == 403
+        assert freeze.status_code == 403
+        assert unfreeze.status_code == 403
 
         listing = await client.get("/recurring-costs", headers=_auth(token))
         assert cost_id not in [cost["id"] for cost in listing.json()]

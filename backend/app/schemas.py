@@ -724,7 +724,9 @@ class RecurringCostOut(BaseModel):
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
     pins and skips, never stored. Skip controls live per Occurrence (ADR-0026)
     on the Occurrences read, not on the definition. `start_date` is the
-    stored start date — every definition carries one (ADR-0024)."""
+    stored start date — every definition carries one (ADR-0024).
+    `frozen` marks whether the definition was frozen (ADR-0028).
+    When frozen, `next_due_date` and `next_unpaid_occurrence_date` are None."""
 
     id: int
     name: str
@@ -732,8 +734,9 @@ class RecurringCostOut(BaseModel):
     interval_value: int
     interval_unit: IntervalUnit
     start_date: str
-    next_due_date: str
-    next_unpaid_occurrence_date: str
+    next_due_date: str | None
+    next_unpaid_occurrence_date: str | None
+    frozen: bool
     backlog_count: int
     created_at: datetime
 
@@ -818,7 +821,9 @@ class RecurringIncomeOut(BaseModel):
     Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
     pins and skips, never stored. Skip controls live per Occurrence (ADR-0026)
     on the Occurrences read, not on the definition. `start_date` is the
-    stored start date — every definition carries one (ADR-0024)."""
+    stored start date — every definition carries one (ADR-0024).
+    `frozen` marks whether the definition was frozen (ADR-0028).
+    When frozen, `next_due_date` and `next_unpaid_occurrence_date` are None."""
 
     id: int
     name: str
@@ -826,8 +831,9 @@ class RecurringIncomeOut(BaseModel):
     interval_value: int
     interval_unit: IntervalUnit
     start_date: str
-    next_due_date: str
-    next_unpaid_occurrence_date: str
+    next_due_date: str | None
+    next_unpaid_occurrence_date: str | None
+    frozen: bool
     backlog_count: int
     created_at: datetime
 

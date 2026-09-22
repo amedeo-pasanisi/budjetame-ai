@@ -369,18 +369,112 @@ async def test_edit_requires_a_change(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_delete_recurring_income(client: AsyncClient) -> None:
+async def test_freeze_recurring_income(client: AsyncClient) -> None:
+    """Freeze replaces delete: the definition stays in the database with
+    frozen=True, its links intact, and hidden from the default list."""
     token = await _login(client)
     created = await client.post(
-        "/recurring-incomes", json=_income(name="Deletable Salary"), headers=_auth(token)
+        "/recurring-incomes", json=_income(name="Freezable Salary"), headers=_auth(token)
     )
     income_id = created.json()["id"]
 
-    response = await client.delete(f"/recurring-incomes/{income_id}", headers=_auth(token))
+    response = await client.post(
+        f"/recurring-incomes/{income_id}/freeze", headers=_auth(token)
+    )
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["frozen"] is True
+    assert response.json()["backlog_count"] == 0
+    assert response.json()["next_due_date"] is None
+    assert response.json()["next_unpaid_occurrence_date"] is None
+
+    # Hidden from the default list.
     listed = await client.get("/recurring-incomes", headers=_auth(token))
     assert income_id not in [income["id"] for income in listed.json()]
+
+    # Visible with include_frozen.
+    with_frozen = await client.get(
+        "/recurring-incomes?include_frozen=true", headers=_auth(token)
+    )
+    assert income_id in [income["id"] for income in with_frozen.json()]
+
+
+async def test_freeze_income_is_idempotent(client: AsyncClient) -> None:
+    """Freezing an already-frozen definition is a no-op."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-incomes", json=_income(name="Idempotent Salary"), headers=_auth(token)
+    )
+    income_id = created.json()["id"]
+
+    await client.post(f"/recurring-incomes/{income_id}/freeze", headers=_auth(token))
+    second = await client.post(
+        f"/recurring-incomes/{income_id}/freeze", headers=_auth(token)
+    )
+    assert second.status_code == 200
+    assert second.json()["frozen"] is True
+
+
+async def test_frozen_income_cannot_be_edited(client: AsyncClient) -> None:
+    """Frozen definitions are read-only — PATCH is rejected (ADR-0028)."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-incomes",
+        json=_income(name="Frozen Edit Salary"),
+        headers=_auth(token),
+    )
+    income_id = created.json()["id"]
+    await client.post(f"/recurring-incomes/{income_id}/freeze", headers=_auth(token))
+
+    response = await client.patch(
+        f"/recurring-incomes/{income_id}",
+        json={"name": "Should Not Work"},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_unfreeze_recurring_income(client: AsyncClient) -> None:
+    """Unfreeze restores the definition to active: frozen=False, derived
+    fields come back, it reappears in the default list."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-incomes",
+        json=_income(name="Unfreezable Salary", start_date="2030-03-15"),
+        headers=_auth(token),
+    )
+    income_id = created.json()["id"]
+    await client.post(f"/recurring-incomes/{income_id}/freeze", headers=_auth(token))
+
+    response = await client.post(
+        f"/recurring-incomes/{income_id}/unfreeze", headers=_auth(token)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["frozen"] is False
+    assert body["next_due_date"] == "2030-03-15"
+    assert body["next_unpaid_occurrence_date"] == "2030-03-15"
+
+    # Back in the default list.
+    listed = await client.get("/recurring-incomes", headers=_auth(token))
+    assert income_id in [income["id"] for income in listed.json()]
+
+
+async def test_unfreeze_income_is_idempotent(client: AsyncClient) -> None:
+    """Unfreezing an already-active definition is a no-op."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-incomes", json=_income(name="Always Active Income"), headers=_auth(token)
+    )
+    income_id = created.json()["id"]
+
+    response = await client.post(
+        f"/recurring-incomes/{income_id}/unfreeze", headers=_auth(token)
+    )
+    assert response.status_code == 200
+    assert response.json()["frozen"] is False
 
 
 async def test_foreign_recurring_income_returns_403(
@@ -416,11 +510,15 @@ async def test_foreign_recurring_income_returns_403(
             json={"name": "Hijacked"},
             headers=_auth(token),
         )
-        delete = await client.delete(
-            f"/recurring-incomes/{income_id}", headers=_auth(token)
+        freeze = await client.post(
+            f"/recurring-incomes/{income_id}/freeze", headers=_auth(token)
+        )
+        unfreeze = await client.post(
+            f"/recurring-incomes/{income_id}/unfreeze", headers=_auth(token)
         )
         assert patch.status_code == 403
-        assert delete.status_code == 403
+        assert freeze.status_code == 403
+        assert unfreeze.status_code == 403
 
         listing = await client.get("/recurring-incomes", headers=_auth(token))
         assert income_id not in [income["id"] for income in listing.json()]

@@ -282,25 +282,31 @@ async def test_deleting_a_linked_income_frees_the_occurrence(
     assert await _linked_pay(client, token, wallet_id, income_id) == "2030-03-01"
 
 
-async def test_deleting_a_recurring_income_severs_links(client: AsyncClient) -> None:
+async def test_freezing_a_recurring_income_keeps_links_intact(
+    client: AsyncClient,
+) -> None:
+    """Freeze keeps all links to Transactions intact (ADR-0028): the
+    linked Income still carries recurring_income_id and occurrence_date
+    after freezing."""
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Sever Wallet")
     income_id = await _create_income(client, token, name="Inc Sever Salary")
     linked = await _create_linked_income(client, token, wallet_id, income_id)
 
-    response = await client.delete(
-        f"/recurring-incomes/{income_id}", headers=_auth(token)
+    response = await client.post(
+        f"/recurring-incomes/{income_id}/freeze", headers=_auth(token)
     )
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["frozen"] is True
 
-    # The Income survives as an ordinary one: the link is severed.
+    # The Income keeps its link: recurring_income_id and occurrence_date
+    # survive.
     items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     body = next(item for item in items if item["id"] == linked["id"])
-    assert body["recurring_income_id"] is None
-    assert body["occurrence_date"] is None
+    assert body["recurring_income_id"] == income_id
+    assert body["occurrence_date"] is not None
 
-    # The severed income is gone: linking to it is indistinguishable from
-    # linking to nothing (ADR-0003).
+    # The frozen income still exists but cannot accept new links.
     response = await client.post(
         "/transactions",
         json={
@@ -312,7 +318,7 @@ async def test_deleting_a_recurring_income_severs_links(client: AsyncClient) -> 
         },
         headers=_auth(token),
     )
-    assert response.status_code == 403
+    assert response.status_code == 422
 
 
 async def test_expense_and_wrong_direction_transfer_reject_a_link(
@@ -666,9 +672,12 @@ async def test_deleting_a_linked_transfer_frees_the_occurrence(
     )["occurrence_date"] == "2030-03-01"
 
 
-async def test_deleting_a_recurring_income_severs_a_transfer_link(
+async def test_freezing_a_recurring_income_keeps_a_transfer_link_intact(
     client: AsyncClient,
 ) -> None:
+    """Freeze keeps a Transfer's link intact (ADR-0028): the linked
+    Transfer still carries recurring_income_id and occurrence_date after
+    freezing."""
     token = await _login(client)
     wallet_id = await _create_wallet(client, token, "Inc Sever Transfer Wallet")
     contact_id = await _create_wallet(client, token, "Inc Sever Transfer Contact", "contact")
@@ -677,16 +686,18 @@ async def test_deleting_a_recurring_income_severs_a_transfer_link(
         client, token, contact_id, wallet_id, income_id
     )
 
-    response = await client.delete(
-        f"/recurring-incomes/{income_id}", headers=_auth(token)
+    response = await client.post(
+        f"/recurring-incomes/{income_id}/freeze", headers=_auth(token)
     )
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["frozen"] is True
 
-    # The Transfer survives as an ordinary one: the link is severed.
+    # The Transfer keeps its link: recurring_income_id and occurrence_date
+    # survive.
     items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     body = next(item for item in items if item["id"] == linked["id"])
-    assert body["recurring_income_id"] is None
-    assert body["occurrence_date"] is None
+    assert body["recurring_income_id"] == income_id
+    assert body["occurrence_date"] is not None
 
 
 async def test_a_skipped_occurrence_is_never_pinned_by_a_transfer_link(

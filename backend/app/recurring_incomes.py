@@ -6,7 +6,7 @@ mirroring #58: the "N unpaid" badge the Incomes side shows comes from
 here. Guards: names unique per Account case-insensitively; all
 data scoped to the Account (foreign data is a 403, ADR-0003)."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -48,7 +48,22 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
     the transaction form's picker shows — and the Backlog (issue #62):
     Unpaid Occurrences due today or
     earlier in Europe/Rome. Skip controls live per Occurrence on the
-    Occurrences read (ADR-0026), not on the definition."""
+    Occurrences read (ADR-0026), not on the definition. When the definition
+    is frozen (ADR-0028), the derived fields return None or 0."""
+    if income.frozen:
+        return RecurringIncomeOut(
+            id=income.id,
+            name=income.name,
+            amount=income.amount,
+            interval_value=income.interval_value,
+            interval_unit=IntervalUnit(income.interval_unit),
+            start_date=income.start_date.isoformat(),
+            next_due_date=None,
+            next_unpaid_occurrence_date=None,
+            frozen=True,
+            backlog_count=0,
+            created_at=income.created_at,
+        )
     backlog = recurring_service.backlog_count_for(session, income)
     return RecurringIncomeOut(
         id=income.id,
@@ -61,6 +76,7 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, income
         ).isoformat(),
+        frozen=False,
         backlog_count=backlog,
         created_at=income.created_at,
     )
@@ -78,17 +94,22 @@ def _name_conflict(session: Session, cause: Exception) -> None:
 
 @router.get("", response_model=list[RecurringIncomeOut])
 def list_recurring_incomes(
+    include_frozen: bool = False,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
 ) -> list[RecurringIncomeOut]:
     """Every Recurring Income of the Account, sorted by next due date
-    ascending (ties by name) — the one order the Recurring screen needs."""
-    incomes = session.scalars(
-        select(RecurringIncome).where(RecurringIncome.account_id == account.id)
-    ).all()
+    ascending (ties by name) — the one order the Recurring screen needs.
+    Active definitions by default; `include_frozen=true` also returns frozen
+    definitions (with `frozen: True`) so the history screen can reach their
+    linked Transactions."""
+    stmt = select(RecurringIncome).where(RecurringIncome.account_id == account.id)
+    if not include_frozen:
+        stmt = stmt.where(RecurringIncome.frozen.is_(False))
+    incomes = session.scalars(stmt).all()
     return sorted(
         (_income_out(session, income) for income in incomes),
-        key=lambda out: (out.next_due_date, out.name.lower()),
+        key=lambda out: (out.next_due_date or "", out.name.lower()),
     )
 
 
@@ -185,6 +206,8 @@ def update_recurring_income(
             income,
             changes=payload.model_dump(exclude_unset=True),
         )
+    except recurring_service.RecurringIncomeFrozen as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except recurring_service.RecurringIncomeRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringIncomeNameTaken, IntegrityError) as cause:
@@ -192,11 +215,37 @@ def update_recurring_income(
     return _income_out(session, income)
 
 
-@router.delete("/{income_id}", status_code=204)
-def delete_recurring_income(
+@router.post("/{income_id}/freeze", response_model=RecurringIncomeOut)
+def freeze_recurring_income(
     income_id: int,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> None:
+) -> RecurringIncomeOut:
+    """Freeze a Recurring Income (ADR-0028): clean up unpaid/skipped
+    Occurrences, stop generating new ones. All links to Transactions
+    survive intact. The frozen definition is read-only and shown in a
+    collapsed Frozen Recurring section."""
     income = _owned_income_or_403(session, account, income_id)
-    recurring_service.delete_recurring_income(session, income)
+    income = recurring_service.freeze_recurring_income(session, income)
+    return _income_out(session, income)
+
+
+@router.post("/{income_id}/unfreeze", response_model=RecurringIncomeOut)
+def unfreeze_recurring_income(
+    income_id: int,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> RecurringIncomeOut:
+    """Unfreeze a frozen Recurring Income (ADR-0028): restore editability and
+    resume Occurrence generation on the natural cycle. If the name collides
+    with an active definition, returns 409."""
+    income = _owned_income_or_403(session, account, income_id)
+    try:
+        income = recurring_service.unfreeze_recurring_income(session, income)
+    except recurring_service.RecurringIncomeNameTaken as cause:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f'A Recurring Income named "{income.name}" already exists — rename it first.',
+        ) from cause
+    return _income_out(session, income)

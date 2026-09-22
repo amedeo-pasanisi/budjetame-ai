@@ -41,7 +41,8 @@ vi.mock('./api', async () => {
     fetchRecurringCosts: vi.fn(),
     createRecurringCost: vi.fn(),
     updateRecurringCost: vi.fn(),
-    deleteRecurringCost: vi.fn(),
+    freezeRecurringCost: vi.fn(),
+    unfreezeRecurringCost: vi.fn(),
     fetchRecurringCostOccurrences: vi.fn(),
     setRecurringCostOccurrenceSkipped: vi.fn(),
   }
@@ -50,7 +51,8 @@ vi.mock('./api', async () => {
 import {
   ApiError,
   createRecurringCost,
-  deleteRecurringCost,
+  freezeRecurringCost,
+  unfreezeRecurringCost,
   fetchRecurringCostOccurrences,
   fetchRecurringCosts,
   updateRecurringCost,
@@ -59,8 +61,14 @@ import {
 const createdAt = '2026-08-19T10:00:00Z'
 
 // Deliberately unsorted: the screen's one order is next due date ascending.
+const costTemplate = {
+  frozen: false as const,
+  created_at: createdAt,
+}
+
 const costs: RecurringCost[] = [
   {
+    ...costTemplate,
     id: 1,
     name: 'Rent',
     amount: '850.00',
@@ -70,9 +78,9 @@ const costs: RecurringCost[] = [
     next_due_date: '2026-09-01',
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 0,
-    created_at: createdAt,
   },
   {
+    ...costTemplate,
     id: 2,
     name: 'Coffee',
     amount: '2.50',
@@ -82,9 +90,9 @@ const costs: RecurringCost[] = [
     next_due_date: '2026-08-20',
     next_unpaid_occurrence_date: '2026-08-20',
     backlog_count: 3,
-    created_at: createdAt,
   },
   {
+    ...costTemplate,
     id: 3,
     name: 'Insurance',
     amount: '120.00',
@@ -94,7 +102,6 @@ const costs: RecurringCost[] = [
     next_due_date: '2026-12-01',
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
-    created_at: createdAt,
   },
 ]
 
@@ -109,7 +116,8 @@ const occurrences = [
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const createRecurringCostMock = vi.mocked(createRecurringCost)
 const updateRecurringCostMock = vi.mocked(updateRecurringCost)
-const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
+const freezeRecurringCostMock = vi.mocked(freezeRecurringCost)
+const unfreezeRecurringCostMock = vi.mocked(unfreezeRecurringCost)
 const fetchRecurringCostOccurrencesMock = vi.mocked(fetchRecurringCostOccurrences)
 
 beforeEach(() => {
@@ -266,7 +274,7 @@ describe('RecurringCostsScreen create flow', () => {
   })
 })
 
-describe('RecurringCostsScreen edit and delete flows', () => {
+describe('RecurringCostsScreen edit and freeze flows', () => {
   it('edits a cost from its ✎ button and keeps it in the sorted list', async () => {
     updateRecurringCostMock.mockResolvedValue({
       ...costs[0],
@@ -311,19 +319,26 @@ describe('RecurringCostsScreen edit and delete flows', () => {
   })
 
   it('deletes a cost with the tap-again confirmation', async () => {
-    deleteRecurringCostMock.mockResolvedValue(undefined)
+    freezeRecurringCostMock.mockResolvedValue({
+      ...costs[1],
+      frozen: true,
+      next_due_date: null,
+      next_unpaid_occurrence_date: null,
+      backlog_count: 0,
+    })
     render(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Coffee' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete recurring cost' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Tap again to confirm' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Freeze recurring cost' }))
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Tap again to confirm freeze' }),
+    )
 
-    await waitFor(() => expect(deleteRecurringCostMock).toHaveBeenCalledWith('', 2))
+    await waitFor(() => expect(freezeRecurringCostMock).toHaveBeenCalledWith('', 2))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(screen.queryByText('Coffee')).not.toBeInTheDocument()
   })
 
   it('backdrop tap, Escape, and Cancel all close the create modal without creating', async () => {

@@ -7,10 +7,10 @@ empty at creation it is set to the creation day; it can be changed, never
 unset) — an Occurrence's due date is its own date, the due-date override
 is gone.
 Occurrences and the next due date are derived, never stored — the pure
-recurrence module (app.recurrence) owns that math. Deleting a Recurring Cost
-is a hard delete; linked Transactions (issue #57, ADR-0027: an Expense, or a
-Transfer to a Contact Wallet) are severed by the FK's ON DELETE SET NULL and
-the definition's skips cascade away (ADR-0016). The paid
+recurrence module (app.recurrence) owns that math. Freezing a Recurring Cost
+replaces the old hard delete: a frozen definition keeps its links, becomes
+read-only, and stops generating Occurrences (ADR-0028). Unfreezing restores
+it to active. The paid
 state also lives here: `paid_occurrence_dates` is the set of Occurrences the
 cost's links cover and `oldest_unpaid_occurrence` the one a new link pays
 (the oldest Unpaid, future Occurrences included — paying ahead) — what the
@@ -25,7 +25,7 @@ non-Paid Occurrence with its skipped state, newest first — and
 
 from datetime import date
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete as sa_delete
 from sqlalchemy.orm import Session
 
 from app.models import IntervalUnit, RecurringCost, RecurringSkip, Transaction
@@ -48,6 +48,10 @@ class RecurringCostNameTaken(Exception):
 
 class RecurringCostRuleError(Exception):
     """A CONTEXT.md rule rejects the write; maps to 422 with the message."""
+
+
+class RecurringCostFrozen(Exception):
+    """The Recurring Cost is frozen — no field can be edited (ADR-0028)."""
 
 
 def _parse_start_date(value: str | None) -> date | None:
@@ -92,7 +96,12 @@ def update_recurring_cost(
     `model_dump(exclude_unset=True)`: a field present in the payload is
     applied; a field absent is untouched. `start_date` is the one exception
     to the null-clears rule: an explicit null is rejected — a definition
-    always carries a start date (ADR-0024), it can be changed, never unset."""
+    always carries a start date (ADR-0024), it can be changed, never unset.
+    A frozen definition is read-only — every edit is rejected (ADR-0028)."""
+    if cost.frozen:
+        raise RecurringCostFrozen(
+            "A frozen recurring cost cannot be edited. Unfreeze it first."
+        )
     name = changes.get("name", cost.name)
     if name is not None and name != cost.name:
         if scoping.name_is_taken(
@@ -119,20 +128,40 @@ def update_recurring_cost(
     return cost
 
 
-def delete_recurring_cost(session: Session, cost: RecurringCost) -> None:
-    """Hard-delete the definition. Linked Expenses (issue #57) survive as
-    ordinary Expenses: the link FK is ON DELETE SET NULL, and the pinned
-    Occurrence date goes with it — a severed link never carries an
-    Occurrence (ADR-0010)."""
-    # The FK nulls recurring_cost_id on its own; occurrence_date is a plain
-    # column, so the pin is cleared here, in the same transaction.
+def freeze_recurring_cost(session: Session, cost: RecurringCost) -> RecurringCost:
+    """Freeze a Recurring Cost (ADR-0028): clean up unpaid/skipped
+    Occurrences, stop generating new ones, mark it frozen. All links to
+    Transactions survive intact. Freezing an already-frozen definition is
+    a no-op (idempotent)."""
+    if cost.frozen:
+        return cost
+    # Delete all skip rows for this definition.
     session.execute(
-        update(Transaction)
-        .where(Transaction.recurring_cost_id == cost.id)
-        .values(recurring_cost_id=None, occurrence_date=None)
+        sa_delete(RecurringSkip).where(RecurringSkip.recurring_cost_id == cost.id)
     )
-    session.delete(cost)
+    cost.frozen = True
+    cost.freeze_date = rome_today()
     session.commit()
+    session.refresh(cost)
+    return cost
+
+
+def unfreeze_recurring_cost(session: Session, cost: RecurringCost) -> RecurringCost:
+    """Unfreeze a frozen Recurring Cost (ADR-0028): restore editability,
+    resume Occurrence generation on the natural cycle. If the name collides
+    with an existing active definition, reject. Unfreezing an active
+    definition is a no-op, mirroring freeze's idempotency."""
+    if not cost.frozen:
+        return cost
+    if scoping.name_is_taken(
+        session, RecurringCost, cost.account_id, cost.name, exclude_id=cost.id
+    ):
+        raise RecurringCostNameTaken(cost.name)
+    cost.frozen = False
+    cost.freeze_date = None
+    session.commit()
+    session.refresh(cost)
+    return cost
 
 
 def skipped_periods(

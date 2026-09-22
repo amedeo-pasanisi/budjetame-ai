@@ -31,7 +31,8 @@ vi.mock('./api', async () => {
         : fallback,
     createRecurringCost: vi.fn(),
     updateRecurringCost: vi.fn(),
-    deleteRecurringCost: vi.fn(),
+    freezeRecurringCost: vi.fn(),
+    unfreezeRecurringCost: vi.fn(),
     fetchRecurringCostOccurrences: vi.fn(),
     setRecurringCostOccurrenceSkipped: vi.fn(),
   }
@@ -39,7 +40,8 @@ vi.mock('./api', async () => {
 
 import {
   createRecurringCost,
-  deleteRecurringCost,
+  freezeRecurringCost,
+  unfreezeRecurringCost,
   fetchRecurringCostOccurrences,
   setRecurringCostOccurrenceSkipped,
   updateRecurringCost,
@@ -57,12 +59,28 @@ const cost: RecurringCost = {
   next_due_date: '2030-03-15',
   next_unpaid_occurrence_date: '2030-03-15',
   backlog_count: 0,
+  frozen: false,
+  created_at: createdAt,
+}
+
+const frozenCost: RecurringCost = {
+  id: 2,
+  name: 'Old Netflix',
+  amount: '15.00',
+  interval_value: 1,
+  interval_unit: 'months',
+  start_date: '2025-01-01',
+  next_due_date: null,
+  next_unpaid_occurrence_date: null,
+  backlog_count: 0,
+  frozen: true,
   created_at: createdAt,
 }
 
 const createRecurringCostMock = vi.mocked(createRecurringCost)
 const updateRecurringCostMock = vi.mocked(updateRecurringCost)
-const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
+const freezeRecurringCostMock = vi.mocked(freezeRecurringCost)
+const unfreezeRecurringCostMock = vi.mocked(unfreezeRecurringCost)
 const fetchRecurringCostOccurrencesMock = vi.mocked(fetchRecurringCostOccurrences)
 const setRecurringCostOccurrenceSkippedMock = vi.mocked(setRecurringCostOccurrenceSkipped)
 
@@ -75,17 +93,19 @@ const occurrences = [
 
 function renderForm(editing?: RecurringCost) {
   const onSaved = vi.fn()
-  const onDeleted = vi.fn()
+  const onFreeze = vi.fn()
+  const onUnfreeze = vi.fn()
   const onCancel = vi.fn()
   const view = render(
     <RecurringCostForm
       cost={editing}
       onSaved={onSaved}
-      onDeleted={onDeleted}
+      onFreeze={onFreeze}
+      onUnfreeze={onUnfreeze}
       onCancel={onCancel}
     />,
   )
-  return { onSaved, onDeleted, onCancel, view }
+  return { onSaved, onFreeze, onUnfreeze, onCancel, view }
 }
 
 beforeEach(() => {
@@ -163,7 +183,7 @@ describe('RecurringCostForm start date', () => {
   })
 })
 
-describe('RecurringCostForm edit and delete', () => {
+describe('RecurringCostForm edit and freeze', () => {
   it('prefills every field from the cost being edited', () => {
     renderForm(cost)
 
@@ -192,15 +212,35 @@ describe('RecurringCostForm edit and delete', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })
 
-  it('deletes with the tap-again confirmation', async () => {
-    deleteRecurringCostMock.mockResolvedValue(undefined)
-    const { onDeleted } = renderForm(cost)
+  it('freezes with the tap-again confirmation', async () => {
+    freezeRecurringCostMock.mockResolvedValue({ ...cost, frozen: true })
+    const { onFreeze } = renderForm(cost)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete recurring cost' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Freeze recurring cost' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm freeze' }))
 
-    await waitFor(() => expect(deleteRecurringCostMock).toHaveBeenCalledWith('', 1))
-    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(1))
+    await waitFor(() =>
+      expect(freezeRecurringCostMock).toHaveBeenCalledWith('', 1),
+    )
+    await waitFor(() => expect(onFreeze).toHaveBeenCalled())
+  })
+
+  it('shows unfreeze button for a frozen cost', async () => {
+    unfreezeRecurringCostMock.mockResolvedValue({ ...frozenCost, frozen: false })
+    const { onUnfreeze } = renderForm(frozenCost)
+
+    expect(
+      screen.getByRole('button', { name: 'Unfreeze recurring cost' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Unfreeze recurring cost' }),
+    )
+
+    await waitFor(() =>
+      expect(unfreezeRecurringCostMock).toHaveBeenCalledWith('', 2),
+    )
+    await waitFor(() => expect(onUnfreeze).toHaveBeenCalled())
   })
 
   it('shows the conflict message when the name is taken', async () => {

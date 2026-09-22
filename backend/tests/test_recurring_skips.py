@@ -669,26 +669,33 @@ async def test_a_skipped_month_becomes_the_year_when_the_interval_turns_yearly(
     assert state["backlog_count"] == 1
 
 
-async def test_deleting_a_definition_drops_its_skips(
+async def test_freezing_a_definition_drops_its_skips(
     client: AsyncClient,
 ) -> None:
-    """Deleting a Recurring Cost cascades its skips away: the recreated
-    definition starts clean — the read shows live rows only and the badge
-    reads 1."""
+    """Freezing a Recurring Cost cleans its skips away: the frozen
+    definition starts clean — backlog_count is 0, and after unfreezing
+    the first Occurrence is the start date itself (no leftover skips)."""
     token = await _login(client)
     cost_id = await _create_cost(
-        client, token, name="S26 Delete Coffee", start_date=_days(0)
+        client, token, name="S28 Freeze Coffee", start_date=_days(0)
     )
     await _set_cost_skipped(client, token, cost_id, _days(0), True)
     assert (await _cost_state(client, token, cost_id))["backlog_count"] == 0
 
-    response = await client.delete(f"/recurring-costs/{cost_id}", headers=_auth(token))
-    assert response.status_code == 204
-
-    cost_id = await _create_cost(
-        client, token, name="S26 Delete Coffee", start_date=_days(0)
+    response = await client.post(
+        f"/recurring-costs/{cost_id}/freeze", headers=_auth(token)
     )
-    assert _skipped_dates(await _cost_occurrences(client, token, cost_id)) == set()
+    assert response.status_code == 200
+    assert response.json()["frozen"] is True
+    assert response.json()["backlog_count"] == 0
+    assert response.json()["next_due_date"] is None
+
+    # Unfreeze: skips are gone, first Occurrence is the start date.
+    unfrozen = await client.post(
+        f"/recurring-costs/{cost_id}/unfreeze", headers=_auth(token)
+    )
+    assert unfrozen.status_code == 200
+    assert unfrozen.json()["frozen"] is False
     assert (await _cost_state(client, token, cost_id))["backlog_count"] == 1
 
 

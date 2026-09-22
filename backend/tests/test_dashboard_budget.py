@@ -814,11 +814,13 @@ async def test_editing_a_recurring_definition_recomputes_the_month(
         == before["remaining_monthly_spendable"]
     )
 
-    # Deleting the definition changes nothing further — it was already gone
+    # Freezing the definition changes nothing further — it was already gone
     # from the month — and its linked expenses (none here) would survive as
-    # ordinary ones.
-    response = await client.delete(f"/recurring-costs/{cost}", headers=_auth(token))
-    assert response.status_code == 204
+    # ordinary ones (ADR-0028).
+    response = await client.post(
+        f"/recurring-costs/{cost}/freeze", headers=_auth(token)
+    )
+    assert response.status_code == 200
     assert (await _budget(client, token))["monthly_spendable"] == before["monthly_spendable"]
 
 

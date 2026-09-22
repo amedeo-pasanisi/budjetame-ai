@@ -83,9 +83,28 @@ export function RecurringCostsScreen({
     closeModal()
   }
 
-  const handleDeleted = (costId: number) => {
+  const handleFreeze = (cost: RecurringCost) => {
     setCosts((current) =>
-      current === null ? current : current.filter((cost) => cost.id !== costId),
+      current === null
+        ? current
+        : sortByNextDue(
+            current.map((existing) =>
+              existing.id === cost.id ? cost : existing,
+            ),
+          ),
+    )
+    closeModal()
+  }
+
+  const handleUnfreeze = (cost: RecurringCost) => {
+    setCosts((current) =>
+      current === null
+        ? current
+        : sortByNextDue(
+            current.map((existing) =>
+              existing.id === cost.id ? cost : existing,
+            ),
+          ),
     )
     closeModal()
   }
@@ -167,7 +186,8 @@ export function RecurringCostsScreen({
         <RecurringCostModal
           cost={modal.kind === 'edit' ? modal.cost : undefined}
           onSaved={handleSaved}
-          onDeleted={handleDeleted}
+          onFreeze={handleFreeze}
+          onUnfreeze={handleUnfreeze}
           onClose={closeModal}
         />
       )}

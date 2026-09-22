@@ -23,12 +23,15 @@ export function intervalText(value: number, unit: IntervalUnit): string {
  * this keeps locally upserted rows in place). Shared by the Costs and the
  * Incomes sides (issue #60): the shape it needs is the two fields the
  * ordering reads. */
-export function sortByNextDue<T extends { next_due_date: string; name: string }>(
+export function sortByNextDue<T extends { next_due_date: string | null; name: string }>(
   items: T[],
 ): T[] {
-  return [...items].sort(
-    (a, b) =>
-      a.next_due_date.localeCompare(b.next_due_date) ||
-      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-  )
+  return [...items].sort((a, b) => {
+    const aDate = a.next_due_date ?? ''
+    const bDate = b.next_due_date ?? ''
+    return (
+      aDate.localeCompare(bDate) ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    )
+  })
 }

@@ -29,7 +29,7 @@ the cost side.
 
 from datetime import date
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete as sa_delete
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -61,6 +61,10 @@ class RecurringIncomeNameTaken(Exception):
 
 class RecurringIncomeRuleError(Exception):
     """A CONTEXT.md rule rejects the write; maps to 422 with the message."""
+
+
+class RecurringIncomeFrozen(Exception):
+    """The Recurring Income is frozen — no field can be edited (ADR-0028)."""
 
 
 def _parse_start_date(value: str | None) -> date | None:
@@ -105,7 +109,12 @@ def update_recurring_income(
     `model_dump(exclude_unset=True)`: a field present in the payload is
     applied; a field absent is untouched. `start_date` is the one exception
     to the null-clears rule: an explicit null is rejected — a definition
-    always carries a start date (ADR-0024), it can be changed, never unset."""
+    always carries a start date (ADR-0024), it can be changed, never unset.
+    A frozen definition is read-only — every edit is rejected (ADR-0028)."""
+    if income.frozen:
+        raise RecurringIncomeFrozen(
+            "A frozen recurring income cannot be edited. Unfreeze it first."
+        )
     name = changes.get("name", income.name)
     if name is not None and name != income.name:
         if scoping.name_is_taken(
@@ -132,20 +141,40 @@ def update_recurring_income(
     return income
 
 
-def delete_recurring_income(session: Session, income: RecurringIncome) -> None:
-    """Hard-delete the definition (issue #60). Linked Incomes (issue #61)
-    survive as ordinary Incomes: the link FK is ON DELETE SET NULL, and the
-    pinned Occurrence date goes with it — a severed link never carries an
-    Occurrence (ADR-0010/0011)."""
-    # The FK nulls recurring_income_id on its own; occurrence_date is a plain
-    # column, so the pin is cleared here, in the same transaction.
+def freeze_recurring_income(session: Session, income: RecurringIncome) -> RecurringIncome:
+    """Freeze a Recurring Income (ADR-0028): clean up unpaid/skipped
+    Occurrences, stop generating new ones, mark it frozen. All links to
+    Transactions survive intact. Freezing an already-frozen definition is
+    a no-op (idempotent)."""
+    if income.frozen:
+        return income
+    # Delete all skip rows for this definition.
     session.execute(
-        update(Transaction)
-        .where(Transaction.recurring_income_id == income.id)
-        .values(recurring_income_id=None, occurrence_date=None)
+        sa_delete(RecurringSkip).where(RecurringSkip.recurring_income_id == income.id)
     )
-    session.delete(income)
+    income.frozen = True
+    income.freeze_date = rome_today()
     session.commit()
+    session.refresh(income)
+    return income
+
+
+def unfreeze_recurring_income(session: Session, income: RecurringIncome) -> RecurringIncome:
+    """Unfreeze a frozen Recurring Income (ADR-0028): restore editability,
+    resume Occurrence generation on the natural cycle. If the name collides
+    with an existing active definition, reject. Unfreezing an active
+    definition is a no-op, mirroring freeze's idempotency."""
+    if not income.frozen:
+        return income
+    if scoping.name_is_taken(
+        session, RecurringIncome, income.account_id, income.name, exclude_id=income.id
+    ):
+        raise RecurringIncomeNameTaken(income.name)
+    income.frozen = False
+    income.freeze_date = None
+    session.commit()
+    session.refresh(income)
+    return income
 
 
 def skipped_periods(

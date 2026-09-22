@@ -280,9 +280,9 @@ class RecurringCost(Base):
     for short months (app.recurrence). An Occurrence's due date is its own
     date — the due-date override is gone (ADR-0024). Every definition
     carries a start date: left empty at creation it is set to the creation
-    day. Deleting a Recurring Cost is a hard delete; linked Expenses — and
-    linked Transfers to a Contact Wallet (ADR-0027) — survive as ordinary
-    Transactions via ON DELETE SET NULL.
+    day. Freezing replaces the old hard delete: a frozen definition keeps
+    its links, becomes read-only, and stops generating Occurrences
+    (ADR-0028). Unfreezing restores it to active.
     """
 
     __tablename__ = "recurring_costs"
@@ -310,6 +310,14 @@ class RecurringCost(Base):
     # day (ADR-0024); it can be changed, never unset. An Occurrence's due
     # date is its own date — the due-date override is gone.
     start_date: Mapped[date] = mapped_column(Date)
+    # A frozen (archived) definition: hidden from the main list, read-only,
+    # no new Occurrences generated; unpaid/skipped Occurrences are cleaned
+    # at freeze time (ADR-0028). freeze_date records when the freeze action
+    # was taken, used for Budget exclusion rules.
+    frozen: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    freeze_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -321,10 +329,10 @@ class RecurringIncome(Base):
 
     The mirror of RecurringCost, deliberately not a generalization: the same
     field set and the same derived Occurrences, sharing the pure recurrence
-    module (app.recurrence) unchanged. Deleting a Recurring Income is a hard
-    delete; linked Incomes — and linked Transfers from a Contact Wallet
-    (ADR-0027) — survive as ordinary Transactions: the link
-    FK is ON DELETE SET NULL, mirroring the Recurring Cost sever (issue #57).
+    module (app.recurrence) unchanged. Freezing replaces the old hard
+    delete: a frozen definition keeps its links, becomes read-only, and
+    stops generating Occurrences (ADR-0028). Unfreezing restores it to
+    active.
     """
 
     __tablename__ = "recurring_incomes"
@@ -352,6 +360,14 @@ class RecurringIncome(Base):
     # day (ADR-0024); it can be changed, never unset. An Occurrence's due
     # date is its own date — the due-date override is gone.
     start_date: Mapped[date] = mapped_column(Date)
+    # A frozen (archived) definition: hidden from the main list, read-only,
+    # no new Occurrences generated; unpaid/skipped Occurrences are cleaned
+    # at freeze time (ADR-0028). freeze_date records when the freeze action
+    # was taken, used for Budget exclusion rules.
+    frozen: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    freeze_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

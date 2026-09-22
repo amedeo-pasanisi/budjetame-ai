@@ -16,15 +16,19 @@ export type RecurringCost = {
    * carries one: left empty at creation it is set to the creation day
    * (ADR-0024), and an Occurrence's due date is its own date. */
   start_date: string
-  /** The next Occurrence's own date, derived on the backend. */
-  next_due_date: string
+  /** The next Occurrence's own date, derived on the backend.
+   * When frozen this is null (ADR-0028). */
+  next_due_date: string | null
   /** The next Occurrence a new linked Expense would pay — the oldest Unpaid
-   * one's own date (issue #57): what the transaction form's picker shows. */
-  next_unpaid_occurrence_date: string
+   * one's own date (issue #57): what the transaction form's picker shows.
+   * When frozen this is null (ADR-0028). */
+  next_unpaid_occurrence_date: string | null
   /** The Backlog (issue #58): Unpaid Occurrences whose due date is today or
    * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
    * from the definition and the stored link pins, never stored. */
   backlog_count: number
+  /** Whether the definition is frozen (ADR-0028). */
+  frozen: boolean
   created_at: string
 }
 
@@ -60,8 +64,14 @@ function toPayload(input: RecurringCostInput) {
   }
 }
 
-export async function fetchRecurringCosts(token: string): Promise<RecurringCost[]> {
-  const response = await request('/recurring-costs', {
+export async function fetchRecurringCosts(
+  token: string,
+  includeFrozen?: boolean,
+): Promise<RecurringCost[]> {
+  const url = includeFrozen
+    ? '/recurring-costs?include_frozen=true'
+    : '/recurring-costs'
+  const response = await request(url, {
     token,
     errorMessage: 'Could not load recurring costs',
   })
@@ -97,12 +107,28 @@ export async function updateRecurringCost(
   return (await response.json()) as RecurringCost
 }
 
-export async function deleteRecurringCost(token: string, costId: number): Promise<void> {
-  await request(`/recurring-costs/${costId}`, {
-    method: 'DELETE',
+export async function freezeRecurringCost(
+  token: string,
+  costId: number,
+): Promise<RecurringCost> {
+  const response = await request(`/recurring-costs/${costId}/freeze`, {
+    method: 'POST',
     token,
-    errorMessage: 'Could not delete recurring cost',
+    errorMessage: 'Could not freeze recurring cost',
   })
+  return (await response.json()) as RecurringCost
+}
+
+export async function unfreezeRecurringCost(
+  token: string,
+  costId: number,
+): Promise<RecurringCost> {
+  const response = await request(`/recurring-costs/${costId}/unfreeze`, {
+    method: 'POST',
+    token,
+    errorMessage: 'Could not unfreeze recurring cost',
+  })
+  return (await response.json()) as RecurringCost
 }
 
 export async function fetchRecurringCostOccurrences(

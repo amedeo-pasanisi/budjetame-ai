@@ -31,7 +31,8 @@ vi.mock('./api', async () => {
         : fallback,
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
-    deleteRecurringIncome: vi.fn(),
+    freezeRecurringIncome: vi.fn(),
+    unfreezeRecurringIncome: vi.fn(),
     fetchRecurringIncomeOccurrences: vi.fn(),
     setRecurringIncomeOccurrenceSkipped: vi.fn(),
   }
@@ -39,7 +40,8 @@ vi.mock('./api', async () => {
 
 import {
   createRecurringIncome,
-  deleteRecurringIncome,
+  freezeRecurringIncome,
+  unfreezeRecurringIncome,
   fetchRecurringIncomeOccurrences,
   setRecurringIncomeOccurrenceSkipped,
   updateRecurringIncome,
@@ -57,12 +59,28 @@ const income: RecurringIncome = {
   next_due_date: '2030-03-15',
   next_unpaid_occurrence_date: '2030-03-15',
   backlog_count: 0,
+  frozen: false,
+  created_at: createdAt,
+}
+
+const frozenIncome: RecurringIncome = {
+  id: 2,
+  name: 'Old Freelance',
+  amount: '500.00',
+  interval_value: 1,
+  interval_unit: 'months',
+  start_date: '2025-01-01',
+  next_due_date: null,
+  next_unpaid_occurrence_date: null,
+  backlog_count: 0,
+  frozen: true,
   created_at: createdAt,
 }
 
 const createRecurringIncomeMock = vi.mocked(createRecurringIncome)
 const updateRecurringIncomeMock = vi.mocked(updateRecurringIncome)
-const deleteRecurringIncomeMock = vi.mocked(deleteRecurringIncome)
+const freezeRecurringIncomeMock = vi.mocked(freezeRecurringIncome)
+const unfreezeRecurringIncomeMock = vi.mocked(unfreezeRecurringIncome)
 const fetchRecurringIncomeOccurrencesMock = vi.mocked(fetchRecurringIncomeOccurrences)
 const setRecurringIncomeOccurrenceSkippedMock = vi.mocked(setRecurringIncomeOccurrenceSkipped)
 
@@ -75,18 +93,21 @@ const occurrences = [
 
 function renderForm(editing?: RecurringIncome) {
   const onSaved = vi.fn()
-  const onDeleted = vi.fn()
+  const onFreeze = vi.fn()
+  const onUnfreeze = vi.fn()
   const onCancel = vi.fn()
   const view = render(
     <RecurringIncomeForm
       income={editing}
       onSaved={onSaved}
-      onDeleted={onDeleted}
+      onFreeze={onFreeze}
+      onUnfreeze={onUnfreeze}
       onCancel={onCancel}
     />,
   )
-  return { onSaved, onDeleted, onCancel, view }
+  return { onSaved, onFreeze, onUnfreeze, onCancel, view }
 }
+
 
 beforeEach(() => {
   createRecurringIncomeMock.mockResolvedValue({ ...income, id: 2 })
@@ -163,7 +184,7 @@ describe('RecurringIncomeForm start date', () => {
   })
 })
 
-describe('RecurringIncomeForm edit and delete', () => {
+describe('RecurringIncomeForm edit and freeze', () => {
   it('prefills every field from the income being edited', () => {
     renderForm(income)
 
@@ -192,15 +213,35 @@ describe('RecurringIncomeForm edit and delete', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })
 
-  it('deletes with the tap-again confirmation', async () => {
-    deleteRecurringIncomeMock.mockResolvedValue(undefined)
-    const { onDeleted } = renderForm(income)
+  it('freezes with the tap-again confirmation', async () => {
+    freezeRecurringIncomeMock.mockResolvedValue({ ...income, frozen: true })
+    const { onFreeze } = renderForm(income)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete recurring income' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Freeze recurring income' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm freeze' }))
 
-    await waitFor(() => expect(deleteRecurringIncomeMock).toHaveBeenCalledWith('', 1))
-    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(1))
+    await waitFor(() =>
+      expect(freezeRecurringIncomeMock).toHaveBeenCalledWith('', 1),
+    )
+    await waitFor(() => expect(onFreeze).toHaveBeenCalled())
+  })
+
+  it('shows unfreeze button for a frozen income', async () => {
+    unfreezeRecurringIncomeMock.mockResolvedValue({ ...frozenIncome, frozen: false })
+    const { onUnfreeze } = renderForm(frozenIncome)
+
+    expect(
+      screen.getByRole('button', { name: 'Unfreeze recurring income' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Unfreeze recurring income' }),
+    )
+
+    await waitFor(() =>
+      expect(unfreezeRecurringIncomeMock).toHaveBeenCalledWith('', 2),
+    )
+    await waitFor(() => expect(onUnfreeze).toHaveBeenCalled())
   })
 
   it('shows the conflict message when the name is taken', async () => {

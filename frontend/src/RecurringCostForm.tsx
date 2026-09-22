@@ -5,7 +5,8 @@ import {
   TOKEN_KEY,
   apiErrorMessage,
   createRecurringCost,
-  deleteRecurringCost,
+  freezeRecurringCost,
+  unfreezeRecurringCost,
   fetchRecurringCostOccurrences,
   setRecurringCostOccurrenceSkipped,
   updateRecurringCost,
@@ -25,7 +26,8 @@ const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
 type RecurringCostFormProps = {
   cost?: RecurringCost
   onSaved: (cost: RecurringCost) => void
-  onDeleted?: (costId: number) => void
+  onFreeze?: (cost: RecurringCost) => void
+  onUnfreeze?: (cost: RecurringCost) => void
   onCancel: () => void
 }
 
@@ -54,7 +56,8 @@ type RecurringCostFormProps = {
 export function RecurringCostForm({
   cost,
   onSaved,
-  onDeleted,
+  onFreeze,
+  onUnfreeze,
   onCancel,
 }: RecurringCostFormProps) {
   const editing = cost !== undefined
@@ -70,7 +73,7 @@ export function RecurringCostForm({
   const [startDate, setStartDate] = useState(cost?.start_date ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [confirmingFreeze, setConfirmingFreeze] = useState(false)
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   // The Occurrences section's rows (ADR-0026): their own read, loaded when
   // an existing definition opens the form (a definition under creation has
@@ -169,21 +172,37 @@ export function RecurringCostForm({
     }
   }
 
-  const handleDelete = async () => {
-    if (cost === undefined) {
+  const handleFreeze = async () => {
+    if (cost === undefined || cost.frozen) {
       return
     }
-    if (!confirmingDelete) {
-      setConfirmingDelete(true)
+    if (!confirmingFreeze) {
+      setConfirmingFreeze(true)
       return
     }
     setSubmitting(true)
     setError(null)
     try {
-      await deleteRecurringCost(token, cost.id)
-      onDeleted?.(cost.id)
+      const frozen = await freezeRecurringCost(token, cost.id)
+      setConfirmingFreeze(false)
+      onFreeze?.(frozen)
     } catch {
-      setError('Could not delete the recurring cost.')
+      setError('Could not freeze the recurring cost.')
+      setSubmitting(false)
+    }
+  }
+
+  const handleUnfreeze = async () => {
+    if (cost === undefined || !cost.frozen) {
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const unfrozen = await unfreezeRecurringCost(token, cost.id)
+      onUnfreeze?.(unfrozen)
+    } catch {
+      setError('Could not unfreeze the recurring cost.')
       setSubmitting(false)
     }
   }
@@ -362,22 +381,33 @@ export function RecurringCostForm({
         </button>
       </div>
 
-      {editing && onDeleted !== undefined && (
+      {editing && cost?.frozen && onUnfreeze !== undefined && (
         <button
           type="button"
-          onClick={handleDelete}
+          onClick={handleUnfreeze}
+          disabled={submitting}
+          className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
+        >
+          {submitting ? 'Unfreezing…' : 'Unfreeze recurring cost'}
+        </button>
+      )}
+
+      {editing && !cost?.frozen && onFreeze !== undefined && (
+        <button
+          type="button"
+          onClick={handleFreeze}
           disabled={submitting}
           className={`w-full rounded-lg border px-4 py-2 text-sm font-medium ${
-            confirmingDelete
+            confirmingFreeze
               ? 'border-red-600 bg-red-600 text-white'
               : 'border-red-200 text-red-600'
           }`}
         >
           {submitting
-            ? 'Deleting…'
-            : confirmingDelete
-              ? 'Tap again to confirm'
-              : 'Delete recurring cost'}
+            ? 'Freezing…'
+            : confirmingFreeze
+              ? 'Tap again to confirm freeze'
+              : 'Freeze recurring cost'}
         </button>
       )}
     </form>

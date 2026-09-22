@@ -5,7 +5,8 @@ import { RecurringIncomeForm } from './RecurringIncomeForm'
 type RecurringIncomeModalProps = {
   income?: RecurringIncome
   onSaved: (income: RecurringIncome) => void
-  onDeleted?: (incomeId: number) => void
+  onFreeze?: (income: RecurringIncome) => void
+  onUnfreeze?: (income: RecurringIncome) => void
   onClose: () => void
 }
 
@@ -13,11 +14,13 @@ type RecurringIncomeModalProps = {
  * (issue #60), mirroring the Costs side (issue #56, ADR-0011). Create and
  * edit share this one modal, like Wallets and Categories; the shell adds the
  * dismissal paths — backdrop tap, Escape, and Cancel all abandon the draft
- * without saving. */
+ * without saving. Freeze/Unfreeze (ADR-0028) replaces the old delete
+ * action. */
 export function RecurringIncomeModal({
   income,
   onSaved,
-  onDeleted,
+  onFreeze,
+  onUnfreeze,
   onClose,
 }: RecurringIncomeModalProps) {
   const editing = income !== undefined
@@ -30,7 +33,8 @@ export function RecurringIncomeModal({
         key={editing ? income.id : 'create'}
         income={income}
         onSaved={onSaved}
-        onDeleted={onDeleted}
+        onFreeze={onFreeze}
+        onUnfreeze={onUnfreeze}
         onCancel={onClose}
       />
     </ModalShell>

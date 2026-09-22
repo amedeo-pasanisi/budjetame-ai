@@ -199,10 +199,22 @@ def _check_create_rules(
             _check_transfer_cost_link_legs(source, destination)
             # Foreign or absent data is indistinguishable: owned_or_raise
             # raises NotOwned, mapped to 403 by the HTTP layer (ADR-0003).
-            owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
+            cost = owned_or_raise(
+                session, RecurringCost, account_id, recurring_cost_id
+            )
+            if cost.frozen:
+                raise TransactionRuleError(
+                    "A frozen recurring cost cannot accept new links"
+                )
         if recurring_income_id is not None:
             _check_transfer_income_link_legs(source, destination)
-            owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
+            income = owned_or_raise(
+                session, RecurringIncome, account_id, recurring_income_id
+            )
+            if income.frozen:
+                raise TransactionRuleError(
+                    "A frozen recurring income cannot accept new links"
+                )
         return source, destination
     if wallet_id is None:
         raise TransactionRuleError("wallet_id is required for Expense and Income")
@@ -232,7 +244,13 @@ def _check_create_rules(
             )
         # Foreign or absent data is indistinguishable: owned_or_raise raises
         # NotOwned, mapped to 403 by the HTTP layer (ADR-0003).
-        owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
+        cost = owned_or_raise(
+            session, RecurringCost, account_id, recurring_cost_id
+        )
+        if cost.frozen:
+            raise TransactionRuleError(
+                "A frozen recurring cost cannot accept new links"
+            )
     if recurring_income_id is not None:
         if type != TransactionType.INCOME.value:
             raise TransactionRuleError(
@@ -240,7 +258,13 @@ def _check_create_rules(
             )
         # Foreign or absent data is indistinguishable: owned_or_raise raises
         # NotOwned, mapped to 403 by the HTTP layer (ADR-0003).
-        owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
+        income = owned_or_raise(
+            session, RecurringIncome, account_id, recurring_income_id
+        )
+        if income.frozen:
+            raise TransactionRuleError(
+                "A frozen recurring income cannot accept new links"
+            )
     return (wallet,)
 
 
@@ -427,6 +451,10 @@ def update_transaction(
                 owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
                 cost = session.get(RecurringCost, recurring_cost_id)
                 assert cost is not None  # owned_or_raise just fetched it
+                if cost.frozen:
+                    raise TransactionRuleError(
+                        "A frozen recurring cost cannot accept new links"
+                    )
                 transaction.recurring_cost_id = recurring_cost_id
                 transaction.occurrence_date = (
                     recurring_service.oldest_unpaid_occurrence(
@@ -449,6 +477,10 @@ def update_transaction(
             owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
             cost = session.get(RecurringCost, recurring_cost_id)
             assert cost is not None  # owned_or_raise just fetched it
+            if cost.frozen:
+                raise TransactionRuleError(
+                    "A frozen recurring cost cannot accept new links"
+                )
             transaction.recurring_cost_id = recurring_cost_id
             transaction.occurrence_date = recurring_service.oldest_unpaid_occurrence(
                 session, cost, exclude_transaction_id=transaction.id
@@ -480,6 +512,10 @@ def update_transaction(
                 owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
                 income = session.get(RecurringIncome, recurring_income_id)
                 assert income is not None  # owned_or_raise just fetched it
+                if income.frozen:
+                    raise TransactionRuleError(
+                        "A frozen recurring income cannot accept new links"
+                    )
                 transaction.recurring_income_id = recurring_income_id
                 transaction.occurrence_date = (
                     income_recurring_service.oldest_unpaid_occurrence(
@@ -502,6 +538,10 @@ def update_transaction(
             owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
             income = session.get(RecurringIncome, recurring_income_id)
             assert income is not None  # owned_or_raise just fetched it
+            if income.frozen:
+                raise TransactionRuleError(
+                    "A frozen recurring income cannot accept new links"
+                )
             transaction.recurring_income_id = recurring_income_id
             transaction.occurrence_date = (
                 income_recurring_service.oldest_unpaid_occurrence(

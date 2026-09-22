@@ -20,16 +20,19 @@ export type RecurringIncome = {
    * carries one: left empty at creation it is set to the creation day
    * (ADR-0024), and an Occurrence's due date is its own date. */
   start_date: string
-  /** The next Occurrence's own date, derived on the backend. */
-  next_due_date: string
+  /** The next Occurrence's own date, derived on the backend.
+   * When frozen this is null (ADR-0028). */
+  next_due_date: string | null
   /** The next Occurrence a new linked Income would receive — the oldest
    * Unpaid one's own date (issue #61): what the transaction form's picker
-   * shows. */
-  next_unpaid_occurrence_date: string
+   * shows. When frozen this is null (ADR-0028). */
+  next_unpaid_occurrence_date: string | null
   /** The Backlog (issue #62): Unpaid Occurrences whose due date is today or
    * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
    * from the definition and the stored link pins, never stored. */
   backlog_count: number
+  /** Whether the definition is frozen (ADR-0028). */
+  frozen: boolean
   created_at: string
 }
 
@@ -57,8 +60,14 @@ function toPayload(input: RecurringIncomeInput) {
   }
 }
 
-export async function fetchRecurringIncomes(token: string): Promise<RecurringIncome[]> {
-  const response = await request('/recurring-incomes', {
+export async function fetchRecurringIncomes(
+  token: string,
+  includeFrozen?: boolean,
+): Promise<RecurringIncome[]> {
+  const url = includeFrozen
+    ? '/recurring-incomes?include_frozen=true'
+    : '/recurring-incomes'
+  const response = await request(url, {
     token,
     errorMessage: 'Could not load recurring incomes',
   })
@@ -94,12 +103,28 @@ export async function updateRecurringIncome(
   return (await response.json()) as RecurringIncome
 }
 
-export async function deleteRecurringIncome(token: string, incomeId: number): Promise<void> {
-  await request(`/recurring-incomes/${incomeId}`, {
-    method: 'DELETE',
+export async function freezeRecurringIncome(
+  token: string,
+  incomeId: number,
+): Promise<RecurringIncome> {
+  const response = await request(`/recurring-incomes/${incomeId}/freeze`, {
+    method: 'POST',
     token,
-    errorMessage: 'Could not delete recurring income',
+    errorMessage: 'Could not freeze recurring income',
   })
+  return (await response.json()) as RecurringIncome
+}
+
+export async function unfreezeRecurringIncome(
+  token: string,
+  incomeId: number,
+): Promise<RecurringIncome> {
+  const response = await request(`/recurring-incomes/${incomeId}/unfreeze`, {
+    method: 'POST',
+    token,
+    errorMessage: 'Could not unfreeze recurring income',
+  })
+  return (await response.json()) as RecurringIncome
 }
 
 export async function fetchRecurringIncomeOccurrences(

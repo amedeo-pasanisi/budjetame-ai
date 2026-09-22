@@ -5,7 +5,8 @@ import {
   TOKEN_KEY,
   apiErrorMessage,
   createRecurringIncome,
-  deleteRecurringIncome,
+  freezeRecurringIncome,
+  unfreezeRecurringIncome,
   fetchRecurringIncomeOccurrences,
   setRecurringIncomeOccurrenceSkipped,
   updateRecurringIncome,
@@ -25,7 +26,8 @@ const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
 type RecurringIncomeFormProps = {
   income?: RecurringIncome
   onSaved: (income: RecurringIncome) => void
-  onDeleted?: (incomeId: number) => void
+  onFreeze?: (income: RecurringIncome) => void
+  onUnfreeze?: (income: RecurringIncome) => void
   onCancel: () => void
 }
 
@@ -54,7 +56,8 @@ type RecurringIncomeFormProps = {
 export function RecurringIncomeForm({
   income,
   onSaved,
-  onDeleted,
+  onFreeze,
+  onUnfreeze,
   onCancel,
 }: RecurringIncomeFormProps) {
   const editing = income !== undefined
@@ -70,7 +73,7 @@ export function RecurringIncomeForm({
   const [startDate, setStartDate] = useState(income?.start_date ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [confirmingFreeze, setConfirmingFreeze] = useState(false)
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   // The Occurrences section's rows (ADR-0026): their own read, loaded when
   // an existing definition opens the form (a definition under creation has
@@ -169,21 +172,37 @@ export function RecurringIncomeForm({
     }
   }
 
-  const handleDelete = async () => {
-    if (income === undefined) {
+  const handleFreeze = async () => {
+    if (income === undefined || income.frozen) {
       return
     }
-    if (!confirmingDelete) {
-      setConfirmingDelete(true)
+    if (!confirmingFreeze) {
+      setConfirmingFreeze(true)
       return
     }
     setSubmitting(true)
     setError(null)
     try {
-      await deleteRecurringIncome(token, income.id)
-      onDeleted?.(income.id)
+      const frozen = await freezeRecurringIncome(token, income.id)
+      setConfirmingFreeze(false)
+      onFreeze?.(frozen)
     } catch {
-      setError('Could not delete the recurring income.')
+      setError('Could not freeze the recurring income.')
+      setSubmitting(false)
+    }
+  }
+
+  const handleUnfreeze = async () => {
+    if (income === undefined || !income.frozen) {
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const unfrozen = await unfreezeRecurringIncome(token, income.id)
+      onUnfreeze?.(unfrozen)
+    } catch {
+      setError('Could not unfreeze the recurring income.')
       setSubmitting(false)
     }
   }
@@ -362,22 +381,33 @@ export function RecurringIncomeForm({
         </button>
       </div>
 
-      {editing && onDeleted !== undefined && (
+      {editing && income?.frozen && onUnfreeze !== undefined && (
         <button
           type="button"
-          onClick={handleDelete}
+          onClick={handleUnfreeze}
+          disabled={submitting}
+          className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
+        >
+          {submitting ? 'Unfreezing…' : 'Unfreeze recurring income'}
+        </button>
+      )}
+
+      {editing && !income?.frozen && onFreeze !== undefined && (
+        <button
+          type="button"
+          onClick={handleFreeze}
           disabled={submitting}
           className={`w-full rounded-lg border px-4 py-2 text-sm font-medium ${
-            confirmingDelete
+            confirmingFreeze
               ? 'border-red-600 bg-red-600 text-white'
               : 'border-red-200 text-red-600'
           }`}
         >
           {submitting
-            ? 'Deleting…'
-            : confirmingDelete
-              ? 'Tap again to confirm'
-              : 'Delete recurring income'}
+            ? 'Freezing…'
+            : confirmingFreeze
+              ? 'Tap again to confirm freeze'
+              : 'Freeze recurring income'}
         </button>
       )}
     </form>

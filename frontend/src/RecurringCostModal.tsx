@@ -5,18 +5,21 @@ import { RecurringCostForm } from './RecurringCostForm'
 type RecurringCostModalProps = {
   cost?: RecurringCost
   onSaved: (cost: RecurringCost) => void
-  onDeleted?: (costId: number) => void
+  onFreeze?: (cost: RecurringCost) => void
+  onUnfreeze?: (cost: RecurringCost) => void
   onClose: () => void
 }
 
 /** The create/edit Recurring Cost form inside the shared modal shell
  * (issue #56). Create and edit share this one modal, like Wallets and
  * Categories; the shell adds the dismissal paths — backdrop tap, Escape, and
- * Cancel all abandon the draft without saving. */
+ * Cancel all abandon the draft without saving. Freeze/Unfreeze (ADR-0028)
+ * replaces the old delete action. */
 export function RecurringCostModal({
   cost,
   onSaved,
-  onDeleted,
+  onFreeze,
+  onUnfreeze,
   onClose,
 }: RecurringCostModalProps) {
   const editing = cost !== undefined
@@ -26,7 +29,8 @@ export function RecurringCostModal({
         key={editing ? cost.id : 'create'}
         cost={cost}
         onSaved={onSaved}
-        onDeleted={onDeleted}
+        onFreeze={onFreeze}
+        onUnfreeze={onUnfreeze}
         onCancel={onClose}
       />
     </ModalShell>

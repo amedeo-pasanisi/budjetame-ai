@@ -84,9 +84,28 @@ export function RecurringIncomesScreen({
     closeModal()
   }
 
-  const handleDeleted = (incomeId: number) => {
+  const handleFreeze = (income: RecurringIncome) => {
     setIncomes((current) =>
-      current === null ? current : current.filter((income) => income.id !== incomeId),
+      current === null
+        ? current
+        : sortByNextDue(
+            current.map((existing) =>
+              existing.id === income.id ? income : existing,
+            ),
+          ),
+    )
+    closeModal()
+  }
+
+  const handleUnfreeze = (income: RecurringIncome) => {
+    setIncomes((current) =>
+      current === null
+        ? current
+        : sortByNextDue(
+            current.map((existing) =>
+              existing.id === income.id ? income : existing,
+            ),
+          ),
     )
     closeModal()
   }
@@ -168,7 +187,8 @@ export function RecurringIncomesScreen({
         <RecurringIncomeModal
           income={modal.kind === 'edit' ? modal.income : undefined}
           onSaved={handleSaved}
-          onDeleted={handleDeleted}
+          onFreeze={handleFreeze}
+          onUnfreeze={handleUnfreeze}
           onClose={closeModal}
         />
       )}

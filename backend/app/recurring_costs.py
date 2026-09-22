@@ -2,7 +2,7 @@
 at a fixed interval. The list exposes each cost's next due date, derived on
 the fly (ADR-0010); the screen sorts by it."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -44,7 +44,22 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
     transaction form's picker shows — and the Backlog (issue #58): Unpaid
     Occurrences due today or
     earlier in Europe/Rome. Skip controls live per Occurrence on the
-    Occurrences read (ADR-0026), not on the definition."""
+    Occurrences read (ADR-0026), not on the definition. When the definition
+    is frozen (ADR-0028), the derived fields return None or 0."""
+    if cost.frozen:
+        return RecurringCostOut(
+            id=cost.id,
+            name=cost.name,
+            amount=cost.amount,
+            interval_value=cost.interval_value,
+            interval_unit=IntervalUnit(cost.interval_unit),
+            start_date=cost.start_date.isoformat(),
+            next_due_date=None,
+            next_unpaid_occurrence_date=None,
+            frozen=True,
+            backlog_count=0,
+            created_at=cost.created_at,
+        )
     backlog = recurring_service.backlog_count_for(session, cost)
     return RecurringCostOut(
         id=cost.id,
@@ -57,6 +72,7 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
         next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
             session, cost
         ).isoformat(),
+        frozen=False,
         backlog_count=backlog,
         created_at=cost.created_at,
     )
@@ -74,17 +90,22 @@ def _name_conflict(session: Session, cause: Exception) -> None:
 
 @router.get("", response_model=list[RecurringCostOut])
 def list_recurring_costs(
+    include_frozen: bool = False,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
 ) -> list[RecurringCostOut]:
     """Every Recurring Cost of the Account, sorted by next due date ascending
-    (ties by name) — the one order the Recurring screen needs."""
-    costs = session.scalars(
-        select(RecurringCost).where(RecurringCost.account_id == account.id)
-    ).all()
+    (ties by name) — the one order the Recurring screen needs.
+    Active definitions by default; `include_frozen=true` also returns frozen
+    definitions (with `frozen: True`) so the history screen can reach their
+    linked Transactions."""
+    stmt = select(RecurringCost).where(RecurringCost.account_id == account.id)
+    if not include_frozen:
+        stmt = stmt.where(RecurringCost.frozen.is_(False))
+    costs = session.scalars(stmt).all()
     return sorted(
         (_cost_out(session, cost) for cost in costs),
-        key=lambda out: (out.next_due_date, out.name.lower()),
+        key=lambda out: (out.next_due_date or "", out.name.lower()),
     )
 
 
@@ -185,6 +206,8 @@ def update_recurring_cost(
             cost,
             changes=payload.model_dump(exclude_unset=True),
         )
+    except recurring_service.RecurringCostFrozen as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except recurring_service.RecurringCostRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (recurring_service.RecurringCostNameTaken, IntegrityError) as cause:
@@ -192,11 +215,37 @@ def update_recurring_cost(
     return _cost_out(session, cost)
 
 
-@router.delete("/{cost_id}", status_code=204)
-def delete_recurring_cost(
+@router.post("/{cost_id}/freeze", response_model=RecurringCostOut)
+def freeze_recurring_cost(
     cost_id: int,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> None:
+) -> RecurringCostOut:
+    """Freeze a Recurring Cost (ADR-0028): clean up unpaid/skipped
+    Occurrences, stop generating new ones. All links to Transactions
+    survive intact. The frozen definition is read-only and shown in a
+    collapsed Frozen Recurring section."""
     cost = _owned_cost_or_403(session, account, cost_id)
-    recurring_service.delete_recurring_cost(session, cost)
+    cost = recurring_service.freeze_recurring_cost(session, cost)
+    return _cost_out(session, cost)
+
+
+@router.post("/{cost_id}/unfreeze", response_model=RecurringCostOut)
+def unfreeze_recurring_cost(
+    cost_id: int,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> RecurringCostOut:
+    """Unfreeze a frozen Recurring Cost (ADR-0028): restore editability and
+    resume Occurrence generation on the natural cycle. If the name collides
+    with an active definition, returns 409."""
+    cost = _owned_cost_or_403(session, account, cost_id)
+    try:
+        cost = recurring_service.unfreeze_recurring_cost(session, cost)
+    except recurring_service.RecurringCostNameTaken as cause:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f'A Recurring Cost named "{cost.name}" already exists — rename it first.',
+        ) from cause
+    return _cost_out(session, cost)
