@@ -288,7 +288,7 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit Salary' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit recurring income' })
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Salary')
-    expect(within(dialog).getByLabelText('Amount')).toHaveValue(2100)
+    expect(within(dialog).getByLabelText('Amount')).toHaveValue('2100.00')
 
     fireEvent.change(within(dialog).getByLabelText('Amount'), { target: { value: '2200.00' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
