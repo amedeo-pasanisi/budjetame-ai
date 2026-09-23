@@ -288,7 +288,7 @@ describe('RecurringCostsScreen edit and freeze flows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit Rent' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Rent')
-    expect(within(dialog).getByLabelText('Amount')).toHaveValue(850)
+    expect(within(dialog).getByLabelText('Amount')).toHaveValue('850.00')
 
     fireEvent.change(within(dialog).getByLabelText('Amount'), { target: { value: '900.00' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))

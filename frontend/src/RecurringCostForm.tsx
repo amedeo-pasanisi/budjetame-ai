@@ -16,6 +16,8 @@ import {
   type RecurringOccurrence,
 } from './api'
 import { intervalText } from './recurringCosts'
+import { FieldError } from './FieldError'
+import { fieldErrorProps, parseAmount, type FieldErrors } from './validation'
 
 const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
   { value: 'days', one: 'Day', many: 'Days' },
@@ -53,7 +55,57 @@ type RecurringCostFormProps = {
  * the row's skipped state and swaps in the refreshed read, and the write
  * refreshes the derived state (badge, next due date) on the cards behind.
  * Cancel — like the shell's backdrop and Escape — abandons the draft
- * without saving. */
+ * without saving. Field Errors (ADR-0029) reveal inline under each wrong
+ * field on a Save attempt; frozen/read-only rendering never validates. */
+
+/** The Recurring Cost form's draft, as submit-and-validate (ADR-0029) sees
+ * it: everything that can be wrong, in one flat record, so the pure
+ * `validate()` below can judge it without touching React. */
+type RecurringCostDraft = {
+  name: string
+  amount: string
+  interval: string
+  editing: boolean
+  startDate: string
+}
+
+/** Submit-and-validate (ADR-0029): the Recurring Cost form's pure
+ * validation. Returns one Field Error per wrong field — keyed by the error
+ * keys the fields render under — and nothing for a valid form. Runs on
+ * every Save click before any API call; a form with errors submits
+ * nothing. Reuses the shared tolerant amount parser from the validation
+ * layer (issue #102), never re-implementing it: an empty Amount is its own
+ * message, an unparseable one (letters, signs, malformed groupings)
+ * another, and a parseable-but-non-positive one a third. The interval is
+ * a whole number of units: empty, non-integer, or below 1 is one message.
+ * The Start date is only mandatory while editing (ADR-0024): at creation
+ * an empty one stays allowed — the first Occurrence becomes today. */
+function validate(draft: RecurringCostDraft): FieldErrors {
+  const errors: FieldErrors = {}
+  if (draft.name.trim() === '') {
+    errors.name = 'Enter a name'
+  }
+  const trimmedAmount = draft.amount.trim()
+  if (trimmedAmount === '') {
+    errors.amount = 'Enter an amount'
+  } else if (parseAmount(trimmedAmount) === null) {
+    // parseAmount reads a finite positive number, or null for everything
+    // else. Split the nulls the way users experience them: text that is
+    // not an amount at all, vs a number that just is not positive.
+    errors.amount = /^-?\d+([.,]\d+)?$/.test(trimmedAmount)
+      ? 'Amount must be a positive number'
+      : "That doesn't look like an amount — use digits and one . or , for decimals"
+  }
+  const interval = draft.interval.trim()
+  if (interval === '' || !/^\d+$/.test(interval) || Number(interval) < 1) {
+    errors.interval = 'The interval must be at least 1'
+  }
+  if (draft.editing && draft.startDate.trim() === '') {
+    errors.start = 'Choose a start date'
+  }
+  return errors
+}
+
 export function RecurringCostForm({
   cost,
   onSaved,
@@ -74,6 +126,10 @@ export function RecurringCostForm({
   )
   const [startDate, setStartDate] = useState(cost?.start_date ?? '')
   const [error, setError] = useState<string | null>(null)
+  // Field Errors (ADR-0029): revealed by a Save attempt, they persist
+  // while the user types and refresh only on the next Save click — never
+  // live, never on blur.
+  const [errors, setErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
@@ -131,19 +187,13 @@ export function RecurringCostForm({
   }
 
   const intervalNumber = Number.parseInt(intervalValue, 10)
-  const amountNumber = Number.parseFloat(amount)
-  const canSave =
-    !readOnly &&
-    name.trim() !== '' &&
-    amountNumber > 0 &&
-    intervalNumber >= 1 &&
-    // The start date is only optional at creation (empty = today); an
-    // existing definition always carries one (ADR-0024).
-    (!editing || startDate !== '')
 
   const buildInput = (): RecurringCostInput => ({
     name: name.trim(),
-    amount,
+    // The tolerant Amount Input (ADR-0029) sends the canonical cents value —
+    // "1.000,45" or "17,5" reach the API as "1000.45"/"17.50" — the
+    // backend's Decimal would reject the comma or the groups.
+    amount: (parseAmount(amount) ?? 0).toFixed(2),
     intervalValue: intervalNumber,
     intervalUnit,
     startDate: startDate === '' ? null : startDate,
@@ -151,6 +201,23 @@ export function RecurringCostForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Submit-and-validate (ADR-0029): judge the draft first. Any Field
+    // Error reveals inline under its field, and the submit ends here —
+    // nothing reaches the API. A valid draft clears the errors (they
+    // refresh only on this next Save attempt) and proceeds exactly as
+    // before.
+    const fieldErrors = validate({
+      name,
+      amount,
+      interval: intervalValue,
+      editing,
+      startDate,
+    })
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors)
+      return
+    }
+    setErrors({})
     setSubmitting(true)
     setError(null)
     try {
@@ -211,8 +278,11 @@ export function RecurringCostForm({
   }
 
   return (
+    // noValidate (ADR-0029): the browser's native bubbles never appear;
+    // the Field Errors are the only validation voice.
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h2 className="font-medium text-slate-900">
@@ -234,9 +304,11 @@ export function RecurringCostForm({
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="e.g. Rent"
+            {...fieldErrorProps('name', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
         )}
+        <FieldError field="name" errors={errors} />
       </div>
 
       <div>
@@ -246,19 +318,22 @@ export function RecurringCostForm({
         {readOnly ? (
           <p className="mt-1 text-sm text-slate-900">{amount}</p>
         ) : (
+          // The browser-owned type="number" swallowed "17.5" in
+          // comma-locales (ADR-0029): parsing is ours now — a tolerant text
+          // field read by parseAmount, with the Error's aria wiring.
           <input
             id="recurring-cost-amount"
-            type="number"
-            step="0.01"
-            min="0.01"
+            type="text"
             inputMode="decimal"
             required
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             placeholder="0.00"
+            {...fieldErrorProps('amount', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
         )}
+        <FieldError field="amount" errors={errors} />
       </div>
 
       <div>
@@ -280,6 +355,7 @@ export function RecurringCostForm({
               value={intervalValue}
               onChange={(event) => setIntervalValue(event.target.value)}
               aria-label="Every N"
+              {...fieldErrorProps('interval', errors)}
               className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
             />
             <select
@@ -297,6 +373,7 @@ export function RecurringCostForm({
             </select>
           </div>
         )}
+        <FieldError field="interval" errors={errors} />
       </div>
 
       <div>
@@ -312,9 +389,11 @@ export function RecurringCostForm({
             required={editing}
             value={startDate}
             onChange={(event) => setStartDate(event.target.value)}
+            {...fieldErrorProps('start', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
           />
         )}
+        <FieldError field="start" errors={errors} />
         {!editing && (
           <p className="mt-1 text-xs text-slate-500">
             The first occurrence. Leave empty to start today.
@@ -381,9 +460,13 @@ export function RecurringCostForm({
 
       {!readOnly && (
         <div className="flex gap-3">
+          {/* Submit-and-validate (ADR-0029): disabled only while work is
+          actually in flight (saving, an Occurrence toggle) — never because
+          the draft is invalid. An invalid draft reveals Field Errors
+          instead of a dead button. */}
           <button
             type="submit"
-            disabled={submitting || !canSave}
+            disabled={submitting || togglingDate !== null}
             className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
           >
             {submitting ? 'Saving…' : editing ? 'Save' : 'Create recurring cost'}

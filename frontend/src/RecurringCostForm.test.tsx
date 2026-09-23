@@ -3,10 +3,12 @@
  * days/weeks/months/years" (the unit reads singular when N is 1), and the
  * start date — the first Occurrence, the one date the definition carries
  * (ADR-0024): optional at creation (empty means today, sent as null), and
- * required when editing (it can be changed, never unset). The API client is
- * mocked. */
+ * required when editing (it can be changed, never unset). Validation is
+ * submit-and-validate (ADR-0029): Save is always clickable and an invalid
+ * draft reveals a Field Error under each wrong field instead of calling the
+ * API. The API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { RecurringCostForm } from './RecurringCostForm'
 import type { RecurringCost } from './api'
@@ -117,6 +119,10 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+/** One occurrence row, found by its date — the row's Skip/Un-skip button
+ * lives inside it. */
+const rowFor = (date: string) => screen.getByText(date).closest('li') as HTMLElement
+
 /** Fill the required fields and submit; returns the payload the mocked
  * create received. */
 async function submitCreate() {
@@ -167,7 +173,7 @@ describe('RecurringCostForm start date', () => {
     })
   })
 
-  it('is required when editing: clearing it blocks the save', () => {
+  it('is required when editing: clearing it reveals "Choose a start date" on Save', () => {
     renderForm(cost)
 
     const start = screen.getByLabelText('Start date')
@@ -179,7 +185,12 @@ describe('RecurringCostForm start date', () => {
 
     const save = screen.getByRole('button', { name: 'Save' })
     fireEvent.change(start, { target: { value: '' } })
-    expect(save).toBeDisabled()
+    // Submit-and-validate (ADR-0029): clearing the date never disables the
+    // button — Save reveals the Start-date Field Error instead.
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    expect(screen.getByText('Choose a start date')).toBeInTheDocument()
+    expect(updateRecurringCostMock).not.toHaveBeenCalled()
   })
 })
 
@@ -188,7 +199,7 @@ describe('RecurringCostForm edit and freeze', () => {
     renderForm(cost)
 
     expect(screen.getByLabelText('Name')).toHaveValue('Rent')
-    expect(screen.getByLabelText('Amount')).toHaveValue(850)
+    expect(screen.getByLabelText('Amount')).toHaveValue('850.00')
     expect(screen.getByLabelText('Every N')).toHaveValue(1)
     expect(screen.getByLabelText('Interval unit')).toHaveValue('months')
     expect(screen.getByLabelText('Start date')).toHaveValue('2030-03-15')
@@ -253,27 +264,197 @@ describe('RecurringCostForm edit and freeze', () => {
     expect(
       await screen.findByText('A recurring cost with this name already exists.'),
     ).toBeInTheDocument()
+    // Server rejections keep the form-level banner and never become Field
+    // Errors (ADR-0029) — the two error kinds never mix.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('RecurringCostForm submit-and-validate (ADR-0029, issue #104)', () => {
+  const createButton = () => screen.getByRole('button', { name: 'Create recurring cost' })
+  const saveButton = () => screen.getByRole('button', { name: 'Save' })
+
+  it('leaves Save clickable on an invalid draft, reveals every Field Error at once, and calls no API', () => {
+    renderForm()
+
+    // Save is never disabled for validation (ADR-0029): an invalid draft
+    // stays clickable so its errors can be discovered.
+    expect(createButton()).toBeEnabled()
+
+    fireEvent.change(screen.getByLabelText('Every N'), { target: { value: '0' } })
+    fireEvent.click(createButton())
+
+    // One Field Error per wrong field, all at once: empty Name, empty
+    // Amount, and an interval below 1.
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+    expect(screen.getByText('The interval must be at least 1')).toBeInTheDocument()
+    // The invalid submit reached the API never.
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+    // The browser's own validation voice is off: Field Errors are the only
+    // ones.
+    expect(document.querySelector('form')).toHaveAttribute('novalidate')
   })
 
-  it('keeps the save disabled until the fields are valid', () => {
+  it('reveals the Amount messages by kind: empty, unparseable, non-positive', () => {
     renderForm()
-    const save = screen.getByRole('button', { name: 'Create recurring cost' })
-    expect(save).toBeDisabled()
-
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gym' } })
-    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '45.00' } })
-    expect(save).not.toBeDisabled()
+
+    fireEvent.click(createButton())
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: 'abc' } })
+    fireEvent.click(createButton())
+    expect(
+      screen.getByText(
+        "That doesn't look like an amount — use digits and one . or , for decimals",
+      ),
+    ).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '0' } })
-    expect(save).toBeDisabled()
+    fireEvent.click(createButton())
+    expect(screen.getByText('Amount must be a positive number')).toBeInTheDocument()
+    expect(createRecurringCostMock).not.toHaveBeenCalled()
+  })
+
+  it('an error rides the Amount field\'s aria wiring, and the input is a tolerant text field', () => {
+    renderForm()
+
+    const amount = screen.getByLabelText('Amount') as HTMLInputElement
+    // The Amount Input contract (ADR-0029): a text field — not the
+    // browser-owned type="number" that swallowed dots in comma-locales.
+    expect(amount).toHaveAttribute('type', 'text')
+    expect(amount).toHaveAttribute('inputmode', 'decimal')
+
+    fireEvent.click(createButton())
+
+    expect(amount).toHaveAttribute('aria-invalid', 'true')
+    expect(amount).toHaveAttribute('aria-describedby', 'amount-error')
+    // The alert is the element the input's aria-describedby points at — a
+    // screen reader reads the message with its field.
+    expect(document.getElementById('amount-error')).toHaveTextContent('Enter an amount')
+  })
+
+  it('keeps every Field Error while the user types the fix, clearing only on the next Save', async () => {
+    renderForm()
+    fireEvent.click(createButton())
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+
+    // Fixing the fields changes nothing on screen (ADR-0029): errors
+    // refresh only on the next Save attempt.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gym' } })
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '45.00' } })
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+
+    // The next Save attempt clears them and proceeds exactly as before.
+    fireEvent.click(createButton())
+    await waitFor(() => expect(createRecurringCostMock).toHaveBeenCalled())
+    expect(createRecurringCostMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ name: 'Gym', amount: '45.00' }),
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('accepts a tolerant Amount Input through the real UI, saving the canonical value', async () => {
+    renderForm()
+
+    // 1.000,45 is Italian grouping + comma decimals: the shared parser
+    // (ADR-0029) reads 1000.45, and the create submits the canonical cents
+    // the backend's Decimal expects.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gym' } })
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1.000,45' } })
+    fireEvent.click(createButton())
+
+    await waitFor(() => expect(createRecurringCostMock).toHaveBeenCalled())
+    expect(createRecurringCostMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ amount: '1000.45' }),
+    )
+  })
+
+  it('rejects an interval below 1 with its message, and a fixed interval saves', async () => {
+    renderForm()
+    const everyN = screen.getByLabelText('Every N')
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Gym' } })
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '45.00' } })
+
+    // Zero and empty (user story #26 in the umbrella): the same message.
+    for (const bad of ['0', '']) {
+      fireEvent.change(everyN, { target: { value: bad } })
+      fireEvent.click(createButton())
+      expect(screen.getByText('The interval must be at least 1')).toBeInTheDocument()
+      expect(createRecurringCostMock).not.toHaveBeenCalled()
+    }
+
+    fireEvent.change(everyN, { target: { value: '3' } })
+    fireEvent.click(createButton())
+    await waitFor(() => expect(createRecurringCostMock).toHaveBeenCalled())
+    expect(createRecurringCostMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ intervalValue: 3 }),
+    )
+  })
+
+  it('editing: a cleared Start date reveals "Choose a start date", restoring it saves', async () => {
+    updateRecurringCostMock.mockResolvedValue({ ...cost })
+    renderForm(cost)
+
+    const start = screen.getByLabelText('Start date')
+    fireEvent.change(start, { target: { value: '' } })
+    fireEvent.click(saveButton())
+    expect(screen.getByText('Choose a start date')).toBeInTheDocument()
+    expect(updateRecurringCostMock).not.toHaveBeenCalled()
+
+    // The date can be changed, never unset (ADR-0024): the next Save with
+    // a date rides to the API exactly as before.
+    fireEvent.change(start, { target: { value: '2030-03-15' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(updateRecurringCostMock).toHaveBeenCalled())
+    expect(screen.queryByText('Choose a start date')).not.toBeInTheDocument()
+  })
+
+  it('frozen records render read-only with no Save button — validation never applies', () => {
+    renderForm(frozenCost)
+
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create recurring cost' })).not.toBeInTheDocument()
+    expect(screen.getByText('Old Netflix')).toBeInTheDocument()
+    // The frozen rendering is pure text: no field ever carries an error.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('disables Save only while an Occurrence Skip/Un-skip toggle is in flight', async () => {
+    let resolveToggle!: (rows: { date: string; skipped: boolean }[]) => void
+    setRecurringCostOccurrenceSkippedMock.mockReturnValue(
+      new Promise<{ date: string; skipped: boolean }[]>((resolve) => {
+        resolveToggle = resolve
+      }),
+    )
+    renderForm(cost)
+    await screen.findByText('2030-04-15')
+
+    fireEvent.click(within(rowFor('2030-04-15')).getByRole('button', { name: 'Skip' }))
+
+    // In-flight work disables Save (ADR-0029)…
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+
+    await act(async () => {
+      resolveToggle([
+        { date: '2030-05-15', skipped: false },
+        { date: '2030-04-15', skipped: true },
+        { date: '2030-03-15', skipped: true },
+      ])
+    })
+
+    // …and the completed write restores it.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
   })
 })
 
 describe('RecurringCostForm Occurrences section (ADR-0026)', () => {
-  /** One occurrence row, found by its date — the row's Skip/Un-skip button
-   * lives inside it. */
-  const rowFor = (date: string) => screen.getByText(date).closest('li') as HTMLElement
-
   it('is absent at creation: a definition under creation has no id yet', async () => {
     renderForm()
 
