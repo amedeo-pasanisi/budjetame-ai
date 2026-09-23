@@ -10,6 +10,12 @@
  * and flips its status inline, auto-selecting rows that become Ready and
  * deselecting ones that stop being Ready; confirm sends the edited values.
  *
+ * Import row editor submit-and-validate (issue #108, ADR-0029): Save is
+ * always clickable except while submitting; clicking it on an invalid row
+ * submits nothing and reveals a Field Error inline beneath each wrong
+ * field; the Amount field is a tolerant text Amount Input (both
+ * separators); server rejections keep the form-level banner.
+ *
  * Import row editor entity selects and inline creation (issue #77): the
  * Wallet and Category fields are dropdowns of the Account's entities with a
  * trailing "＋ Add…" sentinel; picking it opens the create modal stacked on
@@ -152,6 +158,32 @@ const preview: ImportPreview = {
   ok_count: 2,
   error_count: 1,
   duplicate_count: 1,
+}
+
+/** A problem row whose file carried no Wallet value at all: the editor's
+ * Wallet field opens blank, so Save must explain it with a Field Error
+ * (issue #108) instead of a dead button. */
+const missingWalletPreview: ImportPreview = {
+  rows: [
+    {
+      row: 1,
+      status: 'error',
+      type: 'expense',
+      date: '2026-08-03',
+      amount: '12.00',
+      wallet: null,
+      source_wallet: null,
+      destination_wallet: null,
+      category: null,
+      description: null,
+      latitude: null,
+      longitude: null,
+      error: "Unknown wallet ''",
+    },
+  ],
+  ok_count: 0,
+  error_count: 1,
+  duplicate_count: 0,
 }
 
 const importedTransaction: Transaction = {
@@ -868,7 +900,7 @@ describe('ImportScreen row editor (issue #46)', () => {
     // Problem row.
     const problem = await openEditor(4)
     expect(within(problem.dialog).getByLabelText('Wallet')).toHaveValue('Unknown')
-    expect(within(problem.dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(within(problem.dialog).getByLabelText('Amount (€)')).toHaveValue('12.00')
     expect(within(problem.dialog).getByLabelText('Date')).toHaveValue('2026-08-03')
     expect(within(problem.dialog).queryByLabelText('From')).not.toBeInTheDocument()
 
@@ -891,7 +923,7 @@ describe('ImportScreen row editor (issue #46)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit row 3' }))
     const duplicate = await screen.findByRole('dialog', { name: 'Edit row 3' })
     expect(within(duplicate).getByLabelText('Wallet')).toHaveValue('Cash')
-    expect(within(duplicate).getByLabelText('Amount (€)')).toHaveValue(4.5)
+    expect(within(duplicate).getByLabelText('Amount (€)')).toHaveValue('4.50')
     fireEvent.click(within(duplicate).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(validateImportRowMock).not.toHaveBeenCalled()
@@ -920,6 +952,175 @@ describe('ImportScreen row editor (issue #46)', () => {
     expect(within(dialog).getByLabelText('Wallet')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Category')).toBeInTheDocument()
     expect(within(dialog).queryByLabelText('From')).not.toBeInTheDocument()
+  })
+
+  it('leaves Save clickable on an invalid row, reveals every Field Error at once, and calls no API', async () => {
+    // A row with no Wallet value at all, then the user clears Amount and
+    // Date: the draft is wrong in three ways at once.
+    await openPreview(missingWalletPreview)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('Date'), {
+      target: { value: '' },
+    })
+
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+    // Save is never disabled for validation (ADR-0029): an invalid draft
+    // stays clickable so its errors can be discovered.
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+
+    // One Field Error per wrong field, all at once.
+    expect(within(dialog).getByText('Enter an amount')).toBeInTheDocument()
+    expect(within(dialog).getByText('Choose a date')).toBeInTheDocument()
+    expect(within(dialog).getByText('Choose a wallet.')).toBeInTheDocument()
+    // The invalid submit reached the API never.
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+    // The browser's own validation voice is off: Field Errors are the only
+    // ones (issue #108 AC).
+    const form = dialog.querySelector('form')
+    expect(form).toHaveAttribute('novalidate')
+  })
+
+  it('reveals the Amount messages by kind: empty, unparseable, non-positive', async () => {
+    const { dialog } = await openEditor(1)
+    const amount = within(dialog).getByLabelText('Amount (€)')
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+
+    fireEvent.change(amount, { target: { value: '' } })
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    expect(within(dialog).getByText('Enter an amount')).toBeInTheDocument()
+
+    fireEvent.change(amount, { target: { value: 'abc' } })
+    fireEvent.click(save)
+    expect(
+      within(dialog).getByText(
+        "That doesn't look like an amount — use digits and one . or , for decimals",
+      ),
+    ).toBeInTheDocument()
+
+    fireEvent.change(amount, { target: { value: '0' } })
+    fireEvent.click(save)
+    expect(within(dialog).getByText('Amount must be a positive number')).toBeInTheDocument()
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps every Field Error while the user types the fix, clearing only on the next Save", async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    const { dialog } = await openEditor(1)
+    const amount = within(dialog).getByLabelText('Amount (€)')
+    const date = within(dialog).getByLabelText('Date')
+
+    fireEvent.change(amount, { target: { value: '' } })
+    fireEvent.change(date, { target: { value: '' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(within(dialog).getByText('Enter an amount')).toBeInTheDocument()
+    expect(within(dialog).getByText('Choose a date')).toBeInTheDocument()
+
+    // Fixing the fields changes nothing on screen (ADR-0029): errors
+    // refresh only on the next Save attempt.
+    fireEvent.change(amount, { target: { value: '4.50' } })
+    fireEvent.change(date, { target: { value: '2026-08-01' } })
+    expect(within(dialog).getByText('Enter an amount')).toBeInTheDocument()
+    expect(within(dialog).getByText('Choose a date')).toBeInTheDocument()
+
+    // The next Save attempt clears them and proceeds exactly as before.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(validateImportRowMock).toHaveBeenCalled())
+    expect(validateImportRowMock).toHaveBeenCalledWith(
+      'budjetame.token',
+      expect.objectContaining({ row: 1, amount: '4.50', date: '2026-08-01' }),
+      [],
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // A valid submit carries no leftover Field Error text anywhere.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a row with no Wallet reveals "Choose a wallet." under the Wallet field via the aria wiring', async () => {
+    await openPreview(missingWalletPreview)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit row 1' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 1' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(within(dialog).getByText('Choose a wallet.')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Wallet')).toHaveAttribute('aria-invalid', 'true')
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+  })
+
+  it('a Transfer row with no legs, then identical legs, reveals each leg\'s Field Error; one fix saves', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    const { dialog } = await openEditor(1)
+    // Switching the Expense row to a Transfer leaves the From/To legs empty:
+    // each missing leg gets its own message.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(within(dialog).getByText('Choose the source wallet.')).toBeInTheDocument()
+    expect(within(dialog).getByText('Choose the destination wallet.')).toBeInTheDocument()
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+
+    // The same Wallet in both legs: the pair error rides under each.
+    fireEvent.change(within(dialog).getByLabelText('From'), {
+      target: { value: 'Cash' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'Cash' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(
+      within(dialog).getAllByText('Source and destination must be different wallets.'),
+    ).toHaveLength(2)
+    expect(validateImportRowMock).not.toHaveBeenCalled()
+
+    // Changing one leg fixes the pair.
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'Bank' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(validateImportRowMock).toHaveBeenCalled())
+    expect(validateImportRowMock).toHaveBeenCalledWith(
+      'budjetame.token',
+      expect.objectContaining({
+        row: 1,
+        type: 'transfer',
+        amount: '4.50',
+        source_wallet: 'Cash',
+        destination_wallet: 'Bank',
+        category: null,
+      }),
+      [],
+    )
+  })
+
+  it('a tolerant Amount Input (1.000,45) saves with the parsed canonical value', async () => {
+    validateImportRowMock.mockResolvedValue({ status: 'ok', error: null })
+    const { dialog } = await openEditor(4)
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '1.000,45' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(validateImportRowMock).toHaveBeenCalledWith(
+        'budjetame.token',
+        expect.objectContaining({ row: 4, amount: '1000.45', wallet: 'Unknown' }),
+        wireRows,
+      ),
+    )
+  })
+
+  it('server rejections keep the form-level banner and never become Field Errors', async () => {
+    validateImportRowMock.mockRejectedValue(new Error("Unknown wallet 'Cash'"))
+    const { dialog } = await openEditor(1)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    // The existing banner stays the only home for server-side facts.
+    expect(await within(dialog).findByText("Unknown wallet 'Cash'")).toBeInTheDocument()
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Enter an amount')).not.toBeInTheDocument()
+    // The editor stays open for a retry.
+    expect(screen.getByRole('dialog', { name: 'Edit row 1' })).toBeInTheDocument()
   })
 
   it('saves through the re-validation endpoint, flips a fixed problem row to Ready inline, and auto-selects it', async () => {
@@ -1254,7 +1455,7 @@ describe('ImportScreen row editor entity selects and inline creation (issue #77)
     // The editor behind keeps its state; nothing was created.
     expect(screen.getByRole('dialog', { name: 'Edit row 4' })).toBeInTheDocument()
     expect(walletSelect).toHaveValue('Unknown')
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('12.00')
     expect(createWalletMock).not.toHaveBeenCalled()
   })
 
@@ -1347,7 +1548,7 @@ describe('ImportScreen row editor entity selects and inline creation (issue #77)
     await waitFor(() => expect(walletSelect).toHaveValue('Revolut'))
     expect(walletOptions(dialog)).toEqual(['Cash', 'Bank', 'Revolut', '＋ Add wallet…'])
     // The rest of the draft is untouched.
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('12.00')
     expect(within(dialog).getByLabelText('Date')).toHaveValue('2026-08-03')
     expect(within(dialog).getByLabelText('Category')).toHaveValue('')
     expect(validateImportRowMock).not.toHaveBeenCalled()
@@ -1396,7 +1597,7 @@ describe('ImportScreen row editor entity selects and inline creation (issue #77)
     )
     expect(screen.getByRole('dialog', { name: 'Edit row 1' })).toBeInTheDocument()
     await waitFor(() => expect(categorySelect).toHaveValue('Bills'))
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(4.5)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('4.50')
     expect(validateImportRowMock).not.toHaveBeenCalled()
 
     // Saving the row sends the new Category's name, with the row's type.
@@ -1425,7 +1626,7 @@ describe('ImportScreen row editor entity selects and inline creation (issue #77)
     const editorSurvives = () => {
       expect(screen.getByRole('dialog', { name: 'Edit row 4' })).toBeInTheDocument()
       expect(walletSelect).toHaveValue('Unknown')
-      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('12.00')
     }
 
     // Cancel closes only the inner modal.
@@ -1480,7 +1681,7 @@ describe('ImportScreen row editor entity selects and inline creation (issue #77)
     // The modal stays open and nothing is selected; the editor is intact.
     expect(screen.getByRole('dialog', { name: 'New wallet' })).toBeInTheDocument()
     expect(walletSelect).toHaveValue('Unknown')
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('12.00')
 
     fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() =>

@@ -21,6 +21,11 @@ type ImportEntitySelectProps = {
    * (the missing name from the file) and '' otherwise. */
   onAdd: (prefillName: string) => void
   required?: boolean
+  /** ADR-0029: the Field Error's aria wiring for this select
+   * ('aria-invalid' + 'aria-describedby' pointing at the error element),
+   * spread onto the <select>. Absent while the field has no error, so a
+   * valid form carries no error aria at all. */
+  errorProps?: { 'aria-invalid'?: true; 'aria-describedby'?: string }
 }
 
 /** The row editor's entity select (issue #77): like the shared EntitySelect
@@ -41,6 +46,7 @@ export function ImportEntitySelect({
   entity,
   onAdd,
   required = false,
+  errorProps,
 }: ImportEntitySelectProps) {
   const trimmed = value.trim()
   const resolved = options.find(
@@ -76,6 +82,7 @@ export function ImportEntitySelect({
         required={required}
         value={displayed}
         onChange={handleChange}
+        {...errorProps}
         className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
       >
         {!required && <option value="">None</option>}
