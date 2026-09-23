@@ -144,6 +144,16 @@ _Avoid_: backup, dump, statement
 What a Wallet, Category, or Recurring definition row's whole-surface tap does: it opens the Transactions tab with the ledger already filtered to exactly that Wallet, that Category, or — for a Recurring Cost or Recurring Income — that definition's linked Transactions — the previous filters, search, and open Filters panel are all reset by the jump, and a Frozen Wallet's history lands read-only. Editing the row is the card's separate trailing Edit button, never the tap itself.
 _Avoid_: transactions filtering on card tap, row-tap filter, filter shortcut
 
+### Forms
+
+**Field Error**:
+A client-side validation message attached to one form field and shown inline beneath it. It appears only when a Save attempt fails, and updates only on the next Save attempt — never while typing. Server rejections (a name that already exists, a Transfer link whose pair no longer qualifies) are not Field Errors: they surface as the form's error banner (ADR-0029).
+_Avoid_: validation message, inline error, form error
+
+**Amount Input**:
+The way money is typed into a form field: a decimal number tolerant of both separators — the last `.` or `,` is the decimal point, earlier ones are thousands groupings, and a lone separator followed by exactly three digits is a thousands grouping, so 17.5, 17,5, 2,002.01, and 1.000.420,45 all parse. Display, storage, and export stay US-canonical (1,000,420.45) until i18n adds per-locale display; the parser already understands both styles and is kept as-is then (ADR-0029).
+_Avoid_: money field, currency input, amount field
+
 ## Rules
 
 - The only supported currency is EUR.
