@@ -12,6 +12,8 @@ import {
   type Category,
   type CategoryType,
 } from './api'
+import { FieldError } from './FieldError'
+import { fieldErrorProps, type FieldErrors } from './validation'
 
 const PRESET_COLORS = [
   '#ef4444',
@@ -50,10 +52,26 @@ type CategoryFormProps = {
   onCancel: () => void
 }
 
+/** Submit-and-validate (ADR-0029): the Category form's pure validation,
+ * returning one Field Error per wrong field — keyed by the error keys the
+ * fields render under — and nothing for a valid form. Runs on every Save
+ * click before any API call; a form with errors submits nothing. The
+ * Category form has no Amount field, so the tolerant Amount Input
+ * contract does not apply here: Name is the only client-side rule. */
+function validate(name: string): FieldErrors {
+  if (name.trim() === '') return { name: 'Enter a name' }
+  return {}
+}
+
 /** The create/edit/delete form for a Category, hosted in the modal
  * shell (CategoryModal). The form itself is unchanged from the inline days:
  * Name and color/icon, plus a Type selector only while creating (the Type is
- * fixed when editing), and the tap-again delete confirmation. A rename that
+ * fixed when editing), and the tap-again delete confirmation. Validation is
+ * submit-and-validate (ADR-0029): Save is always clickable except while
+ * submitting, and clicking it with an empty Name submits nothing and
+ * reveals a Field Error under the Name field — the only client-side rule
+ * (the Category form has no Amount field, so the tolerant Amount Input
+ * contract does not apply). A rename that
  * collides with an existing same-Type name stops being an error (issue #45):
  * the form shows the merge offer — "Merge X into Y? N transactions will
  * move" — with the tap-again-to-confirm pattern, and confirming runs the
@@ -74,6 +92,10 @@ export function CategoryForm({
   const [icon, setIcon] = useState(category?.icon ?? '')
   const [color, setColor] = useState(category?.color ?? PRESET_COLORS[0])
   const [error, setError] = useState<string | null>(null)
+  // Field Errors (ADR-0029): revealed by a Save attempt, they persist
+  // while the user types and refresh only on the next Save click — never
+  // live, never on blur.
+  const [errors, setErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   // The merge offer (ADR-0007): set when a rename save collided with an
@@ -87,6 +109,17 @@ export function CategoryForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Submit-and-validate (ADR-0029): judge the draft first. A Field
+    // Error reveals inline under its field and the submit ends here —
+    // nothing reaches the API. A valid draft clears the errors (they
+    // refresh only on this next Save attempt) and proceeds exactly as
+    // before.
+    const fieldErrors = validate(name)
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors)
+      return
+    }
+    setErrors({})
     setSubmitting(true)
     setError(null)
     try {
@@ -174,8 +207,11 @@ export function CategoryForm({
   }
 
   return (
+    // noValidate (ADR-0029): the browser's native bubbles never appear;
+    // the Field Errors are the only validation voice.
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h2 className="font-medium text-slate-900">
@@ -205,8 +241,10 @@ export function CategoryForm({
             setConfirmingMerge(false)
           }}
           placeholder="e.g. Groceries"
+          {...fieldErrorProps('name', errors)}
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
+        <FieldError field="name" errors={errors} />
       </div>
 
       {!editing && lockedType !== undefined && (
@@ -302,9 +340,13 @@ export function CategoryForm({
       )}
 
       <div className="flex gap-3">
+        {/* Submit-and-validate (ADR-0029): disabled only while work is
+        actually in flight (submitting) — never because the draft is
+        invalid. An invalid draft reveals Field Errors instead of a dead
+        button. */}
         <button
           type="submit"
-          disabled={submitting || name.trim() === ''}
+          disabled={submitting}
           className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
         >
           {submitting ? 'Saving…' : editing ? 'Save' : 'Create category'}

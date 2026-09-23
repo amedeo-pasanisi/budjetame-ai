@@ -11,8 +11,12 @@
  * trailing ✎ button — never nested. The tap surface sends the ledger jump
  * (requestLedgerFilter, issue #90): the shell opens the Transactions tab
  * pre-filtered to that Category, expense and income alike; ✎ Edit opens
- * the edit modal. The API client is mocked; the form is driven like a
- * user would (click, type, submit). */
+ * the edit modal. The Category form is submit-and-validate (ADR-0029):
+ * Save is always clickable except while submitting, an invalid draft
+ * reveals a Field Error under the Name field and submits nothing, and
+ * server rejections (duplicate name, merge offers) keep their own form
+ * UI. The API client is mocked; the form is driven like a user would
+ * (click, type, submit). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -321,6 +325,111 @@ describe('CategoriesScreen category modal (issue #41)', () => {
   })
 })
 
+describe('CategoriesScreen Category form submit-and-validate (ADR-0029, issue #106)', () => {
+  const openCreateDialog = async () => {
+    render(<CategoriesScreen />)
+    await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(screen.getByRole('button', { name: 'New category' }))
+    return screen.findByRole('dialog', { name: 'New category' })
+  }
+
+  it('leaves Create category clickable on an empty Name, reveals "Enter a name" via the aria wiring, and calls no API', async () => {
+    const dialog = await openCreateDialog()
+    const create = within(dialog).getByRole('button', { name: 'Create category' })
+
+    // Submit-and-validate (ADR-0029, issue #106): validation never disables
+    // the button — an empty Name stays clickable so its error can be found.
+    expect(create).toBeEnabled()
+
+    fireEvent.click(create)
+
+    const name = within(dialog).getByLabelText('Name')
+    expect(within(dialog).getByText('Enter a name')).toBeInTheDocument()
+    // The message rides the field's aria wiring: aria-describedby points at
+    // the alert (name-error), read together by a screen reader.
+    expect(name).toHaveAttribute('aria-invalid', 'true')
+    expect(name).toHaveAttribute('aria-describedby', 'name-error')
+    expect(document.getElementById('name-error')).toHaveTextContent('Enter a name')
+    // Nothing reached the API, and the browser's own validation voice is
+    // off — the form carries noValidate, Field Errors are the only ones.
+    expect(createCategoryMock).not.toHaveBeenCalled()
+    expect(document.querySelector('form')).toHaveAttribute('novalidate')
+  })
+
+  it('keeps the Field Error while the user types the fix, clearing only when the next Save succeeds', async () => {
+    createCategoryMock.mockResolvedValue({ ...categories[0], name: 'Household' })
+    const dialog = await openCreateDialog()
+    const create = within(dialog).getByRole('button', { name: 'Create category' })
+
+    fireEvent.click(create)
+    expect(within(dialog).getByText('Enter a name')).toBeInTheDocument()
+
+    // Fixing the name changes nothing on screen (ADR-0029): the error
+    // refreshes only on the next Save attempt, never while typing.
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Household' } })
+    expect(within(dialog).getByText('Enter a name')).toBeInTheDocument()
+
+    // The next Save attempt clears it and proceeds exactly as before — a
+    // valid form saves with no leftover error text anywhere.
+    fireEvent.click(create)
+    await waitFor(() =>
+      expect(createCategoryMock).toHaveBeenCalledWith('', {
+        name: 'Household',
+        type: 'expense',
+        icon: '',
+        color: '#ef4444',
+      }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Enter a name')).not.toBeInTheDocument()
+  })
+
+  it('editing: clearing the Name reveals "Enter a name" on Save, restoring it saves without error', async () => {
+    updateCategoryMock.mockResolvedValue({ ...categories[0], name: 'apple' })
+    render(<CategoriesScreen />)
+    await screen.findByRole('region', { name: 'Expenses' })
+    fireEvent.click(within(screen.getByRole('region', { name: 'Expenses' })).getByRole('button', {
+      name: 'Edit apple',
+    }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit category' })
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: '' } })
+    // Submit-and-validate (ADR-0029): an empty Name never disables Save in
+    // edit mode either — clicking reveals the same Field Error.
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    expect(within(dialog).getByText('Enter a name')).toBeInTheDocument()
+    expect(updateCategoryMock).not.toHaveBeenCalled()
+
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'apple' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(updateCategoryMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a server rejection keeps the form-level banner and never becomes a Field Error', async () => {
+    // A duplicate name the server rejects: a 409 that is not a merge
+    // collision (merge offers only exist while editing, ADR-0007).
+    createCategoryMock.mockRejectedValue(new ApiError('conflict', 409))
+    const dialog = await openCreateDialog()
+
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Banana' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create category' }))
+
+    // The existing form-level banner renders exactly as today; server
+    // facts never become inline Field Errors (role=alert), so the two
+    // error kinds never mix.
+    expect(
+      await within(dialog).findByText('A category with this name already exists.'),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'New category' })).toBeInTheDocument()
+  })
+})
+
 describe('CategoriesScreen row taps open the ledger (issue #94)', () => {
   it('an expense row tap requests the ledger jump for that category and opens no modal', async () => {
     const requestLedgerFilter = vi.fn()
@@ -414,6 +523,9 @@ describe('CategoriesScreen merge confirm flow (issue #45)', () => {
         /Merge apple into Banana\? 7 transactions will move — this cannot be undone\./,
       ),
     ).toBeInTheDocument()
+    // The offer is not a Field Error: the merge flow keeps its own
+    // confirmation UI, and validation adds errors only (ADR-0029).
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
     expect(mergeCategoriesMock).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel merge' }))
