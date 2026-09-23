@@ -26,6 +26,11 @@ type EntitySelectProps = {
   /** Locks the select — e.g. the Transaction form's Wallet fields, which
    * are frozen while editing: the sentinel stays visible but inert. */
   disabled?: boolean
+  /** ADR-0029: the Field Error's aria wiring for this select
+   * ('aria-invalid' + 'aria-describedby' pointing at the error element),
+   * spread onto the <select>. Absent while the field has no error, so a
+   * valid form carries no error aria at all. */
+  errorProps?: { 'aria-invalid'?: true; 'aria-describedby'?: string }
 }
 
 /** The shared entity select wrapper (ADR-0013): every entity dropdown in the
@@ -46,6 +51,7 @@ export function EntitySelect({
   onAdd,
   required = false,
   disabled = false,
+  errorProps,
 }: EntitySelectProps) {
   const handleChange = (event: ChangeEvent<HTMLSelectElement>) => {
     if (event.target.value === SENTINEL_VALUE) {
@@ -70,6 +76,7 @@ export function EntitySelect({
         disabled={disabled}
         value={value === '' ? '' : String(value)}
         onChange={handleChange}
+        {...errorProps}
         className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
       >
         {!required && <option value="">None</option>}

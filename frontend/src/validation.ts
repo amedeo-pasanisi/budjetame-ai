@@ -76,9 +76,12 @@ export function parseAmount(text: string): number | null {
   // Otherwise the last separator is the decimal point and every earlier
   // separator is a thousands grouping, which must sit between groups of
   // exactly three digits (2,002.01 → 2002.01, 1.000.420,45 → 1000420.45).
-  // A malformed integer part — 1.2.3, or an empty integer part before a
+  // The integer part may also be a plain ungrouped number of any length
+  // (2100.00 → 2100) — nothing about the Amount Input contract requires a
+  // thousands separator, and no realistic typer adds one to a four-digit
+  // sum. A malformed integer part — 1.2.3, an empty integer part before a
   // decimal comma — is not an amount.
-  if (!/^\d{1,3}([.,]\d{3})*$/.test(integerPart)) return null
+  if (!/^(\d{1,3}([.,]\d{3})*|\d{4,})$/.test(integerPart)) return null
 
   return positiveOrNull(Number(`${integerPart.replace(/[.,]/g, '')}.${fractionalPart}`))
 }

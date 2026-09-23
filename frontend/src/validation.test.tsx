@@ -36,6 +36,18 @@ describe('parseAmount — the Amount Input contract (ADR-0029)', () => {
     expect(parseAmount('1.000,00')).toBe(1000)
   })
 
+  it('parses an ungrouped four-digit amount without a thousands separator', () => {
+    expect(parseAmount('2100.00')).toBe(2100)
+  })
+
+  it('parses an ungrouped four-digit comma amount', () => {
+    expect(parseAmount('2100,00')).toBe(2100)
+  })
+
+  it('parses a large ungrouped integer', () => {
+    expect(parseAmount('12000')).toBe(12000)
+  })
+
   it('trims surrounding whitespace', () => {
     expect(parseAmount('  17.5  ')).toBe(17.5)
   })

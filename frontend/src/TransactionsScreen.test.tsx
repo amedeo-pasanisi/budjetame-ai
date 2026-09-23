@@ -957,7 +957,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
     ).toBeInTheDocument()
     // The dropdown reverted to its previous value; the outer draft is intact.
     expect(categorySelect).toHaveValue('1')
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('')
 
     // The lock follows the type: switch to Income and re-pick.
     fireEvent.click(within(categoryDialog).getByRole('button', { name: 'Cancel' }))
@@ -970,7 +970,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
     expect(
       within(categoryDialog).getByText('Income · fixed for this form'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('')
   })
 
   it('the full flow — sentinel, create, auto-select, submit — carries the new category id', async () => {
@@ -1007,7 +1007,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
       expect(screen.queryByRole('dialog', { name: 'New category' })).not.toBeInTheDocument(),
     )
     expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12.5)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('12.50')
     // The new Category is selected and offered in the dropdown.
     await waitFor(() => expect(categorySelect).toHaveValue('5'))
     expect(categoryOptions(dialog)).toEqual([
@@ -1064,7 +1064,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
     // Auto-selected in the form; the Income draft survives.
     await waitFor(() => expect(categorySelect).toHaveValue('6'))
     expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(200)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('200.00')
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
     await waitFor(() =>
@@ -1093,7 +1093,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
     }
     const formSurvives = () => {
       expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(9.99)
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('9.99')
     }
 
     // Cancel closes only the inner modal.
@@ -1289,7 +1289,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     )
   })
 
-  it('switching an Expense that picked a Contact Wallet to Income resets the Wallet', async () => {
+  it('switching an Expense that picked a Contact Wallet to Income keeps the Wallet and blocks Save with a Field Error', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
     render(<Harness />)
     await screen.findByText(/Coffee/)
@@ -1299,10 +1299,30 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     fireEvent.change(walletSelect, { target: { value: '4' } })
     expect(walletSelect).toHaveValue('4')
 
-    // Income cannot record on a Contact Wallet: the stale selection must
-    // not ride along to the API, where the backend would 422 it.
+    // Income cannot record on a Contact Wallet — but there is no silent
+    // reset anymore (ADR-0029): the selection stays (Marco is still the
+    // form's Wallet), and Save reveals the Field Error instead of swapping
+    // the Wallet or shipping a 422 to the backend.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Income' }))
-    expect(walletSelect).toHaveValue('1')
+    fireEvent.change(within(dialog).getByLabelText('Amount (€)'), {
+      target: { value: '10.00' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
+
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      "Incomes can't be recorded on contact wallets.",
+    )
+    expect(createTransactionMock).not.toHaveBeenCalled()
+
+    // Picking a valid Wallet fixes it: Save submits the Income on Cash.
+    fireEvent.change(walletSelect, { target: { value: '1' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() =>
+      expect(createTransactionMock).toHaveBeenCalledWith(
+        '',
+        expect.objectContaining({ type: 'income', walletId: 1, amount: '10.00' }),
+      ),
+    )
   })
 
   it('shows the sentinel as the only row in the Income form when only Frozen and Contact Wallets exist', async () => {
@@ -1337,7 +1357,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     ).toEqual(['Checking', 'Credit Card', 'Cash', 'Contact'])
     // The dropdown reverted to its previous value; the outer draft is intact.
     expect(walletSelect).toHaveValue('1')
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('')
 
     // Income: the modal stays restricted to the three spendable types.
     fireEvent.click(within(walletDialog).getByRole('button', { name: 'Cancel' }))
@@ -1442,7 +1462,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
       expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
     )
     expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(12.5)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('12.50')
     // The new wallet is selected and offered in the dropdown.
     await waitFor(() => expect(walletSelect).toHaveValue('7'))
     expect(walletOptions(dialog)).toEqual([
@@ -1506,7 +1526,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     await waitFor(() => expect(fromSelect).toHaveValue('7'))
     expect(toSelect).toHaveValue('4')
     expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(30)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('30.00')
     // The new wallet is offered in both Transfer selects.
     expect(transferOptions(dialog, 'From')).toEqual([
       'Cash (€100.00)',
@@ -1547,7 +1567,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     }
     const formSurvives = () => {
       expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(9.99)
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('9.99')
     }
 
     // Cancel closes only the inner modal.
@@ -1707,7 +1727,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     const costDialog = await screen.findByRole('dialog', { name: 'New recurring cost' })
     // The dropdown reverted to its previous value; the outer draft is intact.
     expect(costSelect).toHaveValue('11')
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(null)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('')
     // The recurring form's own Name field is the first field — it has no
     // Wallet or Category of its own to carry sentinels for (the definition
     // never carries them).
@@ -1752,7 +1772,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
       ).not.toBeInTheDocument(),
     )
     expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(850)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('850.00')
     // The new definition is auto-selected, offered in the dropdown, and the
     // linking helper names the Occurrence it pays (due today for a fresh
     // definition with no start date).
@@ -1815,7 +1835,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     // Auto-selected in the Income form; the draft and the helper survive.
     await waitFor(() => expect(incomeSelect).toHaveValue('12'))
     expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(2100)
+    expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('2100.00')
     expect(
       within(dialog).getByText('Pays the occurrence of 2026-08-01.'),
     ).toBeInTheDocument()
@@ -1847,7 +1867,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
     }
     const formSurvives = () => {
       expect(screen.getByRole('dialog', { name: 'New transaction' })).toBeInTheDocument()
-      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue(9.99)
+      expect(within(dialog).getByLabelText('Amount (€)')).toHaveValue('9.99')
     }
 
     // Cancel closes only the inner modal.

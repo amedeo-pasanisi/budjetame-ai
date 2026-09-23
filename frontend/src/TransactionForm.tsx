@@ -40,6 +40,8 @@ import {
   type Place,
 } from './location'
 import { NON_CONTACT_WALLET_TYPES, todayInRome } from './transactions'
+import { FieldError } from './FieldError'
+import { fieldErrorProps, parseAmount, type FieldErrors } from './validation'
 
 type TransactionFormProps = {
   wallets: Wallet[]
@@ -90,6 +92,70 @@ type TransactionFormProps = {
   recurringIncomeToSelect: number | null
 }
 
+/** The Transaction form's draft, as submit-and-validate (ADR-0029) sees
+ * it: everything that can be wrong, in one flat record, so the pure
+ * `validate()` below can judge it without touching React. */
+type TransactionDraft = {
+  type: TransactionFormType
+  amount: string
+  date: string
+  walletId: number | undefined
+  /** The type of the selected Wallet — 'contact' for an Income is the one
+   * rule the deleted silent reset used to paper over. */
+  selectedWalletType: Wallet['type'] | undefined
+  sourceWalletId: number | undefined
+  destinationWalletId: number | undefined
+}
+
+/** Submit-and-validate (ADR-0029): the Transaction form's pure validation.
+ * Returns one Field Error per wrong field — keyed by the error keys the
+ * fields render under — and nothing for a valid form. Runs on every Save
+ * click before any API call; a form with errors submits nothing. Reuses
+ * the shared tolerant amount parser from the validation layer (issue
+ * #102), never re-implementing it: an empty Amount is its own message, an
+ * unparseable one (letters, signs, malformed groupings) another, and a
+ * parseable-but-non-positive one a third. */
+function validate(draft: TransactionDraft): FieldErrors {
+  const errors: FieldErrors = {}
+  const trimmedAmount = draft.amount.trim()
+  if (trimmedAmount === '') {
+    errors.amount = 'Enter an amount'
+  } else if (parseAmount(trimmedAmount) === null) {
+    // parseAmount reads a finite positive number, or null for everything
+    // else. Split the nulls the way users experience them: text that is
+    // not an amount at all, vs a number that just is not positive.
+    errors.amount = /^-?\d+([.,]\d+)?$/.test(trimmedAmount)
+      ? 'Amount must be a positive number'
+      : "That doesn't look like an amount — use digits and one . or , for decimals"
+  }
+  if (draft.date.trim() === '') {
+    errors.date = 'Choose a date'
+  }
+  if (draft.type === 'transfer') {
+    if (draft.sourceWalletId === undefined) {
+      errors.source = 'Choose the source wallet.'
+    }
+    if (draft.destinationWalletId === undefined) {
+      errors.destination = 'Choose the destination wallet.'
+    }
+    if (
+      draft.sourceWalletId !== undefined &&
+      draft.sourceWalletId === draft.destinationWalletId
+    ) {
+      // Both legs are equally wrong: the same message rides under each.
+      errors.source = 'Source and destination must be different wallets.'
+      errors.destination = 'Source and destination must be different wallets.'
+    }
+  } else {
+    if (draft.walletId === undefined) {
+      errors.wallet = 'Choose a wallet.'
+    } else if (draft.type === 'income' && draft.selectedWalletType === 'contact') {
+      errors.wallet = "Incomes can't be recorded on contact wallets."
+    }
+  }
+  return errors
+}
+
 /** The create/edit/delete form for a Transaction (Expense, Income, or
  * Transfer), hosted in the modal shell (TransactionModal) by the
  * Transactions tab. Cancel — like the shell's backdrop and Escape —
@@ -128,8 +194,8 @@ export function TransactionForm({
   const assignableWallets = wallets.filter((wallet) => !wallet.frozen)
   // The default Wallet for an Expense/Income: the first spendable one. A
   // Contact Wallet never defaults — an Expense on one is a deliberate pick
-  // (ADR-0017), and Incomes cannot use one at all. Shared by the seed and
-  // the Expense→Income reset below, so the two can never drift.
+  // (ADR-0017), and Incomes cannot use one at all. Feeding the initial
+  // seed only.
   const spendableWallets = useMemo(
     () => assignableWallets.filter((w) => NON_CONTACT_WALLET_TYPES.includes(w.type)),
     [assignableWallets],
@@ -142,17 +208,10 @@ export function TransactionForm({
   )
   // The Wallet picker's allowed types depend on the form type (ADR-0017):
   // Expenses may record consumption a Contact paid for, Incomes may not.
-  // Switching an Expense that picked a Contact Wallet to Income must not
-  // ride the stale Contact selection along to the API (where the backend
-  // would reject it) — reset to the first spendable Wallet, like the
-  // initial seed.
-  useEffect(() => {
-    if (type !== 'income') return
-    const selected = wallets.find((w) => w.id === walletId)
-    if (selected !== undefined && selected.type === 'contact') {
-      setWalletId(firstSpendableWalletId)
-    }
-  }, [type, walletId, wallets, firstSpendableWalletId])
+  // There is no silent reset anymore (ADR-0029): switching an Expense that
+  // picked a Contact Wallet to Income keeps the selection, and Save blocks
+  // it with the "Incomes can't be recorded on contact wallets." Field
+  // Error instead of swapping the Wallet behind the user's back.
   const [sourceWalletId, setSourceWalletId] = useState<number | undefined>(
     editing?.type === 'transfer' ? (editing.source_wallet_id ?? undefined) : assignableWallets[0]?.id,
   )
@@ -259,6 +318,10 @@ export function TransactionForm({
   // propagated from GoogleMapPicker via MapPicker's onLookingUpChange.
   const [lookingUpForPlace, setLookingUpForPlace] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Field Errors (ADR-0029): revealed by a Save attempt, they persist
+  // while the user types and refresh only on the next Save click — never
+  // live, never on blur.
+  const [errors, setErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
@@ -310,8 +373,12 @@ export function TransactionForm({
   const transferIncomeQualifies =
     isTransfer && sourceIsContact && !destinationIsContact
   const selectedWallet = wallets.find((w) => w.id === walletId)
-  const amountValue = Number.parseFloat(amount)
-  const hasAmount = !Number.isNaN(amountValue) && amountValue > 0
+  // The tolerant Amount Input parser (ADR-0029) is the only amount reader
+  // here — Number.parseFloat would read a typed "1.000,45" as 1. The
+  // balance previews and the Submit payload both derive from this one
+  // parsed value (0 pre-validation, so an empty field has no preview).
+  const amountValue = parseAmount(amount) ?? 0
+  const hasAmount = amountValue > 0
   // The Wallet's current Balance includes the Transaction being edited, so the
   // projection removes its old contribution before adding the new amount
   // (issue #24); null when creating. Safe because Wallet and type are locked
@@ -357,15 +424,39 @@ export function TransactionForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Submit-and-validate (ADR-0029): judge the draft first. Any Field
+    // Error reveals inline under its field, and the submit ends here —
+    // nothing reaches the API. A valid draft clears the errors (they
+    // refresh only on this next Save attempt) and proceeds exactly as
+    // before.
+    const fieldErrors = validate({
+      type,
+      amount,
+      date,
+      walletId,
+      selectedWalletType: selectedWallet?.type,
+      sourceWalletId,
+      destinationWalletId,
+    })
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors)
+      return
+    }
+    setErrors({})
     setSubmitting(true)
     setError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
       const finalLocation = location
+      // The tolerant Amount Input (ADR-0029) sends the canonical cents
+      // value — "17,5" and "1.000,45" reach the API as "17.50" and
+      // "1000.45" — the backend's Decimal would reject the comma or the
+      // groups.
+      const canonicalAmount = amountValue.toFixed(2)
       const input: TransactionInput = isTransfer
         ? {
             type: 'transfer',
-            amount,
+            amount: canonicalAmount,
             date,
             sourceWalletId: sourceWalletId as number,
             destinationWalletId: destinationWalletId as number,
@@ -380,7 +471,7 @@ export function TransactionForm({
           }
         : {
             type,
-            amount,
+            amount: canonicalAmount,
             date,
             walletId: walletId as number,
             categoryId,
@@ -393,7 +484,7 @@ export function TransactionForm({
       const saved =
         isEditing && editing !== null
           ? await updateTransaction(token, editing.id, {
-              amount,
+              amount: canonicalAmount,
               date,
               description,
               ...(isTransfer ? {} : { categoryId }),
@@ -477,8 +568,11 @@ export function TransactionForm({
   }
 
   return (
+    // noValidate (ADR-0029): the browser's native bubbles never appear;
+    // the Field Errors are the only validation voice.
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h3 className="font-medium text-slate-900">
@@ -492,18 +586,21 @@ export function TransactionForm({
           <label htmlFor="tx-amount" className="block text-sm font-medium text-slate-700">
             Amount (€)
           </label>
+          {/* The browser-owned type="number" is what swallowed "17.5" in
+          comma-locales (ADR-0029): parsing is ours now — a tolerant text
+          field read by parseAmount, with the Error's aria wiring. */}
           <input
             id="tx-amount"
-            type="number"
-            step="0.01"
-            min="0.01"
-            required
+            type="text"
             inputMode="decimal"
+            required
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             placeholder="0.00"
+            {...fieldErrorProps('amount', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
+          <FieldError field="amount" errors={errors} />
         </div>
         <div>
           <label htmlFor="tx-date" className="block text-sm font-medium text-slate-700">
@@ -515,8 +612,10 @@ export function TransactionForm({
             required
             value={date}
             onChange={(event) => setDate(event.target.value)}
+            {...fieldErrorProps('date', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
           />
+          <FieldError field="date" errors={errors} />
         </div>
       </div>
 
@@ -529,6 +628,7 @@ export function TransactionForm({
           onSourceChange={setSourceWalletId}
           onDestinationChange={setDestinationWalletId}
           onAdd={(target) => onAddWallet(target, type)}
+          errors={errors}
         />
       ) : (
         <WalletField
@@ -538,6 +638,7 @@ export function TransactionForm({
           disabled={isEditing}
           onChange={setWalletId}
           onAdd={() => onAddWallet('wallet', type)}
+          errors={errors}
         />
       )}
 
@@ -726,19 +827,13 @@ export function TransactionForm({
       {error !== null && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex gap-3">
+        {/* Submit-and-validate (ADR-0029): disabled only while work is
+        actually in flight (saving, GPS locating, Place lookup) — never
+        because the draft is invalid. An invalid draft reveals Field
+        Errors instead of a dead button. */}
         <button
           type="submit"
-          disabled={
-            submitting ||
-            locating ||
-            lookingUpForPlace ||
-            !hasAmount ||
-            (isTransfer
-              ? sourceWalletId === undefined ||
-                destinationWalletId === undefined ||
-                sourceWalletId === destinationWalletId
-              : walletId === undefined)
-          }
+          disabled={submitting || locating || lookingUpForPlace}
           className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
         >
           {submitting ? 'Saving…' : isEditing ? 'Save' : 'Save transaction'}

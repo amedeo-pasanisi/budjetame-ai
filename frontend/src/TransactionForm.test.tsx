@@ -40,7 +40,7 @@ vi.mock('./location', async (importOriginal) => {
   return { ...actual, getGpsPosition: vi.fn() }
 })
 
-import { createTransaction, updateTransaction } from './api'
+import { createTransaction, updateTransaction, ApiError } from './api'
 import { getGpsPosition } from './location'
 
 const createTransactionMock = vi.mocked(createTransaction)
@@ -883,5 +883,181 @@ describe('TransactionForm readable description (issue #53)', () => {
       7,
       expect.objectContaining({ description: longDescription }),
     )
+  })
+})
+
+describe('TransactionForm submit-and-validate (ADR-0029, issue #103)', () => {
+  const saveButton = () => screen.getByRole('button', { name: 'Save transaction' })
+  const clearDate = () =>
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '' } })
+
+  it('leaves Save clickable on an invalid draft, reveals every Field Error at once, and calls no API', () => {
+    // No Wallets at all: the Expense Wallet field has nothing to select, so
+    // the draft is wrong in three ways at once.
+    renderForm(null, undefined, undefined, [])
+    clearDate()
+
+    // Save is never disabled for validation (ADR-0029): an invalid draft
+    // stays clickable so its errors can be discovered.
+    expect(saveButton()).toBeEnabled()
+
+    fireEvent.click(saveButton())
+
+    // One Field Error per wrong field, all at once.
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+    expect(screen.getByText('Choose a date')).toBeInTheDocument()
+    expect(screen.getByText('Choose a wallet.')).toBeInTheDocument()
+    // The invalid submit reached the API never.
+    expect(createTransactionMock).not.toHaveBeenCalled()
+    // The browser's own validation voice is off: Field Errors are the only
+    // ones.
+    expect(document.querySelector('form')).toHaveAttribute('novalidate')
+  })
+
+  it('reveals the Amount messages by kind: empty, unparseable, non-positive', () => {
+    renderForm(null)
+
+    fireEvent.click(saveButton())
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: 'abc' } })
+    fireEvent.click(saveButton())
+    expect(
+      screen.getByText(
+        "That doesn't look like an amount — use digits and one . or , for decimals",
+      ),
+    ).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '0' } })
+    fireEvent.click(saveButton())
+    expect(screen.getByText('Amount must be a positive number')).toBeInTheDocument()
+    expect(createTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps every Field Error while the user types the fix, clearing only on the next Save', async () => {
+    renderForm(null)
+    clearDate()
+    fireEvent.click(saveButton())
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+    expect(screen.getByText('Choose a date')).toBeInTheDocument()
+
+    // Fixing the fields changes nothing on screen (ADR-0029): errors
+    // refresh only on the next Save attempt.
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-08-02' } })
+    expect(screen.getByText('Enter an amount')).toBeInTheDocument()
+    expect(screen.getByText('Choose a date')).toBeInTheDocument()
+
+    // The next Save attempt clears them and proceeds exactly as before.
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ amount: '5.00' }),
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a tolerant Amount Input reaches the balance preview and the API canonicalized', async () => {
+    renderForm(null)
+
+    // 1.000,45 on Cash (€100.00): the shared parser reads 1000.45, so the
+    // preview projects the Expense into the red — the parse-through-the-UI
+    // case proving the parser is wired end to end.
+    fireEvent.change(screen.getByLabelText('Amount (€)'), {
+      target: { value: '1.000,45' },
+    })
+    // The after-value of the Cash balance preview reflects the parsed 1000.45.
+    expect(screen.getByText('€-900.45')).toBeInTheDocument()
+
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    // The backend speaks Decimal: the comma'd input rides as US cents.
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ amount: '1000.45' }),
+    )
+  })
+
+  it('a Transfer with identical From and To reveals the pair error under both legs, and one fix saves', async () => {
+    renderForm(null, undefined, undefined, [wallet, checkingWallet])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    // Both legs are equally wrong: the same message rides under each.
+    expect(
+      screen.getAllByText('Source and destination must be different wallets.'),
+    ).toHaveLength(2)
+    expect(createTransactionMock).not.toHaveBeenCalled()
+
+    // Changing one leg fixes the pair.
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({
+        type: 'transfer',
+        sourceWalletId: 1,
+        destinationWalletId: 5,
+      }),
+    )
+  })
+
+  it('a Transfer with no Wallets to choose from reveals the missing-leg errors', () => {
+    renderForm(null, undefined, undefined, [])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    expect(screen.getByText('Choose the source wallet.')).toBeInTheDocument()
+    expect(screen.getByText('Choose the destination wallet.')).toBeInTheDocument()
+    expect(createTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it('switching an Expense on a Contact Wallet to Income keeps the Wallet and blocks Save with a Field Error', async () => {
+    renderForm(null, undefined, undefined, [wallet, contactWallet])
+    const walletSelect = screen.getByLabelText('Wallet')
+
+    fireEvent.change(walletSelect, { target: { value: '3' } })
+    expect(walletSelect).toHaveValue('3')
+    fireEvent.click(screen.getByRole('button', { name: 'Income' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    // No silent reset (ADR-0029): the draft still carries Chiara, and Save
+    // explains why instead of swapping the Wallet or shipping a 422 to the
+    // backend — the error rides the field's own aria wiring.
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "Incomes can't be recorded on contact wallets.",
+    )
+    expect(walletSelect).toHaveAttribute('aria-invalid', 'true')
+    expect(createTransactionMock).not.toHaveBeenCalled()
+
+    // Choosing a spendable Wallet fixes it.
+    fireEvent.change(walletSelect, { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() => expect(createTransactionMock).toHaveBeenCalled())
+    expect(createTransactionMock).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({ type: 'income', walletId: 1 }),
+    )
+  })
+
+  it('server rejections keep the form-level banner and never become Field Errors', async () => {
+    createTransactionMock.mockRejectedValueOnce(new ApiError('conflict', 409))
+    renderForm(null)
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '5.00' } })
+
+    fireEvent.click(saveButton())
+
+    // The existing banner stays the only home for server-side facts.
+    expect(await screen.findByText('Could not save the transaction.')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Enter an amount')).not.toBeInTheDocument()
   })
 })

@@ -12,6 +12,8 @@
 import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
 import { formatEuros } from './api'
 import type { TransferProjection } from './balanceProjection'
+import { FieldError } from './FieldError'
+import { fieldErrorProps, type FieldErrors } from './validation'
 import { EntitySelect } from './EntitySelect'
 import { NON_CONTACT_WALLET_TYPES } from './transactions'
 
@@ -68,6 +70,7 @@ export function WalletField({
   disabled,
   onChange,
   onAdd,
+  errors,
 }: {
   wallets: Wallet[]
   /** The Expense or Income the field belongs to: Expense allows Contact
@@ -78,6 +81,10 @@ export function WalletField({
   onChange: (walletId: number) => void
   /** Opens the Wallet create modal, hosted by the screen. */
   onAdd: () => void
+  /** The form's Field Errors (ADR-0029): this field's entry, when
+   * present, renders inline beneath the select and wires the error aria
+   * onto it. */
+  errors: FieldErrors
 }) {
   const spendableWallets =
     type === 'expense'
@@ -100,7 +107,9 @@ export function WalletField({
         }))}
         entity="wallet"
         onAdd={onAdd}
+        errorProps={fieldErrorProps('wallet', errors)}
       />
+      <FieldError field="wallet" errors={errors} />
       <p className="mt-1 text-xs text-slate-500">
         {type === 'expense'
           ? 'An expense on a contact wallet means the contact paid for this.'
@@ -124,6 +133,7 @@ export function TransferWalletFields({
   onSourceChange,
   onDestinationChange,
   onAdd,
+  errors,
 }: {
   wallets: Wallet[]
   sourceWalletId: number | undefined
@@ -134,26 +144,32 @@ export function TransferWalletFields({
   /** Opens the Wallet create modal, hosted by the screen, with the field
    * whose sentinel was picked. */
   onAdd: (target: 'source' | 'destination') => void
+  /** The form's Field Errors (ADR-0029), handed to both legs. */
+  errors: FieldErrors
 }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <WalletSelect
         id="tx-source"
         label="From"
+        field="source"
         wallets={wallets}
         value={sourceWalletId}
         disabled={disabled}
         onChange={onSourceChange}
         onAdd={() => onAdd('source')}
+        errors={errors}
       />
       <WalletSelect
         id="tx-destination"
         label="To"
+        field="destination"
         wallets={wallets}
         value={destinationWalletId}
         disabled={disabled}
         onChange={onDestinationChange}
         onAdd={() => onAdd('destination')}
+        errors={errors}
       />
     </div>
   )
@@ -348,36 +364,45 @@ export function TransferBalancePreview({
 function WalletSelect({
   id,
   label,
+  field,
   wallets,
   value,
   disabled,
   onChange,
   onAdd,
+  errors,
 }: {
   id: string
   label: string
+  /** The Field Error key for this leg — 'source' or 'destination'. */
+  field: 'source' | 'destination'
   wallets: Wallet[]
   value: number | undefined
   disabled: boolean
   onChange: (walletId: number) => void
   onAdd: () => void
+  errors: FieldErrors
 }) {
   return (
-    <EntitySelect
-      id={id}
-      label={label}
-      required
-      disabled={disabled}
-      value={value ?? ''}
-      onChange={(next) => {
-        if (next !== '') onChange(next)
-      }}
-      options={wallets.map((wallet) => ({
-        id: wallet.id,
-        label: `${wallet.name} (${formatEuros(wallet.balance)})`,
-      }))}
-      entity="wallet"
-      onAdd={onAdd}
-    />
+    <div>
+      <EntitySelect
+        id={id}
+        label={label}
+        required
+        disabled={disabled}
+        value={value ?? ''}
+        onChange={(next) => {
+          if (next !== '') onChange(next)
+        }}
+        options={wallets.map((wallet) => ({
+          id: wallet.id,
+          label: `${wallet.name} (${formatEuros(wallet.balance)})`,
+        }))}
+        entity="wallet"
+        onAdd={onAdd}
+        errorProps={fieldErrorProps(field, errors)}
+      />
+      <FieldError field={field} errors={errors} />
+    </div>
   )
 }
