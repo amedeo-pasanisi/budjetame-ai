@@ -10,12 +10,20 @@
  * ledger pre-filtered to that Wallet (the shell's requestLedgerFilter,
  * issue #90); ✎ Edit opens the edit modal, and frozen rows add a one-tap
  * Unfreeze button. The API client is mocked; the real display helpers stay
- * live. */
+ * live.
+ *
+ * The Wallet form inside the modals is submit-and-validate (ADR-0029,
+ * issue #107): the Save button is always clickable except while work is in
+ * flight, and an invalid draft reveals Field Errors under the wrong fields
+ * instead of calling the API. The Opening balance is a tolerant Amount
+ * Input — text, both separators, empty stays valid (the Wallet starts at
+ * €0). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { WalletsScreen } from './WalletsScreen'
 import type { Wallet } from './api'
+import { ApiError, createWallet, fetchWallets, freezeWallet, renameWallet, unfreezeWallet } from './api'
 
 vi.mock('./api', async () => {
   // The real display helpers, so the screen exercises the actual formatting
@@ -47,8 +55,6 @@ vi.mock('./api', async () => {
     unfreezeWallet: vi.fn(),
   }
 })
-
-import { createWallet, fetchWallets, freezeWallet, renameWallet, unfreezeWallet } from './api'
 
 const createdAt = '2026-08-01T10:00:00Z'
 
@@ -473,5 +479,204 @@ describe('WalletsScreen trailing row buttons (issue #93)', () => {
     ).toBeInTheDocument()
     expect(requestLedgerFilter).not.toHaveBeenCalled()
     expect(unfreezeWalletMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
+  const createButton = (dialog: HTMLElement) =>
+    within(dialog).getByRole('button', { name: 'Create wallet' })
+  const nameInput = (dialog: HTMLElement) => within(dialog).getByLabelText('Name')
+  const balanceInput = (dialog: HTMLElement) =>
+    within(dialog).getByLabelText('Opening balance (optional)')
+
+  const openCreateDialog = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'New wallet' }))
+    return await screen.findByRole('dialog', { name: 'New wallet' })
+  }
+
+  it('keeps Create clickable on an invalid draft, reveals "Enter a name" under the field, and calls no API', async () => {
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    const dialog = await openCreateDialog()
+    // Save is never disabled for validation (ADR-0029): an empty Name must
+    // be discoverable by trying to save.
+    expect(createButton(dialog)).toBeEnabled()
+    fireEvent.click(createButton(dialog))
+
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+    expect(createWalletMock).not.toHaveBeenCalled()
+    // The Name field carries the error via the aria wiring (ADR-0029): a
+    // screen reader reads the message with its field.
+    expect(nameInput(dialog)).toHaveAttribute('aria-invalid', 'true')
+    expect(nameInput(dialog)).toHaveAttribute('aria-describedby', 'name-error')
+    expect(document.getElementById('name-error')).toHaveTextContent('Enter a name')
+    // The browser's own validation voice is off: Field Errors are the only
+    // ones.
+    expect(document.querySelector('form')).toHaveAttribute('novalidate')
+  })
+
+  it('keeps the Name error while typing the fix, clearing only on the next Save', async () => {
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    const dialog = await openCreateDialog()
+    fireEvent.click(createButton(dialog))
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+
+    // Fixing the field changes nothing on screen (ADR-0029): errors
+    // refresh only on the next Save attempt.
+    fireEvent.change(nameInput(dialog), { target: { value: 'Revolut' } })
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+
+    fireEvent.click(createButton(dialog))
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '',
+      }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // The successful save leaves no error text anywhere.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('the Opening balance is a tolerant text Amount Input: a malformed value reveals the parser\'s error and submits nothing', async () => {
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    const dialog = await openCreateDialog()
+    const balance = balanceInput(dialog) as HTMLInputElement
+    // The Amount Input contract (ADR-0029): a text field — not the
+    // browser-owned type="number" that swallowed dots in comma-locales.
+    expect(balance).toHaveAttribute('type', 'text')
+    expect(balance).toHaveAttribute('inputmode', 'decimal')
+    // The number input's min/step are gone with it.
+    expect(balance).not.toHaveAttribute('min')
+    expect(balance).not.toHaveAttribute('step')
+
+    fireEvent.change(nameInput(dialog), { target: { value: 'Revolut' } })
+    fireEvent.change(balance, { target: { value: '12.34.56' } })
+    fireEvent.click(createButton(dialog))
+
+    expect(
+      screen.getByText(
+        "That doesn't look like an amount — use digits and one . or , for decimals",
+      ),
+    ).toBeInTheDocument()
+    expect(balance).toHaveAttribute('aria-invalid', 'true')
+    expect(balance).toHaveAttribute('aria-describedby', 'openingBalance-error')
+    expect(document.getElementById('openingBalance-error')).toHaveTextContent(
+      "That doesn't look like an amount — use digits and one . or , for decimals",
+    )
+    expect(createWalletMock).not.toHaveBeenCalled()
+  })
+
+  it('a non-positive Opening balance reveals the positive-amount error', async () => {
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    const dialog = await openCreateDialog()
+    fireEvent.change(nameInput(dialog), { target: { value: 'Revolut' } })
+    fireEvent.change(balanceInput(dialog), { target: { value: '0' } })
+    fireEvent.click(createButton(dialog))
+
+    expect(screen.getByText('Amount must be a positive number')).toBeInTheDocument()
+    expect(createWalletMock).not.toHaveBeenCalled()
+  })
+
+  it('saves a tolerant Opening balance with the canonical parsed value (17,5 → 17.50, 1.000,45 → 1000.45)', async () => {
+    createWalletMock.mockResolvedValue({
+      id: 9,
+      name: 'Revolut',
+      type: 'checking',
+      balance: '17.50',
+      frozen: false,
+      created_at: createdAt,
+    })
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    // Comma decimals (17,5) parse and reach the API as canonical cents.
+    const dialog = await openCreateDialog()
+    fireEvent.change(nameInput(dialog), { target: { value: 'Revolut' } })
+    fireEvent.change(balanceInput(dialog), { target: { value: '17,5' } })
+    fireEvent.click(createButton(dialog))
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '17.50',
+      }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Italian-style grouping + comma decimals (1.000,45) parse to 1000.45.
+    fireEvent.click(screen.getByRole('button', { name: 'New wallet' }))
+    const second = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(nameInput(second), { target: { value: 'Revolut' } })
+    fireEvent.change(balanceInput(second), { target: { value: '1.000,45' } })
+    fireEvent.click(createButton(second))
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '1000.45',
+      }),
+    )
+  })
+
+  it('an empty Opening balance stays valid: the new Wallet starts at €0', async () => {
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    const dialog = await openCreateDialog()
+    fireEvent.change(nameInput(dialog), { target: { value: 'Revolut' } })
+    // No balance touched: the form sends '' and the API client emits the
+    // "0.00" balance — the Wallet starts at €0.
+    fireEvent.click(createButton(dialog))
+    await waitFor(() =>
+      expect(createWalletMock).toHaveBeenCalledWith('', {
+        name: 'Revolut',
+        type: 'checking',
+        openingBalance: '',
+      }),
+    )
+    // The empty balance raised no Field Error.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('clearing the Name while editing reveals the same error and rename is not called', async () => {
+    render(<WalletsScreen />)
+    const contacts = await screen.findByRole('region', { name: 'Contacts' })
+    fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Marco' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+    expect(save).toBeEnabled()
+
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: '' } })
+    fireEvent.click(save)
+
+    expect(screen.getByText('Enter a name')).toBeInTheDocument()
+    expect(renameWalletMock).not.toHaveBeenCalled()
+    expect(save).toBeEnabled()
+  })
+
+  it('a 409 duplicate-name rejection keeps the form-level banner and never becomes a Field Error', async () => {
+    createWalletMock.mockRejectedValue(new ApiError('Conflict', 409))
+    render(<WalletsScreen />)
+    await screen.findByRole('region', { name: 'Contacts' })
+
+    const dialog = await openCreateDialog()
+    fireEvent.change(nameInput(dialog), { target: { value: 'Intesa' } })
+    fireEvent.click(createButton(dialog))
+
+    expect(
+      await within(dialog).findByText('A wallet with this name already exists.'),
+    ).toBeInTheDocument()
+    // Server rejections keep the form-level banner (ADR-0029); Field Errors
+    // (role=alert) never appear — the two error kinds never mix.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
