@@ -137,12 +137,26 @@ The act of editing a Preview row — date, amount, type, wallet(s), category, de
 _Avoid_: fixing rows
 
 **Export**:
-A generated .xlsx of the Account's Transactions in the import template's format, downloaded from the ledger with the current filters and search applied. It carries only what the template carries: Opening Balance Transactions are left out (the template's type vocabulary has no value for them), Recurring links are never carried, and Places flatten to coordinates. Re-importing an Export into the same Account flags every row as a Duplicate; into a fresh Account it restores the ledger once its Wallets and Categories exist.
-_Avoid_: backup, dump, statement
+A generated .xlsx of the Account's Transactions in the import template's format, downloaded from the ledger with the current filters and search applied. It carries only what the template carries: Opening Balance Transactions are left out (the template's type vocabulary has no value for them), Recurring links are never carried, and Places flatten to coordinates. Re-importing an Export into the same Account flags every row as a Duplicate; into a fresh Account it restores the ledger once its Wallets and Categories exist. Not to be confused with a Backup, which is complete.
+_Avoid_: dump, statement
 
 **Ledger jump**:
 What a Wallet, Category, or Recurring definition row's whole-surface tap does: it opens the Transactions tab with the ledger already filtered to exactly that Wallet, that Category, or — for a Recurring Cost or Recurring Income — that definition's linked Transactions — the previous filters, search, and open Filters panel are all reset by the jump, and a Frozen Wallet's history lands read-only. Editing the row is the card's separate trailing Edit button, never the tap itself.
 _Avoid_: transactions filtering on card tap, row-tap filter, filter shortcut
+
+### Backup and recovery
+
+**Backup**:
+A multi-sheet .xlsx exported on demand from Settings carrying the Account's whole data state: Transactions including Opening Balances, Wallets, Categories, Recurring Costs and Recurring Incomes, and skips. Entities are keyed by name (the restore path rebuilds by name), with the original database ids carried alongside for reference. Unlike an Export it is unfiltered and complete, and it is downloaded to wherever the user wants — the app's off-site safety net.
+_Avoid_: export all, full export, dump, snapshot
+
+**Restore**:
+The Settings action that replaces the Account's current data — Transactions, Wallets, Categories, Recurring definitions, skips — with a Backup file's contents in one atomic all-or-nothing step: a rollback to the point in time the Backup was exported. Guarded by a two-step confirmation that first offers a fresh Backup of the current state. Restore is deliberately not an Import: Import merges and dedupes, Restore replaces. A Backup whose origin marker does not match the signed-in Account warns before proceeding (restoring into a fresh Account is a legitimate migration path).
+_Avoid_: re-import, import a backup, rollback
+
+**Undo**:
+The 10-second window after deleting a Transaction in which that deletion can be reversed: a stack of up to three toasts (newest first) sits at the bottom of the screen, each with its own countdown, and tapping Undo re-creates the very same Transaction — same id, same Recurring pin — through a dedicated endpoint. If the pinned Occurrence was already paid by another Transaction in the meantime, the undo fails with a specific message rather than silently re-linking. The window is client-enforced and dies with the session.
+_Avoid_: undo history, redo, soft delete, trash
 
 ### Forms
 
@@ -151,8 +165,12 @@ A client-side validation message attached to one form field and shown inline ben
 _Avoid_: validation message, inline error, form error
 
 **Amount Input**:
-The way money is typed into a form field: a decimal number tolerant of both separators — the last `.` or `,` is the decimal point, earlier ones are thousands groupings, and a lone separator followed by exactly three digits is a thousands grouping, so 17.5, 17,5, 2,002.01, and 1.000.420,45 all parse. Display, storage, and export stay US-canonical (1,000,420.45) until i18n adds per-locale display; the parser already understands both styles and is kept as-is then (ADR-0029).
+The way money is typed into a form field: a decimal number tolerant of both separators — the last `.` or `,` is the decimal point, earlier ones are thousands groupings, and a lone separator followed by exactly three digits is a thousands grouping, so 17.5, 17,5, 2,002.01, and 1.000.420,45 all parse. Display follows the Account's Locale (it-IT: 1.000,42 while editing), while storage, the wire format, and Export/Backup stay US-canonical (1,000,420.45); the parser is locale-independent and is kept as-is then (ADR-0029).
 _Avoid_: money field, currency input, amount field
+
+**Locale**:
+The Account's display language, stored on the Account and served by the API so every client — web and Android — formats identically. Auto-detected once from the browser/device locale at first load (`it`/`it-IT` for Italian, `en` otherwise, existing Accounts included), changeable in Settings. It drives number and date formatting and, where translated, UI strings; wire formats and exported files are unaffected.
+_Avoid_: language setting, regional format, i18n setting
 
 ## Rules
 
