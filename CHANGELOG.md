@@ -9,20 +9,54 @@ here and on GitHub Releases.
 
 ### Added
 
-- **Dashboard** — the Budget card now supports a **month selector**
+### Fixed
+
+### Changed
+
+## [v1.8.0] — 2026-09-23
+
+### Added
+
+- **Form validation — submit-and-validate with inline Field Errors** (ADR-0029) —
+  all six entity forms (Transaction, Recurring Cost, Recurring Income, Category,
+  Wallet, Import row editor) now keep Save always clickable except while work is
+  actually in flight; clicking Save on an invalid form reveals a **Field Error**
+  inline beneath every wrong field and submits nothing, so a user can discover
+  what is wrong and fix every error in one pass. Errors persist while typing and
+  refresh only on the next Save attempt. Server rejections (duplicate names,
+  merge collisions) keep the existing form-level banner.
+- **Amount Input tolerance** — a shared `parseAmount` parser accepts both `.` and
+  `,` as decimal separators: `17.5`, `17,5`, `2,002.01`, `1.000.420,45`,
+  `1.000` and `1.000,00` all parse to the right value. A lone separator with
+  exactly three digits after it (like `1.000`) is read as a thousands grouping,
+  never a three-decimal fraction.
+- **Recurring definitions can be frozen instead of deleted** (ADR-0028) — a freeze
+  preserves the definition and its history, renders it collapsed (web) or
+  read-only (forms with fields as text, no Save button), and hides its
+  Occurrences from the unpaid tally. An unfreeze restores the record fully.
+  Deleting a definition with linked Transactions now blocks with an error; only
+  a freeze is offered.
+- **Dashboard** — the Budget card now breaks Monthly Spendable into its
+  components (income − costs) with a daily accrual line on every month frame,
+  and supports a **month selector** so any month's budget is browsable.
 
 ### Fixed
 
 - **Location permission no longer requested on save** — the device-location
-  permission prompt was appearing when saving a new Transaction without a
-  location; it now only triggers when the user taps "Use my location". (just
-  like the Pie card's): you can browse any month's Budget frame, not just
-  the current one. For past/future months, Spendable Today and Remaining
-  Monthly Spendable are computed against the month's last day, so you see
-  the final state. The frame line also breaks the Monthly Spendable into
-  its components: "€500.00 this month (€2100.00 income − €850.00 costs) ·
-  €16.60 per day" — you can see at a glance what's coming in, what's going
-  out, and what's left.
+  permission prompt appeared when saving a new Transaction without a location;
+  it now only triggers when the user taps "Use my location".
+- **GPS prefill removed** — location is only added on explicit user action.
+- **Transaction form** — switching an Expense on a Contact Wallet to Income no
+  longer silently swaps the Wallet to the first spendable one; the selection
+  stays and Save shows "Incomes can't be recorded on contact wallets." instead.
+
+### Changed
+
+- **Amount and Opening balance fields** changed from `type="number"` to
+  `type="text" inputMode="decimal"` so the browser never silently rejects
+  locale-typed separators (`17.5` in an Italian-locale browser).
+- **Save button rule** — disabled only for in-flight flags (submitting, GPS
+  locating, Places lookup), never for validation.
 
 ## [v1.7.0] — 2026-09-11
 
@@ -278,3 +312,4 @@ behind the live deployment at budjetame.de.
 [v1.0.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.0.0
 [v1.1.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.0
 [v1.1.1]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.1
+[v1.8.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.8.0
