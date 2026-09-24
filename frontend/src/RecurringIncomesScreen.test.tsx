@@ -152,9 +152,9 @@ describe('RecurringIncomesScreen rows', () => {
     const texts = rows.map((row) => row.textContent ?? '')
     expect(texts[0]).toContain('€600.00')
     expect(texts[0]).toContain('Every month · next due 2026-09-01')
-    expect(texts[1]).toContain('€2100.00')
+    expect(texts[1]).toContain('€2,100.00')
     expect(texts[1]).toContain('Every month · next due 2026-09-27')
-    expect(texts[2]).toContain('€1500.00')
+    expect(texts[2]).toContain('€1,500.00')
     expect(texts[2]).toContain('Every year · next due 2026-12-01')
   })
 
@@ -301,7 +301,7 @@ describe('RecurringIncomesScreen edit and delete flows', () => {
       ),
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(mainSurface('Salary').textContent).toContain('€2200.00')
+    expect(mainSurface('Salary').textContent).toContain('€2,200.00')
   })
 
   it('loads the Occurrences section into the edit modal (ADR-0026)', async () => {

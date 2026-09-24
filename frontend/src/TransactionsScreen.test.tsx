@@ -43,6 +43,7 @@ vi.mock('./api', () => {
           : fallback
         : fallback,
     formatEuros: (value: string) => `€${value}`,
+    formatLedgerDate: (value: string) => value,
     fetchWallets: vi.fn(),
     fetchCategories: vi.fn(),
     fetchRecurringCosts: vi.fn(),

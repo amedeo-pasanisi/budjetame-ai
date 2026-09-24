@@ -363,6 +363,126 @@ async def test_delete_account_requires_authentication(client: AsyncClient) -> No
     assert response.status_code == 401
 
 
+async def test_account_language_defaults_to_en_on_registration(client: AsyncClient) -> None:
+    """A freshly registered Account starts with locale `en` (issue #114)."""
+    register = await client.post(
+        "/auth/register", json={"email": "lingua-default@example.com", "password": "hunter2-hunter2"}
+    )
+    assert register.status_code == 200
+    token = register.json()["access_token"]
+
+    response = await client.get(
+        "/auth/me/language", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"language": "en"}
+
+
+async def test_account_language_can_be_changed(client: AsyncClient) -> None:
+    """PUT /auth/me/language saves the locale and persists across logins
+    (issue #114)."""
+    register = await client.post(
+        "/auth/register", json={"email": "lingua@example.com", "password": "hunter2-hunter2"}
+    )
+    token = register.json()["access_token"]
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.json()["language"] == "en"
+
+    put = await client.put(
+        "/auth/me/language",
+        json={"language": "it"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert put.status_code == 204
+
+    # Persisted: re-fetch
+    response = await client.get(
+        "/auth/me/language", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.json() == {"language": "it"}
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.json()["language"] == "it"
+
+
+async def test_account_language_persists_across_logins(client: AsyncClient) -> None:
+    """The locale is stored on the Account, not on the session (issue #114):
+    re-login shows the stored value."""
+    email = "persist@example.com"
+    password = "hunter2-hunter2"
+    register = await client.post(
+        "/auth/register", json={"email": email, "password": password}
+    )
+    token = register.json()["access_token"]
+    await client.put(
+        "/auth/me/language",
+        json={"language": "it"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    login = await client.post(
+        "/auth/login", json={"email": email, "password": password}
+    )
+    second_token = login.json()["access_token"]
+
+    response = await client.get(
+        "/auth/me/language", headers={"Authorization": f"Bearer {second_token}"}
+    )
+    assert response.json() == {"language": "it"}
+
+
+async def test_account_language_cross_account_isolation(client: AsyncClient) -> None:
+    """Each Account has its own locale — changing one never affects another
+    (issue #114)."""
+    a = await client.post(
+        "/auth/register", json={"email": "lingua_iso_a@example.com", "password": "hunter2-hunter2"}
+    )
+    b = await client.post(
+        "/auth/register", json={"email": "lingua_iso_b@example.com", "password": "hunter2-hunter2"}
+    )
+    token_a = a.json()["access_token"]
+    token_b = b.json()["access_token"]
+
+    await client.put(
+        "/auth/me/language",
+        json={"language": "it"},
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+
+    response_a = await client.get(
+        "/auth/me/language", headers={"Authorization": f"Bearer {token_a}"}
+    )
+    response_b = await client.get(
+        "/auth/me/language", headers={"Authorization": f"Bearer {token_b}"}
+    )
+    assert response_a.json() == {"language": "it"}
+    assert response_b.json() == {"language": "en"}
+
+
+async def test_account_language_rejects_invalid_locale(client: AsyncClient) -> None:
+    """Only `en` and `it` are accepted — anything else is a 422
+    (issue #114)."""
+    login = await client.post(
+        "/auth/login", json={"email": SEED_EMAIL, "password": SEED_PASSWORD}
+    )
+    token = login.json()["access_token"]
+
+    response = await client.put(
+        "/auth/me/language",
+        json={"language": "de"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+async def test_account_language_requires_authentication(client: AsyncClient) -> None:
+    """Both GET and PUT require a bearer token (issue #114)."""
+    get_resp = await client.get("/auth/me/language")
+    assert get_resp.status_code == 401
+
+    put_resp = await client.put("/auth/me/language", json={"language": "it"})
+    assert put_resp.status_code == 401
+
+
 async def test_delete_account_leaves_other_accounts_untouched(client: AsyncClient) -> None:
     """ADR-0020: one Account's deletion never touches another's data."""
     seed_login = await client.post(

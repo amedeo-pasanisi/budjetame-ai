@@ -17,6 +17,8 @@ vi.mock('./api', async (importOriginal) => {
 const renderModal = (
   overrides: Partial<{
     email: string
+    language: string
+    onChangeLanguage: (language: 'en' | 'it') => void
     onDeleteAccount: () => Promise<void>
     onDeleted: () => void
     onClose: () => void
@@ -25,6 +27,8 @@ const renderModal = (
   render(
     <SettingsModal
       email="owner@example.com"
+      language="en"
+      onChangeLanguage={vi.fn()}
       onDeleteAccount={vi.fn().mockResolvedValue(undefined)}
       onDeleted={vi.fn()}
       onClose={vi.fn()}
@@ -49,7 +53,26 @@ describe('SettingsModal (issue #84)', () => {
     expect(screen.getByRole('button', { name: 'Delete account' })).toBeInTheDocument()
   })
 
-  it('shows the Export all action', () => {
+  it('shows the language picker with the current locale selected', () => {
+    renderModal({ language: 'en' })
+
+    const picker = screen.getByRole('combobox') as HTMLSelectElement
+    expect(picker).toBeInTheDocument()
+    expect(picker.value).toBe('en')
+    expect(screen.getByRole('option', { name: 'English' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Italiano' })).toBeInTheDocument()
+  })
+
+  it('reports the picked language on change', () => {
+    const onChangeLanguage = vi.fn()
+    renderModal({ language: 'en', onChangeLanguage })
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'it' } })
+
+    expect(onChangeLanguage).toHaveBeenCalledWith('it')
+  })
+
+  it('surfaces the Export all action', () => {
     renderModal()
 
     expect(screen.getByRole('button', { name: 'Export all' })).toBeInTheDocument()

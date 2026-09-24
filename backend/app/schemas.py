@@ -62,6 +62,18 @@ class AccountOut(BaseModel):
 
     id: int
     email: str
+    language: str
+
+
+class LanguageUpdate(BaseModel):
+    """Change the Account's display Locale (issue #114).
+    Accepted values: `en` (English) or `it` (Italian).
+    The backend validates this so the frontend has a single source of truth.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    language: Literal["en", "it"]
 
 
 class WalletCreate(BaseModel):

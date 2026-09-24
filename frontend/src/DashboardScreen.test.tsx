@@ -15,7 +15,7 @@ import { todayInRome } from './transactions'
 import type { BudgetView, CategoryExpense, RecurringCost, RecurringIncome } from './api'
 
 vi.mock('./api', async () => {
-  const { formatEuros } = await import('./api/format')
+  const { formatEuros, formatMonth, formatShortMonth } = await import('./api/format')
   class ApiError extends Error {
     status: number
 
@@ -34,6 +34,8 @@ vi.mock('./api', async () => {
           : fallback
         : fallback,
     formatEuros,
+    formatMonth,
+    formatShortMonth,
     fetchDashboardSummary: vi.fn(),
     fetchTrend: vi.fn(),
     fetchBudget: vi.fn(),
@@ -163,7 +165,7 @@ describe('Dashboard Budget card', () => {
 
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
     expect(
-      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs)'),
+      screen.getByText('€500.00 this month (€2,100.00 income − €850.00 costs)'),
     ).toBeInTheDocument()
     expect(screen.getByText('€16.60 per day')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledWith('', currentMonth)
@@ -281,7 +283,7 @@ describe('Dashboard Budget card', () => {
     // the pie month changed — only its own selector refetches it.
     expect(screen.getByText('€49.80')).toBeInTheDocument()
     expect(
-      screen.getByText('€500.00 this month (€2100.00 income − €850.00 costs)'),
+      screen.getByText('€500.00 this month (€2,100.00 income − €850.00 costs)'),
     ).toBeInTheDocument()
     expect(screen.getByText('€16.60 per day')).toBeInTheDocument()
     expect(fetchBudgetMock).toHaveBeenCalledTimes(1)
@@ -297,7 +299,7 @@ describe('Dashboard category pie', () => {
     expect(screen.getByText('€100.00 · 100%')).toBeInTheDocument()
     expect(screen.getByLabelText('Expenses by category')).toBeInTheDocument()
     // The pie's center is the expense total, not the income total.
-    expect(screen.getByText('€1500.00')).toBeInTheDocument()
+    expect(screen.getByText('€1,500.00')).toBeInTheDocument()
     expect(fetchDashboardSummaryMock).toHaveBeenCalledWith('', currentMonth)
   })
 
@@ -311,7 +313,7 @@ describe('Dashboard category pie', () => {
     expect(screen.getByText('💰 Salary')).toBeInTheDocument()
     expect(screen.getByText('€200.00 · 100%')).toBeInTheDocument()
     expect(screen.getByLabelText('Incomes by category')).toBeInTheDocument()
-    expect(screen.getByText('€3000.00')).toBeInTheDocument()
+    expect(screen.getByText('€3,000.00')).toBeInTheDocument()
     expect(screen.queryByText('🍕 Food')).not.toBeInTheDocument()
     // Both pies ride on the same summary — one fetch.
     expect(fetchDashboardSummaryMock).toHaveBeenCalledTimes(1)
@@ -331,7 +333,7 @@ describe('Dashboard category pie', () => {
     expect(await screen.findByText(/Expenses by Category/)).toBeInTheDocument()
     // Net Worth never depends on the month — balances are current — so it
     // keeps rendering while the pie reloads.
-    expect(screen.getByText('€1000.00')).toBeInTheDocument()
+    expect(screen.getByText('€1,000.00')).toBeInTheDocument()
   })
 
   it('shows the empty state per side', async () => {

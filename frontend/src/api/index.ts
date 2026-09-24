@@ -3,11 +3,12 @@
  */
 
 export { ApiError, TOKEN_KEY, apiErrorMessage } from './transport'
-export { formatEuros, formatSignedEuros } from './format'
+export { setLocale, getLocale, formatEuros, formatSignedEuros, formatMonth, formatShortMonth, formatLedgerDate } from './format'
 
 export {
   type Account,
   deleteAccount,
+  fetchAccountLanguage,
   fetchAuthConfig,
   fetchCurrentAccount,
   googleSignIn,
@@ -15,6 +16,7 @@ export {
   register,
   requestPasswordReset,
   resetPassword,
+  updateAccountLanguage,
 } from './auth'
 
 export {

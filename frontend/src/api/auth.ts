@@ -3,7 +3,7 @@
 
 import { request } from './transport'
 
-export type Account = { id: number; email: string }
+export type Account = { id: number; email: string; language: string }
 
 export type AuthConfig = { google_client_id: string }
 
@@ -87,4 +87,25 @@ export async function fetchCurrentAccount(token: string): Promise<Account> {
     errorMessage: 'Not authenticated',
   })
   return (await response.json()) as Account
+}
+
+/** Fetch the Account's display Locale (issue #114): returns `{"language": "en"}` or `{"language": "it"}`. */
+export async function fetchAccountLanguage(token: string): Promise<string> {
+  const response = await request('/auth/me/language', {
+    token,
+    errorMessage: 'Could not load the language setting',
+  })
+  const body = (await response.json()) as { language: string }
+  return body.language
+}
+
+/** Update the Account's display Locale (issue #114). Accepted values:
+ * `"en"` (English) or `"it"` (Italian). Returns nothing on success (204). */
+export async function updateAccountLanguage(token: string, language: 'en' | 'it'): Promise<void> {
+  await request('/auth/me/language', {
+    method: 'PUT',
+    token,
+    json: { language },
+    errorMessage: 'Could not update the language setting',
+  })
 }

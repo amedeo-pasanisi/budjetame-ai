@@ -8,6 +8,8 @@ import {
   fetchRecurringIncomes,
   fetchTrend,
   formatEuros,
+  formatMonth,
+  formatShortMonth,
   type BudgetView,
   type CategoryExpense,
   type DashboardSummary,
@@ -805,22 +807,16 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
 }
 
 /** "2026-08" → "Aug"; January bars also carry the year so long ranges stay
- * readable ("Jan '26"). Always uses abbreviated English month names. */
+ * readable ("Jan '26"). Locale-aware (issue #114): abbreviated Italian
+ * month names under `it`. */
 function shortMonthLabel(month: string): string {
-  const [year, monthIndex] = month.split('-').map(Number)
-  const short = new Date(year, monthIndex - 1, 1).toLocaleDateString('en', {
-    month: 'short',
-  })
-  return monthIndex === 1 ? `${short} '${String(year).slice(2)}` : short
+  return formatShortMonth(month)
 }
 
-/** "2026-08" → "Aug 2026", always uses abbreviated English month names. */
+/** "2026-08" → "Aug 2026"; locale-aware (issue #114): "ago 2026" under
+ * `it`. */
 function monthLabel(month: string): string {
-  const [year, monthIndex] = month.split('-').map(Number)
-  return new Date(year, monthIndex - 1, 1).toLocaleDateString('en', {
-    month: 'short',
-    year: 'numeric',
-  })
+  return formatMonth(month)
 }
 
 /** The YYYY-MM month `count` months before `current`, e.g. monthsAgo("2026-08", 5). */

@@ -13,7 +13,7 @@ import { bumpDataVersion } from './api/dataVersion'
 vi.mock('./api', async () => {
   // The real display helpers stay live (formatting is part of the screens'
   // contract); only the resource calls are mocked.
-  const { formatEuros, formatSignedEuros } = await import('./api/format')
+  const { formatEuros, formatSignedEuros, formatMonth, formatShortMonth, formatLedgerDate, setLocale, getLocale } = await import('./api/format')
   class ApiError extends Error {
     status: number
 
@@ -45,6 +45,11 @@ vi.mock('./api', async () => {
         : fallback,
     formatEuros,
     formatSignedEuros,
+    formatMonth,
+    formatShortMonth,
+    formatLedgerDate,
+    setLocale,
+    getLocale,
     login: vi.fn(),
     fetchCurrentAccount: vi.fn(),
     fetchWallets: vi.fn(),
@@ -77,6 +82,8 @@ vi.mock('./api', async () => {
     updateRecurringIncome: vi.fn(),
     freezeRecurringIncome: vi.fn(),
     unfreezeRecurringIncome: vi.fn(),
+    fetchAccountLanguage: vi.fn().mockResolvedValue('en'),
+    updateAccountLanguage: vi.fn().mockResolvedValue(undefined),
   }
 })
 
@@ -90,11 +97,15 @@ import {
   fetchCategories,
   fetchDashboardSummary,
   fetchTrend,
+  fetchAccountLanguage,
   fetchRecurringCosts,
   fetchRecurringIncomes,
   fetchTransactions,
   fetchWallets,
+  updateAccountLanguage,
 } from './api'
+import { getLocale, setLocale } from './api/format'
+import { TOKEN_KEY } from './api'
 import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
 
 const fetchWalletsMock = vi.mocked(fetchWallets)
@@ -105,6 +116,8 @@ const fetchTrendMock = vi.mocked(fetchTrend)
 const fetchBudgetMock = vi.mocked(fetchBudget)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
+const fetchAccountLanguageMock = vi.mocked(fetchAccountLanguage)
+const updateAccountLanguageMock = vi.mocked(updateAccountLanguage)
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
@@ -151,6 +164,7 @@ function swipe(
 }
 
 beforeEach(() => {
+  fetchAccountLanguageMock.mockResolvedValue('en')
   fetchWalletsMock.mockResolvedValue([])
   fetchCategoriesMock.mockResolvedValue([])
   fetchRecurringCostsMock.mockResolvedValue([])
@@ -712,5 +726,56 @@ describe('AppShell recurring ledger jump (ADR-0026)', () => {
     expect(
       screen.getByRole('button', { name: 'Remove Salary filter' }),
     ).toBeInTheDocument()
+  })
+})
+
+describe('AppShell Locale (issue #114)', () => {
+  beforeEach(() => {
+    localStorage.setItem(TOKEN_KEY, 'test-token')
+  })
+
+  afterEach(() => {
+    localStorage.removeItem(TOKEN_KEY)
+    setLocale('en')
+  })
+
+  it('auto-detects an Italian browser and saves the locale via the API once', async () => {
+    // A first load with a stored 'en' locale and an Italian browser: the
+    // shell detects it, saves it, and switches display to it-IT.
+    const languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue('it-IT')
+    try {
+      await renderShell()
+      await waitFor(() =>
+        expect(updateAccountLanguageMock).toHaveBeenCalledWith('test-token', 'it'),
+      )
+      expect(getLocale()).toBe('it')
+    } finally {
+      languageSpy.mockRestore()
+    }
+  })
+
+  it('keeps en when the browser is not Italian', async () => {
+    const languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-GB')
+    try {
+      await renderShell()
+      // No write: the stored en is correct.
+      expect(updateAccountLanguageMock).not.toHaveBeenCalled()
+      expect(getLocale()).toBe('en')
+    } finally {
+      languageSpy.mockRestore()
+    }
+  })
+
+  it('uses the stored it locale as-is on subsequent loads', async () => {
+    fetchAccountLanguageMock.mockResolvedValue('it')
+    const languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-US')
+    try {
+      await renderShell()
+      await waitFor(() => expect(getLocale()).toBe('it'))
+      // Stored it: never overwritten by an English browser.
+      expect(updateAccountLanguageMock).not.toHaveBeenCalled()
+    } finally {
+      languageSpy.mockRestore()
+    }
   })
 })

@@ -17,6 +17,11 @@ vi.mock('./api', () => ({
   TOKEN_KEY: 'budjetame.token',
   PAGE_LIMIT: 50,
   formatEuros: (value: string) => `€${value}`,
+  formatMonth: (month: string) => month,
+  formatShortMonth: (month: string) => month,
+  formatLedgerDate: (date: string) => date,
+  setLocale: vi.fn(),
+  getLocale: () => 'en',
   ApiError: class ApiError extends Error {},
   apiErrorMessage: (cause: unknown) =>
     cause instanceof Error ? cause.message : 'Something went wrong.',
@@ -53,6 +58,8 @@ vi.mock('./api', () => ({
   createWallet: vi.fn(),
   renameWallet: vi.fn(),
   freezeWallet: vi.fn(),
+  fetchAccountLanguage: vi.fn().mockResolvedValue('en'),
+  updateAccountLanguage: vi.fn().mockResolvedValue(undefined),
 }))
 
 // The map picker is a separate seam (issue #27); this test is about tabs.

@@ -9,6 +9,7 @@ import {
   fetchTransactions,
   fetchWallets,
   formatEuros,
+  formatLedgerDate,
   TOKEN_KEY,
   undoTransaction,
   ApiError,
@@ -995,7 +996,7 @@ export function TransactionsScreen({
                           {transactionTitle(transaction, category)}
                         </span>
                         <span className="block truncate text-xs text-slate-500">
-                          {transaction.date} · {walletLabel}
+                          {formatLedgerDate(transaction.date)} · {walletLabel}
                           {locationSuffix(transaction)}
                         </span>
                       </span>

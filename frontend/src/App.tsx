@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account } from './api'
+import { fetchAccountLanguage, setLocale, TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account, updateAccountLanguage } from './api'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft, type ImportDraftController } from './importDraft'
@@ -63,7 +63,9 @@ function App() {
     setAuth({ kind: 'checking' })
     fetchCurrentAccount(token)
       .then((account) => {
-        if (!cancelled) setAuth({ kind: 'signedIn', account })
+        if (!cancelled) {
+          setAuth({ kind: 'signedIn', account })
+        }
       })
       .catch(() => {
         if (cancelled) return
@@ -183,6 +185,11 @@ export function AppShell({
   }
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // The Account's display Locale (issue #114): loaded from the API at sign-in
+  // and updated when the user changes it in Settings. The module-level
+  // setLocale() is kept in sync so every format helper sees the right locale.
+  const [locale, setLanguageState] = useState('en')
+  const autoDetectDone = useRef(false)
   // The Import Draft lives here, not in the Transactions screen, so it
   // survives tab switches (issue #43) — under keep-alive the screen never
   // unmounts, and the shell-owned draft is what it was from the start.
@@ -197,6 +204,47 @@ export function AppShell({
   // A newer request replaces an unconsumed one.
   const [pendingLedgerRequest, setPendingLedgerRequest] =
     useState<LedgerFilterRequest | null>(null)
+
+  /** Sync locale from account and auto-detect once on first load (issue #114).
+   *  On first session load, if the stored locale is 'en', check
+   *  navigator.language: if it starts with 'it', auto-set to 'it' and save. */
+  const syncLocale = useCallback(
+    (token: string, accountLang: string) => {
+      if (!autoDetectDone.current && accountLang === 'en') {
+        autoDetectDone.current = true
+        const browserLang = navigator.language
+        if (browserLang.startsWith('it')) {
+          updateAccountLanguage(token, 'it').catch(() => {})
+          setLocale('it')
+          setLanguageState('it')
+          return
+        }
+      }
+      const lang = accountLang === 'it' ? 'it' : 'en'
+      setLocale(lang)
+      setLanguageState(lang)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token === null) return
+    fetchAccountLanguage(token)
+      .then((lang) => syncLocale(token, lang))
+      .catch(() => {})
+  }, [syncLocale])
+
+  /** User changed the locale in Settings: save to the API and update UI. */
+  const handleChangeLanguage = async (language: 'en' | 'it') => {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token === null) return
+    try {
+      await updateAccountLanguage(token, language)
+    } catch { /* surface through the picker — keep the optimistic value */ }
+    setLocale(language)
+    setLanguageState(language)
+  }
 
   /** Send a ledger jump: hold the request pending and switch to the
    * Transactions tab — the screen applies it on first mount (initial
@@ -255,6 +303,8 @@ export function AppShell({
       {settingsOpen && (
         <SettingsModal
           email={email}
+          language={locale}
+          onChangeLanguage={handleChangeLanguage}
           onDeleteAccount={onDeleteAccount}
           onDeleted={onSignOut}
           onClose={() => setSettingsOpen(false)}

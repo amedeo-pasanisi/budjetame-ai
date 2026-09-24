@@ -174,7 +174,7 @@ describe('WalletsScreen sections (issue #47)', () => {
     // a positive Checking balance and a negative Credit Card balance.
     expect(
       rows(screen.getByRole('region', { name: 'Checking Accounts' }))[0],
-    ).toContain('+€1200.00')
+    ).toContain('+€1,200.00')
     expect(
       rows(screen.getByRole('region', { name: 'Credit Cards' }))[0],
     ).toContain('-€250.00')

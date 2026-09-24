@@ -65,13 +65,19 @@ class IntervalUnit(str, enum.Enum):
 class Account(Base):
     """A person's login identity and personal data space (ADR-0020): created
     by email+password registration or by a first Google sign-in (issue #81,
-    nullable password_hash). Every other table scopes to it."""
+    nullable password_hash). Every other table scopes to it.
+
+    Stores the display Locale (`en` or `it`), auto-detected from the browser
+    on first load and changeable in Settings. Wire formats, Export, and Backup
+    stay US-canonical regardless of locale (issue #114).
+    """
 
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    language: Mapped[str] = mapped_column(String(5), default="en")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

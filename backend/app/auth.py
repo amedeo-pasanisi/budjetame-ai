@@ -14,6 +14,7 @@ from app.schemas import (
     AuthConfigOut,
     ForgotPasswordRequest,
     GoogleSignInRequest,
+    LanguageUpdate,
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -196,3 +197,26 @@ def delete_me(
 @router.get("/me", response_model=AccountOut)
 def me(account: Account = Depends(get_current_account)) -> Account:
     return account
+
+
+@router.get("/me/language")
+def get_language(
+    account: Account = Depends(get_current_account),
+) -> dict[str, str]:
+    """The Account's display Locale (issue #114): `en` or `it`, stored on
+    the Account and served identically to every client."""
+    return {"language": account.language}
+
+
+@router.put("/me/language", status_code=204)
+def update_language(
+    payload: LanguageUpdate,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Set the Account's display Locale (issue #114). Accepted values:
+    `en` (English) or `it` (Italian). Cross-account isolation is the
+    same as every other endpoint: the bearer token scopes the write."""
+    account.language = payload.language
+    session.commit()
+    return Response(status_code=204)
