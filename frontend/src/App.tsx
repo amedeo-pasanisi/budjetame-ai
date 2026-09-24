@@ -308,6 +308,7 @@ export function AppShell({
           onDeleteAccount={onDeleteAccount}
           onDeleted={onSignOut}
           onClose={() => setSettingsOpen(false)}
+          onRestored={() => setSettingsOpen(false)}
         />
       )}
 

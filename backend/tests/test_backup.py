@@ -457,3 +457,179 @@ async def test_backup_export_has_attachment_headers(client: AsyncClient) -> None
     disposition = response.headers["content-disposition"]
     assert disposition.startswith('attachment; filename="')
     assert re.search(r'budjetame-backup-\d{4}-\d{2}-\d{2}\.xlsx"$', disposition)
+
+
+# --- Restore (issue #115) ----------------------------------------------------
+
+
+async def test_restore_requires_auth(client: AsyncClient) -> None:
+    """POST /backup/restore returns 401 without authentication."""
+    response = await client.post("/backup/restore")
+    assert response.status_code == 401
+
+
+async def test_restore_malformed_file_422(client: AsyncClient) -> None:
+    """A malformed or invalid file fails closed — nothing changes."""
+    token = await _login(client)
+    response = await client.post(
+        "/backup/restore",
+        files={"file": ("junk.xlsx", b"not an xlsx file", "application/octet-stream")},
+        headers=_auth(token),
+    )
+    assert response.status_code == 422
+    assert "detail" in response.json()
+
+
+async def test_restore_round_trip(client: AsyncClient) -> None:
+    """Export → restore → export lands on exactly the exported state."""
+    token = await _login(client)
+
+    # Create some data
+    wallet_name = _name("RT Wallet")
+    wallet = await _create_wallet(client, token, wallet_name, "250.00")
+    cat_name = _name("RT Category")
+    cat = await _create_category(client, token, cat_name, "expense")
+
+    await _create_transaction(
+        client, token,
+        type="expense", amount="42.50", date="2026-06-15",
+        wallet_id=wallet, category_id=cat, description="test restore",
+    )
+
+    # Export the current state
+    content1 = await _export_backup(client, token)
+
+    # Restore from it
+    response = await client.post(
+        "/backup/restore",
+        files={"file": ("backup.xlsx", content1, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+    # Export again
+    content2 = await _export_backup(client, token)
+
+    # The two workbooks should have the same data (same sheet structure,
+    # same rows minus the exported_at timestamp in Metadata)
+    cells1 = _cells(content1)
+    cells2 = _cells(content2)
+
+    # Compare every sheet except Metadata (exported_at differs)
+    # Exclude the last column (database id) from comparison:
+    # ids are auto-generated after restore and will differ.
+    for sheet_name in ["Transactions", "Wallets", "Categories",
+                        "Recurring Costs", "Recurring Incomes", "Skips"]:
+        assert [row[:-1] for row in cells1[sheet_name]] == [row[:-1] for row in cells2[sheet_name]], (
+            f"Sheet {sheet_name!r} differs after restore round-trip"
+        )
+
+    # Metadata: origin should match, exported_at differs
+    assert cells1["Metadata"][1] == cells2["Metadata"][1]  # same origin
+    assert cells1["Metadata"][2] != cells2["Metadata"][2]  # different timestamps
+async def test_restore_origin_mismatch_warns(client: AsyncClient) -> None:
+    """A backup whose origin doesn't match the signed-in Account warns but
+    can still proceed."""
+    token = await _login(client)
+    content = await _export_backup(client, token)
+
+    # Modify the origin in the Metadata sheet to simulate a mismatch
+    from io import BytesIO
+    from openpyxl import load_workbook
+    workbook = load_workbook(BytesIO(content))
+    meta = workbook["Metadata"]
+    for row in meta.iter_rows():
+        if row[0].value == "origin":
+            row[1].value = "different@email.com"
+            break
+    fake_content = BytesIO()
+    workbook.save(fake_content)
+    fake_content = fake_content.getvalue()
+
+    response = await client.post(
+        "/backup/restore",
+        files={"file": ("backup.xlsx", fake_content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "warning" in body
+    assert "different@email.com" in body["warning"]
+    assert SEED_EMAIL in body["warning"]
+
+
+async def test_restore_leaves_account_unchanged(client: AsyncClient) -> None:
+    """Restore leaves Account email, credentials, and Locale untouched."""
+    token = await _login(client)
+    content = await _export_backup(client, token)
+
+    response = await client.post(
+        "/backup/restore",
+        files={"file": ("backup.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+
+    # Account still exists (we can login with the same password)
+    response = await client.post(
+        "/auth/login",
+        json={"email": SEED_EMAIL, "password": SEED_PASSWORD},
+    )
+    assert response.status_code == 200
+    new_token = response.json()["access_token"]
+
+    # Check the account details
+    response = await client.get(
+        "/auth/me",
+        headers=_auth(new_token),
+    )
+    assert response.status_code == 200
+    me = response.json()
+    assert me["email"] == SEED_EMAIL
+    assert me["language"] == "en"  # default locale
+
+
+async def test_restore_empty_backup_clears_data(client: AsyncClient) -> None:
+    """Restoring an empty backup clears all data."""
+    token = await _login(client)
+
+    # Create some data first
+    wallet = await _create_wallet(client, token, _name("Pre Wallet"), "100.00")
+    cat = await _create_category(client, token, _name("Pre Cat"), "expense")
+    await _create_transaction(
+        client, token,
+        type="expense", amount="10.00", date="2026-07-01",
+        wallet_id=wallet, category_id=cat,
+    )
+
+    # Build an empty backup
+    from app.services.backup import build_backup_workbook
+    empty_content = build_backup_workbook(
+        transactions=[],
+        wallets=[],
+        categories=[],
+        recurring_costs=[],
+        recurring_incomes=[],
+        skips=[],
+        origin=SEED_EMAIL,
+    )
+
+    response = await client.post(
+        "/backup/restore",
+        files={"file": ("backup.xlsx", empty_content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+
+    # After restore, the account should have no data
+    content_after = await _export_backup(client, token)
+    cells_after = _cells(content_after)
+    # Only headers, no data rows
+    assert len(cells_after["Transactions"]) == 1  # just header
+    assert len(cells_after["Wallets"]) == 1  # just header
+    assert len(cells_after["Categories"]) == 1  # just header
+    assert len(cells_after["Recurring Costs"]) == 1  # just header
+    assert len(cells_after["Recurring Incomes"]) == 1  # just header
+    assert len(cells_after["Skips"]) == 1  # just header

@@ -1,17 +1,22 @@
 /** The settings modal (issue #84): shows the signed-in Account, closes
  * cleanly, hosts the Export all backup action, and hosts the Delete account
- * action with its own confirm step. */
+ * action with its own confirm step. Also hosts the Restore from backup flow
+ * (issue #115). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { TOKEN_KEY } from './api'
 import { SettingsModal } from './SettingsModal'
 
-// Mock the entire ./api module so exportBackup is a spy that can be
-// configured per-test. The actual TOKEN_KEY is kept for localStorage.
+// Mock the entire ./api module so exportBackup and restoreBackup are spies
+// that can be configured per-test. The actual TOKEN_KEY is kept for localStorage.
 vi.mock('./api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api')>()
-  return { ...actual, exportBackup: vi.fn() }
+  return {
+    ...actual,
+    exportBackup: vi.fn(),
+    restoreBackup: vi.fn(),
+  }
 })
 
 const renderModal = (
@@ -35,6 +40,13 @@ const renderModal = (
       {...overrides}
     />,
   )
+
+/** Helper to select a file via the hidden input. */
+async function selectFile(file: File) {
+  const input = screen.getByLabelText('Restore from backup…').querySelector('input[type="file"]')
+  if (!input) throw new Error('File input not found')
+  fireEvent.change(input, { target: { files: [file] } })
+}
 
 describe('SettingsModal (issue #84)', () => {
   beforeEach(() => {
@@ -127,5 +139,109 @@ describe('SettingsModal (issue #84)', () => {
 
     expect(createObjectURL).toHaveBeenCalled()
     expect(clickSpy).toHaveBeenCalled()
+  })
+
+  // --- Restore flow (issue #115) ---
+
+  it('shows the Restore from backup… action', () => {
+    renderModal()
+
+    expect(screen.getByText('Restore from backup…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Choose file…' })).toBeInTheDocument()
+  })
+
+  it('shows the confirmation step after picking a file', () => {
+    renderModal()
+
+    const button = screen.getByRole('button', { name: 'Choose file…' })
+    fireEvent.click(button)
+
+    // The file input should be triggered via click
+    // We simulate file selection directly
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error('File input not found')
+    fireEvent.change(input, { target: { files: [new File(['fake-content'], 'backup.xlsx')] } })
+
+    // Now the confirmation step should be shown
+    expect(screen.getByRole('heading', { name: 'Restore from backup' })).toBeInTheDocument()
+    expect(screen.getByText(/This will replace all/, { exact: false })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export current state first' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Restore from backup' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+  })
+
+  it('calls restoreBackup on confirm and shows success', async () => {
+    const { restoreBackup } = await import('./api')
+    ;(restoreBackup as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'ok' })
+
+    renderModal()
+
+    // Pick a file
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error('File input not found')
+    fireEvent.change(input, { target: { files: [new File(['fake-content'], 'backup.xlsx')] } })
+
+    // Confirm restore
+    fireEvent.click(screen.getByRole('button', { name: 'Restore from backup' }))
+
+    await waitFor(() => {
+      expect(restoreBackup).toHaveBeenCalled()
+    })
+
+    // Success screen
+    expect(screen.getByText('Restore complete')).toBeInTheDocument()
+    expect(screen.getByText(/replaced with the backup/)).toBeInTheDocument()
+  })
+
+  it('shows warning on origin mismatch and can dismiss', async () => {
+    const { restoreBackup } = await import('./api')
+    ;(restoreBackup as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ok',
+      warning: 'Backup was exported from different@email.com',
+    })
+
+    renderModal()
+
+    // Pick a file
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error('File input not found')
+    fireEvent.change(input, { target: { files: [new File(['fake-content'], 'backup.xlsx')] } })
+
+    // Confirm restore
+    fireEvent.click(screen.getByRole('button', { name: 'Restore from backup' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Origin mismatch')).toBeInTheDocument()
+    })
+
+    // Warning text shown
+    expect(screen.getByText(/different@email/)).toBeInTheDocument()
+
+    // Dismiss
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    // Now the done screen
+    expect(screen.getByText('Restore complete')).toBeInTheDocument()
+  })
+
+  it('shows error on failed restore', async () => {
+    const { restoreBackup } = await import('./api')
+    ;(restoreBackup as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Invalid file format'))
+
+    renderModal()
+
+    // Pick a file
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error('File input not found')
+    fireEvent.change(input, { target: { files: [new File(['bad-content'], 'backup.xlsx')] } })
+
+    // Confirm restore
+    fireEvent.click(screen.getByRole('button', { name: 'Restore from backup' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Restore failed')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('Invalid file format')).toBeInTheDocument()
   })
 })

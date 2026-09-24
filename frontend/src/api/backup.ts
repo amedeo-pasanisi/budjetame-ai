@@ -25,3 +25,22 @@ export async function exportBackup(token: string): Promise<BackupFile> {
     filename: exportFilename(response.headers.get('content-disposition')),
   }
 }
+
+/** Restore the Account's data from an uploaded backup workbook (issue #115).
+ * Returns the response JSON (status, optional warning). */
+export async function restoreBackup(
+  token: string,
+  file: Blob,
+): Promise<{ status: string; warning?: string }> {
+  const formData = new FormData()
+  formData.append('file', file, 'budjetame-backup.xlsx')
+  const response = await request('/backup/restore', {
+    method: 'POST',
+    token,
+    formData,
+    errorMessage: 'Could not restore backup',
+    readDetail: true,
+  })
+  const data = await response.json() as { status: string; warning?: string }
+  return data
+}

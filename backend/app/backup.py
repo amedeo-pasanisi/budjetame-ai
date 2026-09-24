@@ -7,7 +7,7 @@ key references to names, and passes the resolved data to the pure builder.
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.services.backup import (
     BackupTransaction,
     BackupWallet,
     build_backup_workbook,
+    restore_from_backup,
 )
 
 router = APIRouter(prefix="/backup", tags=["backup"])
@@ -50,26 +51,25 @@ def export_backup(
     are carried for reference. The origin marker is the Account's email."""
     account_id = account.id
 
-    # --- Resolve Wallet id → name for reference lookups ---
+    # --- Resolve Wallet id to name for reference lookups ---
     wallets_list = session.scalars(
         select(Wallet).where(Wallet.account_id == account_id)
     ).all()
     wallet_names: dict[int, str] = {w.id: w.name for w in wallets_list}
-    wallet_types: dict[int, str] = {w.id: w.type for w in wallets_list}
 
-    # --- Resolve Category id → name ---
+    # --- Resolve Category id to name ---
     categories_list = session.scalars(
         select(Category).where(Category.account_id == account_id)
     ).all()
     category_names: dict[int, str] = {c.id: c.name for c in categories_list}
 
-    # --- Resolve Recurring Cost id → name ---
+    # --- Resolve Recurring Cost id to name ---
     recurring_costs_list = session.scalars(
         select(RecurringCost).where(RecurringCost.account_id == account_id)
     ).all()
     recurring_cost_names: dict[int, str] = {rc.id: rc.name for rc in recurring_costs_list}
 
-    # --- Resolve Recurring Income id → name ---
+    # --- Resolve Recurring Income id to name ---
     recurring_incomes_list = session.scalars(
         select(RecurringIncome).where(RecurringIncome.account_id == account_id)
     ).all()
@@ -199,3 +199,21 @@ def export_backup(
         media_type=BACKUP_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/restore")
+def restore_backup(
+    file: UploadFile = File(...),
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    """Restore the Account's data from an uploaded backup workbook (issue
+    #115, ADR-0030). Validates the file fully before atomically replacing
+    all data. Returns a warning when the origin marker doesn't match."""
+    content = file.file.read()
+    result = restore_from_backup(
+        session,
+        account=account,
+        content=content,
+    )
+    return result
