@@ -7,6 +7,7 @@ from app.config import settings
 from app.dashboard import router as dashboard_router
 from app.db import check_connection, create_db_engine
 from app.google_auth import GoogleIdTokenVerifier, GoogleVerifier
+from app.backup import router as backup_router
 from app.imports import router as imports_router
 from app.mailer import LoggingMailer, Mailer, SmtpMailer
 from app.recurring_costs import router as recurring_costs_router
@@ -72,6 +73,7 @@ def create_app(
     app.include_router(imports_router)
     app.include_router(recurring_costs_router)
     app.include_router(recurring_incomes_router)
+    app.include_router(backup_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

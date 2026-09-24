@@ -79,6 +79,11 @@ export {
 } from './imports'
 
 export {
+  type BackupFile,
+  exportBackup,
+} from './backup'
+
+export {
   type IntervalUnit,
   type RecurringCost,
   type RecurringCostInput,

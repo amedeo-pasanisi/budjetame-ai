@@ -1,9 +1,18 @@
 /** The settings modal (issue #84): shows the signed-in Account, closes
- * cleanly, and hosts the Delete account action with its own confirm step. */
-import { describe, expect, it, vi } from 'vitest'
+ * cleanly, hosts the Export all backup action, and hosts the Delete account
+ * action with its own confirm step. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
+import { TOKEN_KEY } from './api'
 import { SettingsModal } from './SettingsModal'
+
+// Mock the entire ./api module so exportBackup is a spy that can be
+// configured per-test. The actual TOKEN_KEY is kept for localStorage.
+vi.mock('./api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./api')>()
+  return { ...actual, exportBackup: vi.fn() }
+})
 
 const renderModal = (
   overrides: Partial<{
@@ -24,12 +33,26 @@ const renderModal = (
   )
 
 describe('SettingsModal (issue #84)', () => {
+  beforeEach(() => {
+    localStorage.setItem(TOKEN_KEY, 'test-token')
+  })
+
+  afterEach(() => {
+    localStorage.removeItem(TOKEN_KEY)
+  })
+
   it('shows the signed-in email and the delete action', () => {
     renderModal()
 
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByText('owner@example.com')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Delete account' })).toBeInTheDocument()
+  })
+
+  it('shows the Export all action', () => {
+    renderModal()
+
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeInTheDocument()
   })
 
   it('closes from the X button', () => {
@@ -51,5 +74,35 @@ describe('SettingsModal (issue #84)', () => {
 
     await waitFor(() => expect(onDeleteAccount).toHaveBeenCalled())
     expect(onDeleted).toHaveBeenCalled()
+  })
+
+  it('triggers a backup download when clicking Export all', async () => {
+    // Get the mocked exportBackup, configure its resolved value
+    const { exportBackup } = await import('./api')
+    ;(exportBackup as ReturnType<typeof vi.fn>).mockResolvedValue({
+      blob: new Blob(['fake-workbook']),
+      filename: 'budjetame-backup-2026-07-15.xlsx',
+    })
+
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
+    const clickSpy = vi.fn()
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => {
+      const el = originalCreateElement(tag)
+      if (tag === 'a') {
+        el.click = clickSpy
+      }
+      return el
+    })
+
+    renderModal()
+    fireEvent.click(screen.getByRole('button', { name: 'Export all' }))
+
+    await waitFor(() => {
+      expect(exportBackup).toHaveBeenCalledWith('test-token')
+    })
+
+    expect(createObjectURL).toHaveBeenCalled()
+    expect(clickSpy).toHaveBeenCalled()
   })
 })
