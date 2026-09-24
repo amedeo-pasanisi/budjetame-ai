@@ -50,7 +50,9 @@ type TransactionFormProps = {
   recurringIncomes: RecurringIncome[]
   editing: Transaction | null
   onSaved: (transaction: Transaction) => void
-  onDeleted: (warning: boolean) => void
+  /** Called with the full Transaction after a successful single-tap delete
+   * (ADR-0031). The screen uses it to populate the undo buffer. */
+  onDeleted: (deleted: Transaction) => void
   onCancel: () => void
   /** Inline entity creation (ADR-0013): opens the Category create modal
    * hosted by the screen, locked to the transaction's current type —
@@ -323,7 +325,6 @@ export function TransactionForm({
   // live, never on blur.
   const [errors, setErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const isEditing = editing !== null
   const isTransfer = type === 'transfer'
@@ -526,16 +527,12 @@ export function TransactionForm({
     if (editing === null) {
       return
     }
-    if (!confirmingDelete) {
-      setConfirmingDelete(true)
-      return
-    }
     setSubmitting(true)
     setError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
-      const result = await deleteTransaction(token, editing.id)
-      onDeleted(result.warning)
+      await deleteTransaction(token, editing.id)
+      onDeleted(editing)
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -853,13 +850,9 @@ export function TransactionForm({
           type="button"
           onClick={handleDelete}
           disabled={submitting}
-          className={`w-full rounded-lg border px-4 py-2 text-sm font-medium ${
-            confirmingDelete
-              ? 'border-red-600 bg-red-600 text-white'
-              : 'border-red-200 text-red-600'
-          }`}
+          className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:border-red-300 hover:bg-red-50"
         >
-          {submitting ? 'Deleting…' : confirmingDelete ? 'Tap again to confirm' : 'Delete transaction'}
+          {submitting ? 'Deleting…' : 'Delete transaction'}
         </button>
       )}
     </form>

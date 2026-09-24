@@ -883,7 +883,6 @@ describe('TransactionsScreen search (issue #54)', () => {
 
     fireEvent.click(screen.getByText('Coffee'))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete transaction' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Tap again to confirm' }))
     await waitFor(() => expect(deleteTransactionMock).toHaveBeenCalled())
 
     await waitFor(() =>

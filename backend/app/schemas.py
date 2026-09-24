@@ -850,3 +850,81 @@ class TransactionDeleteOut(BaseModel):
 
     warning: bool
 
+
+class TransactionUndoRequest(BaseModel):
+    """The full Transaction payload the client kept after delete, sent back
+    to re-insert the very same Transaction — same id, same recurring pin
+    (ADR-0031). The server re-inserts with the original id and re-syncs
+    the Postgres sequence so future auto-generated ids never collide.
+
+    `place_name`/`place_id` follow the same contract as TransactionCreate.
+    `occurrence_date` is the original Occurrence pin, restored exactly so
+    the undo of a linked Transaction pays the same Occurrence the original
+    paid — and fails with a specific message when that Occurrence was
+    already paid by another Transaction in the window.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: int
+    type: Literal["expense", "income", "transfer"]
+    amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
+    date: str
+    wallet_id: int | None = None
+    source_wallet_id: int | None = None
+    destination_wallet_id: int | None = None
+    category_id: int | None = None
+    recurring_cost_id: int | None = None
+    recurring_income_id: int | None = None
+    occurrence_date: str | None = None
+    description: str | None = Field(default=None, max_length=500)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+    place_name: str | None = Field(
+        default=None, min_length=1, max_length=_MAX_PLACE_LENGTH
+    )
+    place_id: str | None = Field(
+        default=None, min_length=1, max_length=_MAX_PLACE_LENGTH
+    )
+
+    @field_validator("date")
+    @classmethod
+    def _date_is_a_rome_day(cls, value: str) -> str:
+        return _valid_rome_day(value)
+
+    @field_validator("occurrence_date")
+    @classmethod
+    def _occurrence_date_is_a_rome_day(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _valid_rome_day(value)
+
+    @model_validator(mode="after")
+    def _location_is_a_pair(self) -> "TransactionUndoRequest":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be set together")
+        return self
+
+    @model_validator(mode="after")
+    def _fields_match_the_type(self) -> "TransactionUndoRequest":
+        if self.type == "transfer":
+            if self.wallet_id is not None or self.category_id is not None:
+                raise ValueError(
+                    "Transfers use source and destination Wallets and never "
+                    "carry a Category"
+                )
+            if self.source_wallet_id is None or self.destination_wallet_id is None:
+                raise ValueError("Transfers need source and destination Wallets")
+        else:
+            if self.wallet_id is None:
+                raise ValueError("wallet_id is required for Expense and Income")
+            if self.source_wallet_id is not None or self.destination_wallet_id is not None:
+                raise ValueError(
+                    "source and destination Wallets are only for Transfers"
+                )
+            if self.type == "income" and self.recurring_cost_id is not None:
+                raise ValueError("Only Expenses can be linked to a Recurring Cost")
+            if self.type == "expense" and self.recurring_income_id is not None:
+                raise ValueError("Only Incomes can be linked to a Recurring Income")
+        return self
+

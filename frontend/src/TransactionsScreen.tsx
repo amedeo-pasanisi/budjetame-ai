@@ -10,6 +10,7 @@ import {
   fetchWallets,
   formatEuros,
   TOKEN_KEY,
+  undoTransaction,
   ApiError,
   type Category,
   type RecurringCost,
@@ -27,6 +28,14 @@ import { RecurringCostModal } from './RecurringCostModal'
 import { RecurringIncomeModal } from './RecurringIncomeModal'
 import { TransactionModal } from './TransactionModal'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
+import { UndoToastStack } from './UndoToastStack'
+import {
+  clearStack,
+  expireEntries,
+  pushEntry,
+  removeEntry,
+  type UndoEntry,
+} from './undoStack'
 import { WalletModal } from './WalletModal'
 import { signedAmount, locationSuffix, transactionTitle } from './transactions'
 
@@ -123,6 +132,9 @@ export function TransactionsScreen({
   const [recurringIncomeToSelect, setRecurringIncomeToSelect] = useState<number | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
+  // The undo stack (ADR-0031): in-memory buffer of deleted Transactions
+  // waiting for a 10-second undo window. Newest first; max 3.
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
   // then the whole toolbar row hides (issue #92) — there is nothing to
   // search or filter.
@@ -594,11 +606,42 @@ export function TransactionsScreen({
     setSavedWarning(transaction.warning ? 'Saved — this made a Cash wallet negative.' : null)
   }
 
-  const handleDeleted = (warning: boolean) => {
+  const handleDeleted = (deleted: Transaction) => {
     closeForm()
+    // Push the deleted Transaction onto the undo stack (ADR-0031)
+    // The reload happens after the undo buffer state is updated.
+    setUndoStack((current) => pushEntry(current, deleted, Date.now()).stack)
     reload()
-    setSavedWarning(warning ? 'Deleted — this made a Cash wallet negative.' : null)
+    setSavedWarning(null)
   }
+
+  // Undo a deletion (ADR-0031): call the undo endpoint, then reload.
+  const handleUndo = async (entry: UndoEntry) => {
+    const token = localStorage.getItem(TOKEN_KEY) ?? ''
+    try {
+      await undoTransaction(token, entry.transaction)
+      setUndoStack((current) => removeEntry(current, entry.transaction.id))
+      reload()
+    } catch {
+      // Undo failed (e.g. pin already taken or network error); remove
+      // from the stack so the toast disappears.
+      setUndoStack((current) => removeEntry(current, entry.transaction.id))
+      reload()
+    }
+  }
+
+  // Dismiss an undo entry (expiry or manual ✕).
+  const handleDismissUndo = (transactionId: number) => {
+    setUndoStack((current) => removeEntry(current, transactionId))
+  }
+
+  // Periodically expire entries that have outlived their window.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setUndoStack((current) => expireEntries(current, Date.now()).stack)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   // Clear all filters (panel footer, issue #92): resets the five panel
   // filters only — the search box keeps its text. The existing
@@ -1044,6 +1087,12 @@ export function TransactionsScreen({
           }}
         />
       )}
+
+      <UndoToastStack
+        stack={undoStack}
+        onUndo={handleUndo}
+        onDismiss={handleDismissUndo}
+      />
     </>
   )
 }

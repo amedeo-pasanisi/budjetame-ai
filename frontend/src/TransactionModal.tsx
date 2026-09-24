@@ -16,7 +16,9 @@ type TransactionModalProps = {
   recurringIncomes: RecurringIncome[]
   editing: Transaction | null
   onSaved: (transaction: Transaction) => void
-  onDeleted: (warning: boolean) => void
+  /** Called with the deleted Transaction after a successful single-tap delete
+   * (ADR-0031). The screen pushes it into the undo buffer. */
+  onDeleted: (deleted: Transaction) => void
   onClose: () => void
   /** Inline entity creation (ADR-0013): opens the Category create modal
    * hosted by the screen, locked to the transaction's current type. */

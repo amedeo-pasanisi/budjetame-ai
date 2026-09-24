@@ -18,9 +18,10 @@ a Transfer never carries a link (ADR-0010/0011) — except one crossing exactly 
 Transfer whose destination is a Contact Wallet may pin a Recurring Cost.
 """
 
+from datetime import date as DateObj, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.dates import from_rome_day
@@ -582,3 +583,203 @@ def delete_transaction(session: Session, transaction: Transaction) -> None:
     _ensure_transaction_wallets_writable(session, transaction)
     session.delete(transaction)
     session.commit()
+
+
+def undo_transaction(
+    session: Session,
+    account_id: int,
+    *,
+    transaction_id: int,
+    type: str,
+    amount: Decimal,
+    date: str,
+    wallet_id: int | None = None,
+    source_wallet_id: int | None = None,
+    destination_wallet_id: int | None = None,
+    category_id: int | None = None,
+    recurring_cost_id: int | None = None,
+    recurring_income_id: int | None = None,
+    occurrence_date: str | None = None,
+    description: str | None = None,
+    latitude: Decimal | None = None,
+    longitude: Decimal | None = None,
+    place_name: str | None = None,
+    place_id: str | None = None,
+) -> Transaction:
+    """Re-insert a deleted Transaction with its original id (ADR-0031).
+
+    Steps:
+    1. Validate ownership of referenced entities (Wallet, Category,
+       Recurring Cost/Income).
+    2. Check that the target id is not already taken.
+    3. If carrying a recurring pin, verify the pinned Occurrence is still
+       unpaid (not paid by another Transaction).
+    4. Lock the touched Wallets, re-insert with the original id via raw SQL,
+       and re-sync the Postgres sequence so future auto_ids never collide.
+
+    Raises NotOwned (→ 403) for missing or foreign entities.
+    Raises TransactionRuleError (→ 422) for pin-taken or id-collision.
+    """
+    # Resolve and validate Wallet(s)
+    if type == TransactionType.TRANSFER.value:
+        if source_wallet_id is None or destination_wallet_id is None:
+            raise TransactionRuleError("Transfers need source and destination Wallets")
+        source = owned_or_raise(session, Wallet, account_id, source_wallet_id)
+        destination = owned_or_raise(session, Wallet, account_id, destination_wallet_id)
+        if source.id == destination.id:
+            raise TransactionRuleError(
+                "Source and Destination must be different Wallets"
+            )
+        for w in (source, destination):
+            _ensure_wallet_writable(w)
+        wallet_ids = sorted([source.id, destination.id])
+    else:
+        if wallet_id is None:
+            raise TransactionRuleError("wallet_id is required for Expense and Income")
+        wallet = owned_or_raise(session, Wallet, account_id, wallet_id)
+        _ensure_wallet_writable(wallet)
+        wallet_ids = [wallet.id]
+
+    if category_id is not None:
+        owned_or_raise(session, Category, account_id, category_id)
+
+    # Validate recurring pin — check the pinned Occurrence is still free
+    if recurring_cost_id is not None:
+        cost = owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
+        if cost.frozen:
+            raise TransactionRuleError(
+                "A frozen recurring cost cannot accept new links"
+            )
+        if occurrence_date is not None:
+            od = DateObj.fromisoformat(occurrence_date)
+            existing = session.scalar(
+                select(Transaction).where(
+                    Transaction.recurring_cost_id == recurring_cost_id,
+                    Transaction.occurrence_date == od,
+                    Transaction.id != transaction_id,
+                )
+            )
+            if existing is not None:
+                raise TransactionRuleError(
+                    "This Occurrence was already paid by another Transaction"
+                )
+
+    if recurring_income_id is not None:
+        income = owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
+        if income.frozen:
+            raise TransactionRuleError(
+                "A frozen recurring income cannot accept new links"
+            )
+        if occurrence_date is not None:
+            od = DateObj.fromisoformat(occurrence_date)
+            existing = session.scalar(
+                select(Transaction).where(
+                    Transaction.recurring_income_id == recurring_income_id,
+                    Transaction.occurrence_date == od,
+                    Transaction.id != transaction_id,
+                )
+            )
+            if existing is not None:
+                raise TransactionRuleError(
+                    "This Occurrence was already paid by another Transaction"
+                )
+
+    # Lock wallets in ascending id order
+    _locked_wallets(session, *wallet_ids)
+
+    # Check id not already taken
+    if session.get(Transaction, transaction_id) is not None:
+        raise TransactionRuleError("Transaction id already exists")
+
+    # Re-insert with explicit id via raw SQL
+    rome_dt = from_rome_day(date)
+    occurrence_dt: DateObj | None = DateObj.fromisoformat(occurrence_date) if occurrence_date else None
+
+    if type == TransactionType.TRANSFER.value:
+        session.execute(
+            text(
+                """INSERT INTO transactions (
+                    id, account_id, type, amount, date,
+                    source_wallet_id, destination_wallet_id,
+                    category_id, recurring_cost_id, recurring_income_id,
+                    occurrence_date, description,
+                    latitude, longitude, place_name, place_id,
+                    created_at
+                ) VALUES (
+                    :id, :account_id, :type, :amount, :date,
+                    :source_wallet_id, :destination_wallet_id,
+                    :category_id, :recurring_cost_id, :recurring_income_id,
+                    :occurrence_date, :description,
+                    :latitude, :longitude, :place_name, :place_id,
+                    NOW()
+                )"""
+            ),
+            {
+                "id": transaction_id,
+                "account_id": account_id,
+                "type": type,
+                "amount": amount,
+                "date": rome_dt,
+                "source_wallet_id": source_wallet_id,
+                "destination_wallet_id": destination_wallet_id,
+                "category_id": category_id,
+                "recurring_cost_id": recurring_cost_id,
+                "recurring_income_id": recurring_income_id,
+                "occurrence_date": occurrence_dt,
+                "description": description,
+                "latitude": latitude,
+                "longitude": longitude,
+                "place_name": place_name,
+                "place_id": place_id,
+            },
+        )
+    else:
+        session.execute(
+            text(
+                """INSERT INTO transactions (
+                    id, account_id, type, amount, date,
+                    wallet_id, category_id, recurring_cost_id,
+                    recurring_income_id, occurrence_date, description,
+                    latitude, longitude, place_name, place_id,
+                    created_at
+                ) VALUES (
+                    :id, :account_id, :type, :amount, :date,
+                    :wallet_id, :category_id, :recurring_cost_id,
+                    :recurring_income_id, :occurrence_date, :description,
+                    :latitude, :longitude, :place_name, :place_id,
+                    NOW()
+                )"""
+            ),
+            {
+                "id": transaction_id,
+                "account_id": account_id,
+                "type": type,
+                "amount": amount,
+                "date": rome_dt,
+                "wallet_id": wallet_id,
+                "category_id": category_id,
+                "recurring_cost_id": recurring_cost_id,
+                "recurring_income_id": recurring_income_id,
+                "occurrence_date": occurrence_dt,
+                "description": description,
+                "latitude": latitude,
+                "longitude": longitude,
+                "place_name": place_name,
+                "place_id": place_id,
+            },
+        )
+
+    # Re-sync the sequence: set to max(id) so future auto-generated ids
+    # never collide with the restored id
+    session.execute(
+        text(
+            "SELECT setval(pg_get_serial_sequence('transactions', 'id'), "
+            "COALESCE((SELECT MAX(id) FROM transactions), 1))"
+        )
+    )
+
+    session.commit()
+
+    restored = session.get(Transaction, transaction_id)
+    assert restored is not None
+    return restored

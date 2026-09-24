@@ -25,6 +25,7 @@ from app.schemas import (
     TransactionDeleteOut,
     TransactionOut,
     TransactionPage,
+    TransactionUndoRequest,
     TransactionUpdate,
     fmt_coord,
 )
@@ -502,3 +503,57 @@ def delete_transaction(
     except transaction_service.TransactionRuleError as error:
         raise HTTPException(status_code=422, detail=str(error))
     return TransactionDeleteOut(warning=_delete_warning(session, account, transaction))
+
+
+@router.post("/undo", response_model=TransactionOut, status_code=201)
+def undo_transaction(
+    payload: TransactionUndoRequest,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> TransactionOut:
+    """Re-insert a deleted Transaction with its original id (ADR-0031).
+
+    The client keeps the full Transaction row after deleting (the DELETE
+    response already returns TransactionDeleteOut — the client holds the
+    former Transaction row from its buffer) and sends it back here.
+    The server re-inserts with the original id, re-syncs the Postgres
+    sequence so future auto-generated ids never collide, and restores
+    the original recurring pin — failing with 422 when the pinned
+    Occurrence was already paid by another Transaction.
+
+    Foreign or missing referenced entities answer 403 (ADR-0003).
+    """
+    try:
+        transaction = transaction_service.undo_transaction(
+            session,
+            account.id,
+            transaction_id=payload.id,
+            type=payload.type,
+            amount=payload.amount,
+            date=payload.date,
+            wallet_id=payload.wallet_id,
+            source_wallet_id=payload.source_wallet_id,
+            destination_wallet_id=payload.destination_wallet_id,
+            category_id=payload.category_id,
+            recurring_cost_id=payload.recurring_cost_id,
+            recurring_income_id=payload.recurring_income_id,
+            occurrence_date=payload.occurrence_date,
+            description=payload.description,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            place_name=payload.place_name,
+            place_id=payload.place_id,
+        )
+    except scoping.NotOwned:
+        raise HTTPException(
+            status_code=403,
+            detail="Transaction not found",
+        )
+    except transaction_service.TransactionRuleError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    return _transaction_out(
+        session,
+        account,
+        transaction,
+        warning=_write_warning(session, account, transaction),
+    )

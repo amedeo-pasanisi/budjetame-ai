@@ -50,6 +50,7 @@ export {
   deleteTransaction,
   exportTransactions,
   fetchTransactions,
+  undoTransaction,
   updateTransaction,
 } from './transactions'
 

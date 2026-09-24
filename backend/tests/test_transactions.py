@@ -2240,3 +2240,309 @@ async def test_list_returns_a_well_formed_cursor_round_trip(
     )
     assert [t["date"] for t in second["items"]] == ["2026-08-01"]
     assert second["next_cursor"] is None
+
+
+# --- Undo: client replay with id preservation (ADR-0031) ---
+
+
+async def _create_recurring_cost(
+    client: AsyncClient, token: str, name: str = "Cost", start_date: str = "2030-03-01"
+) -> int:
+    """A monthly Recurring Cost starting 2030-03-01 — the same stable
+    Occurrence sequence the link tests use."""
+    response = await client.post(
+        "/recurring-costs",
+        json={
+            "name": name,
+            "amount": "100.00",
+            "interval_value": 1,
+            "interval_unit": "months",
+            "start_date": start_date,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_undo_restores_the_same_transaction_with_its_id(
+    client: AsyncClient,
+) -> None:
+    """The full round-trip: create, delete, undo — the re-inserted row has the
+    same id and all the same fields as the original, and the listing shows it
+    under its original date."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Undo Wallet", "checking", "100.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "25.00",
+            "date": "2026-08-15",
+            "wallet_id": wallet_id,
+            "description": "Undo test expense",
+        },
+        headers=_auth(token),
+    )
+    assert created.status_code == 201
+    original = created.json()
+
+    delete = await client.delete(
+        f"/transactions/{original['id']}", headers=_auth(token)
+    )
+    assert delete.status_code == 200
+    assert await _wallet_balance(client, token, wallet_id) == "100.00"
+
+    # Undo with the same payload the client would keep
+    undo = await client.post(
+        "/transactions/undo",
+        json={
+            "id": original["id"],
+            "type": original["type"],
+            "amount": original["amount"],
+            "date": original["date"],
+            "wallet_id": original["wallet_id"],
+            "source_wallet_id": original["source_wallet_id"],
+            "destination_wallet_id": original["destination_wallet_id"],
+            "category_id": original["category_id"],
+            "recurring_cost_id": original["recurring_cost_id"],
+            "recurring_income_id": original["recurring_income_id"],
+            "occurrence_date": original["occurrence_date"],
+            "description": original["description"],
+            "latitude": original["latitude"],
+            "longitude": original["longitude"],
+            "place_name": original["place_name"],
+            "place_id": original["place_id"],
+        },
+        headers=_auth(token),
+    )
+    assert undo.status_code == 201
+    restored = undo.json()
+
+    # Same id, same fields
+    assert restored["id"] == original["id"]
+    assert restored["type"] == original["type"]
+    assert restored["amount"] == original["amount"]
+    assert restored["date"] == original["date"]
+    assert restored["wallet_id"] == original["wallet_id"]
+    assert restored["description"] == original["description"]
+    assert await _wallet_balance(client, token, wallet_id) == "75.00"
+
+    # Shows in the ledger under its original date
+    listed = await _list_all(client, token)
+    assert any(t["id"] == original["id"] and t["date"] == original["date"] for t in listed)
+
+
+async def test_undo_re_syncs_sequence_so_new_creates_dont_collide(
+    client: AsyncClient,
+) -> None:
+    """After undoing a deleted Transaction with an explicit id, a subsequent
+    create gets a fresh auto-generated id with no collision."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Undo Sequence Wallet", "checking", "100.00")
+    created = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "10.00",
+            "date": "2026-08-01",
+            "wallet_id": wallet_id,
+        },
+        headers=_auth(token),
+    )
+    assert created.status_code == 201
+    original_id = created.json()["id"]
+
+    await client.delete(f"/transactions/{original_id}", headers=_auth(token))
+
+    # Undo restores with the original id
+    undo = await client.post(
+        "/transactions/undo",
+        json={
+            "id": original_id,
+            "type": "expense",
+            "amount": "10.00",
+            "date": "2026-08-01",
+            "wallet_id": wallet_id,
+            "source_wallet_id": None,
+            "destination_wallet_id": None,
+            "category_id": None,
+            "recurring_cost_id": None,
+            "recurring_income_id": None,
+            "occurrence_date": None,
+            "description": None,
+            "latitude": None,
+            "longitude": None,
+            "place_name": None,
+            "place_id": None,
+        },
+        headers=_auth(token),
+    )
+    assert undo.status_code == 201
+
+    # A new create gets a distinct id (no collision)
+    new_tx = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "20.00",
+            "date": "2026-08-02",
+            "wallet_id": wallet_id,
+        },
+        headers=_auth(token),
+    )
+    assert new_tx.status_code == 201
+    assert new_tx.json()["id"] != original_id
+
+
+async def test_undo_restores_recurring_pin_and_fails_when_occurrence_taken(
+    client: AsyncClient,
+) -> None:
+    """Undo restores the original recurring_cost_id + occurrence_date. If
+    another Transaction paid that Occurrence within the window, the undo
+    fails with a specific message rather than silently re-linking to a
+    different Occurrence."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Undo Pin Wallet", "checking", "100.00")
+    cost_id = await _create_recurring_cost(client, token, "Undo Pin Cost", "2030-03-01")
+
+    # Link to the cost: pays the oldest Unpaid Occurrence (2030-03-01)
+    expense = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "30.00",
+            "date": "2030-02-15",
+            "wallet_id": wallet_id,
+            "recurring_cost_id": cost_id,
+        },
+        headers=_auth(token),
+    )
+    assert expense.status_code == 201
+    original = expense.json()
+    assert original["occurrence_date"] == "2030-03-01"
+
+    # Delete it
+    await client.delete(f"/transactions/{original['id']}", headers=_auth(token))
+
+    # Another Expense pays the same Occurrence in the mean time
+    other = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "5.00",
+            "date": "2030-02-20",
+            "wallet_id": wallet_id,
+            "recurring_cost_id": cost_id,
+        },
+        headers=_auth(token),
+    )
+    assert other.status_code == 201
+
+    # The undo should fail: the pinned Occurrence is already paid
+    undo = await client.post(
+        "/transactions/undo",
+        json={
+            "id": original["id"],
+            "type": "expense",
+            "amount": original["amount"],
+            "date": original["date"],
+            "wallet_id": original["wallet_id"],
+            "source_wallet_id": None,
+            "destination_wallet_id": None,
+            "category_id": original["category_id"],
+            "recurring_cost_id": cost_id,
+            "recurring_income_id": None,
+            "occurrence_date": "2030-03-01",
+            "description": original["description"],
+            "latitude": None,
+            "longitude": None,
+            "place_name": None,
+            "place_id": None,
+        },
+        headers=_auth(token),
+    )
+    assert undo.status_code == 422
+
+
+async def test_undo_foreign_transaction_is_forbidden(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Foreign or missing transactions answer 403 on undo, consistent with
+    the delete endpoint (ADR-0003)."""
+    token = await _login(client)
+    account_id = insert_foreign_account(database_url, "undo-nosy@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            account = session.get(Account, account_id)
+            assert account is not None
+            wallet = Wallet(
+                account_id=account_id, name="Their Wallet", type=WalletType.CHECKING.value
+            )
+            session.add(wallet)
+            session.commit()
+            wallet_id = wallet.id
+            tx = Transaction(
+                account_id=account_id,
+                type="expense",
+                amount=Decimal("10.00"),
+                date=date(2026, 8, 1),
+                wallet_id=wallet_id,
+            )
+            session.add(tx)
+            session.commit()
+            foreign_tx_id = tx.id
+        engine.dispose()
+
+        # Try undoing the foreign transaction (should 403)
+        undo = await client.post(
+            "/transactions/undo",
+            json={
+                "id": foreign_tx_id,
+                "type": "expense",
+                "amount": "10.00",
+                "date": "2026-08-01",
+                "wallet_id": wallet_id,
+                "source_wallet_id": None,
+                "destination_wallet_id": None,
+                "category_id": None,
+                "recurring_cost_id": None,
+                "recurring_income_id": None,
+                "occurrence_date": None,
+                "description": None,
+                "latitude": None,
+                "longitude": None,
+                "place_name": None,
+                "place_id": None,
+            },
+            headers=_auth(token),
+        )
+        assert undo.status_code == 403
+
+        # A missing (non-existent) transaction also answers 403
+        undo = await client.post(
+            "/transactions/undo",
+            json={
+                "id": 999_999,
+                "type": "expense",
+                "amount": "10.00",
+                "date": "2026-08-01",
+                "wallet_id": wallet_id,
+                "source_wallet_id": None,
+                "destination_wallet_id": None,
+                "category_id": None,
+                "recurring_cost_id": None,
+                "recurring_income_id": None,
+                "occurrence_date": None,
+                "description": None,
+                "latitude": None,
+                "longitude": None,
+                "place_name": None,
+                "place_id": None,
+            },
+            headers=_auth(token),
+        )
+        assert undo.status_code == 403
+    finally:
+        delete_account(database_url, account_id)

@@ -290,3 +290,37 @@ export async function deleteTransaction(
   })
   return (await response.json()) as TransactionDeleteResult
 }
+
+/** Undo a deleted Transaction by re-inserting it with its original id
+ * (ADR-0031). The client sends back the full Transaction row it kept in
+ * its in-memory buffer. Returns the restored Transaction.
+ * Answer 422 when the pinned Occurrence was already taken. */
+export async function undoTransaction(
+  token: string,
+  transaction: Transaction,
+): Promise<Transaction> {
+  const response = await request('/transactions/undo', {
+    method: 'POST',
+    token,
+    json: {
+      id: transaction.id,
+      type: transaction.type,
+      amount: transaction.amount,
+      date: transaction.date,
+      wallet_id: transaction.wallet_id,
+      source_wallet_id: transaction.source_wallet_id,
+      destination_wallet_id: transaction.destination_wallet_id,
+      category_id: transaction.category_id,
+      recurring_cost_id: transaction.recurring_cost_id,
+      recurring_income_id: transaction.recurring_income_id,
+      occurrence_date: transaction.occurrence_date,
+      description: transaction.description,
+      latitude: transaction.latitude,
+      longitude: transaction.longitude,
+      place_name: transaction.place_name,
+      place_id: transaction.place_id,
+    },
+    errorMessage: 'Could not undo transaction',
+  })
+  return (await response.json()) as Transaction
+}
