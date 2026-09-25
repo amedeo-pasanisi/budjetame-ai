@@ -1,3 +1,4 @@
+import { useIntl } from 'react-intl'
 import type { RecurringIncome } from './api'
 import { ModalShell } from './ModalShell'
 import { RecurringIncomeForm } from './RecurringIncomeForm'
@@ -23,10 +24,11 @@ export function RecurringIncomeModal({
   onUnfreeze,
   onClose,
 }: RecurringIncomeModalProps) {
+  const { formatMessage } = useIntl()
   const editing = income !== undefined
   return (
     <ModalShell
-      label={editing ? 'Edit recurring income' : 'New recurring income'}
+      label={formatMessage({ id: editing ? 'recurringIncomeModal.label.edit' : 'recurringIncomeModal.label.new' })}
       onClose={onClose}
     >
       <RecurringIncomeForm

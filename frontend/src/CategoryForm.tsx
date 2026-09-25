@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useIntl } from 'react-intl'
 
 import {
   ApiError,
@@ -28,55 +29,42 @@ const PRESET_COLORS = [
   '#ec4899',
 ]
 
-const TYPE_LABELS: Record<CategoryType, string> = {
-  expense: 'Expense',
-  income: 'Income',
-}
+const TYPE_OPTIONS: { value: CategoryType; labelId: string }[] = [
+  { value: 'expense', labelId: 'categories.type.expense' },
+  { value: 'income', labelId: 'categories.type.income' },
+]
 
 type CategoryFormProps = {
   category?: Category
-  /** Eligibility locking (ADR-0013): when set, the Type selector is hidden
-   * and the type preset — create mode only, for inline creation from a
-   * form whose field only accepts one type (e.g. an Expense form can only
-   * create expense Categories). */
   lockedType?: CategoryType
-  /** The create form's prefilled Name (issue #77), e.g. the row editor's
-   * missing name from the file. Create mode only: an edited Category keeps
-   * its own name. */
   prefillName?: string
   onSaved: (category: Category) => void
   onDeleted?: (categoryId: number) => void
-  /** The confirmed merge (ADR-0007): the renamed Category is gone and the
-   * surviving one returned, so the list can show exactly the survivor. */
   onMerged?: (deletedId: number, surviving: Category) => void
   onCancel: () => void
 }
 
 /** Submit-and-validate (ADR-0029): the Category form's pure validation,
- * returning one Field Error per wrong field — keyed by the error keys the
- * fields render under — and nothing for a valid form. Runs on every Save
- * click before any API call; a form with errors submits nothing. The
- * Category form has no Amount field, so the tolerant Amount Input
- * contract does not apply here: Name is the only client-side rule. */
+ * returning i18n message IDs keyed by field — the form translates them
+ * through `formatMessage` before passing to FieldError. The Category form
+ * has no Amount field, so the tolerant Amount Input contract does not apply
+ * here: Name is the only client-side rule. */
 function validate(name: string): FieldErrors {
-  if (name.trim() === '') return { name: 'Enter a name' }
+  if (name.trim() === '') return { name: 'categoryForm.validation.nameEmpty' }
   return {}
 }
 
+/** Translate FieldErrors from i18n message IDs to human-readable strings. */
+function translateErrors(errors: FieldErrors, formatMessage: (descriptor: { id: string }) => string): FieldErrors {
+  const translated: FieldErrors = {}
+  for (const [field, key] of Object.entries(errors)) {
+    translated[field] = formatMessage({ id: key })
+  }
+  return translated
+}
+
 /** The create/edit/delete form for a Category, hosted in the modal
- * shell (CategoryModal). The form itself is unchanged from the inline days:
- * Name and color/icon, plus a Type selector only while creating (the Type is
- * fixed when editing), and the tap-again delete confirmation. Validation is
- * submit-and-validate (ADR-0029): Save is always clickable except while
- * submitting, and clicking it with an empty Name submits nothing and
- * reveals a Field Error under the Name field — the only client-side rule
- * (the Category form has no Amount field, so the tolerant Amount Input
- * contract does not apply). A rename that
- * collides with an existing same-Type name stops being an error (issue #45):
- * the form shows the merge offer — "Merge X into Y? N transactions will
- * move" — with the tap-again-to-confirm pattern, and confirming runs the
- * merge. Cancel — like the shell's backdrop and Escape — abandons the draft
- * without saving. */
+ * shell (CategoryModal). */
 export function CategoryForm({
   category,
   lockedType,
@@ -86,21 +74,16 @@ export function CategoryForm({
   onMerged,
   onCancel,
 }: CategoryFormProps) {
+  const { formatMessage } = useIntl()
   const editing = category !== undefined
   const [name, setName] = useState(category?.name ?? prefillName ?? '')
   const [type, setType] = useState<CategoryType>(category?.type ?? lockedType ?? 'expense')
   const [icon, setIcon] = useState(category?.icon ?? '')
   const [color, setColor] = useState(category?.color ?? PRESET_COLORS[0])
   const [error, setError] = useState<string | null>(null)
-  // Field Errors (ADR-0029): revealed by a Save attempt, they persist
-  // while the user types and refresh only on the next Save click — never
-  // live, never on blur.
   const [errors, setErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  // The merge offer (ADR-0007): set when a rename save collided with an
-  // existing same-Type Category. `name` is the collision — the surviving
-  // Category's name; `category.name` is the one that would be absorbed.
   const [mergeOffer, setMergeOffer] = useState<{
     targetId: number
     transactionCount: number
@@ -109,14 +92,9 @@ export function CategoryForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    // Submit-and-validate (ADR-0029): judge the draft first. A Field
-    // Error reveals inline under its field and the submit ends here —
-    // nothing reaches the API. A valid draft clears the errors (they
-    // refresh only on this next Save attempt) and proceeds exactly as
-    // before.
     const fieldErrors = validate(name)
     if (Object.keys(fieldErrors).length > 0) {
-      setErrors(fieldErrors)
+      setErrors(translateErrors(fieldErrors, formatMessage))
       return
     }
     setErrors({})
@@ -130,8 +108,6 @@ export function CategoryForm({
       onSaved(saved)
     } catch (err) {
       if (editing && err instanceof CategoryMergeConflict) {
-        // The collision is a merge offer, not an error: show the
-        // confirmation instead of the failure message (issue #45).
         setMergeOffer({
           targetId: err.targetId,
           transactionCount: err.transactionCount,
@@ -141,10 +117,10 @@ export function CategoryForm({
           err instanceof ApiError
             ? apiErrorMessage(
                 err,
-                'A category with this name already exists.',
-                editing ? 'Could not save the category.' : 'Could not create the category.',
+                formatMessage({ id: 'categoryForm.error.conflict' }),
+                editing ? formatMessage({ id: 'categoryForm.error.save' }) : formatMessage({ id: 'categoryForm.error.create' }),
               )
-            : 'Something went wrong.',
+            : formatMessage({ id: 'categoryForm.error.generic' }),
         )
       }
     } finally {
@@ -152,8 +128,6 @@ export function CategoryForm({
     }
   }
 
-  /** The confirmed merge: first tap arms it, the second executes (the same
-   * tap-again-to-confirm pattern as delete). */
   const handleMerge = async () => {
     if (category === undefined || mergeOffer === null) {
       return
@@ -173,10 +147,10 @@ export function CategoryForm({
         err instanceof ApiError
           ? apiErrorMessage(
               err,
-              'A category with this name already exists.',
-              'Could not merge the categories.',
+              formatMessage({ id: 'categoryForm.error.conflict' }),
+              formatMessage({ id: 'categoryForm.error.merge' }),
             )
-          : 'Something went wrong.',
+          : formatMessage({ id: 'categoryForm.error.generic' }),
       )
       setSubmitting(false)
     }
@@ -199,33 +173,31 @@ export function CategoryForm({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? apiErrorMessage(err, 'A category with this name already exists.', 'Could not delete the category.')
-          : 'Something went wrong.',
+          ? apiErrorMessage(err, formatMessage({ id: 'categoryForm.error.conflict' }), formatMessage({ id: 'categoryForm.error.delete' }))
+          : formatMessage({ id: 'categoryForm.error.generic' }),
       )
       setSubmitting(false)
     }
   }
 
   return (
-    // noValidate (ADR-0029): the browser's native bubbles never appear;
-    // the Field Errors are the only validation voice.
     <form
       onSubmit={handleSubmit}
       noValidate
       className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h2 className="font-medium text-slate-900">
-        {editing ? 'Edit category' : 'New category'}
+        {formatMessage({ id: editing ? 'categoryForm.title.edit' : 'categoryForm.title.new' })}
       </h2>
       {editing && (
         <p className="text-xs text-slate-500">
-          {TYPE_LABELS[category.type]} · type cannot be changed
+          {formatMessage({ id: 'categories.typeLocked' }, { type: formatMessage({ id: category.type === 'expense' ? 'categories.type.expense' : 'categories.type.income' }) })}
         </p>
       )}
 
       <div>
         <label htmlFor="category-name" className="block text-sm font-medium text-slate-700">
-          Name
+          {formatMessage({ id: 'categoryForm.name' })}
         </label>
         <input
           id="category-name"
@@ -235,12 +207,10 @@ export function CategoryForm({
           value={name}
           onChange={(event) => {
             setName(event.target.value)
-            // A new name invalidates the offer: it was about the collision
-            // the user just typed.
             setMergeOffer(null)
             setConfirmingMerge(false)
           }}
-          placeholder="e.g. Groceries"
+          placeholder={formatMessage({ id: 'categoryForm.namePlaceholder' })}
           {...fieldErrorProps('name', errors)}
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
@@ -249,14 +219,14 @@ export function CategoryForm({
 
       {!editing && lockedType !== undefined && (
         <p className="text-xs text-slate-500">
-          {TYPE_LABELS[lockedType]} · fixed for this form
+          {formatMessage({ id: 'categoryForm.typeFixed' }, { type: formatMessage({ id: lockedType === 'expense' ? 'categories.type.expense' : 'categories.type.income' }) })}
         </p>
       )}
 
       {!editing && lockedType === undefined && (
         <div>
           <label htmlFor="category-type" className="block text-sm font-medium text-slate-700">
-            Type
+            {formatMessage({ id: 'categoryForm.type' })}
           </label>
           <select
             id="category-type"
@@ -264,21 +234,24 @@ export function CategoryForm({
             onChange={(event) => setType(event.target.value as CategoryType)}
             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
           >
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
+            {TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {formatMessage({ id: option.labelId })}
+              </option>
+            ))}
           </select>
         </div>
       )}
 
       <div>
-        <span className="block text-sm font-medium text-slate-700">Color</span>
+        <span className="block text-sm font-medium text-slate-700">{formatMessage({ id: 'categoryForm.color' })}</span>
         <div className="mt-2 flex flex-wrap gap-2">
           {PRESET_COLORS.map((preset) => (
             <button
               key={preset}
               type="button"
               onClick={() => setColor(preset)}
-              aria-label={`Use color ${preset}`}
+              aria-label={formatMessage({ id: 'categoryForm.colorAria' }, { preset })}
               className={`h-8 w-8 rounded-full ${
                 color === preset ? 'ring-2 ring-slate-900 ring-offset-2' : ''
               }`}
@@ -290,7 +263,7 @@ export function CategoryForm({
 
       <div>
         <label htmlFor="category-icon" className="block text-sm font-medium text-slate-700">
-          Icon (optional)
+          {formatMessage({ id: 'categoryForm.icon' })}
         </label>
         <input
           id="category-icon"
@@ -298,7 +271,7 @@ export function CategoryForm({
           maxLength={16}
           value={icon}
           onChange={(event) => setIcon(event.target.value)}
-          placeholder="e.g. 🛒"
+          placeholder={formatMessage({ id: 'categoryForm.iconPlaceholder' })}
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
       </div>
@@ -308,8 +281,11 @@ export function CategoryForm({
       {mergeOffer !== null && category !== undefined && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
           <p className="text-sm text-slate-800">
-            Merge {category.name} into {name}? {mergeOffer.transactionCount} transactions
-            will move — this cannot be undone.
+            {formatMessage({ id: 'categoryForm.mergeOffer' }, {
+              source: category.name,
+              target: name,
+              count: mergeOffer.transactionCount,
+            })}
           </p>
           <div className="mt-2 flex gap-3">
             <button
@@ -322,7 +298,11 @@ export function CategoryForm({
                   : 'border-amber-300 bg-white text-amber-800'
               }`}
             >
-              {submitting ? 'Merging…' : confirmingMerge ? 'Tap again to confirm' : 'Merge'}
+              {submitting
+                ? formatMessage({ id: 'categoryForm.merging' })
+                : confirmingMerge
+                  ? formatMessage({ id: 'categoryForm.mergeConfirm' })
+                  : formatMessage({ id: 'categoryForm.merge' })}
             </button>
             <button
               type="button"
@@ -333,23 +313,23 @@ export function CategoryForm({
               disabled={submitting}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600"
             >
-              Cancel merge
+              {formatMessage({ id: 'categoryForm.mergeCancel' })}
             </button>
           </div>
         </div>
       )}
 
       <div className="flex gap-3">
-        {/* Submit-and-validate (ADR-0029): disabled only while work is
-        actually in flight (submitting) — never because the draft is
-        invalid. An invalid draft reveals Field Errors instead of a dead
-        button. */}
         <button
           type="submit"
           disabled={submitting}
           className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
         >
-          {submitting ? 'Saving…' : editing ? 'Save' : 'Create category'}
+          {submitting
+            ? formatMessage({ id: 'categoryForm.saving' })
+            : editing
+              ? formatMessage({ id: 'categoryForm.save' })
+              : formatMessage({ id: 'categoryForm.create' })}
         </button>
         <button
           type="button"
@@ -357,7 +337,7 @@ export function CategoryForm({
           disabled={submitting}
           className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
         >
-          Cancel
+          {formatMessage({ id: 'categoryForm.cancel' })}
         </button>
       </div>
 
@@ -372,7 +352,11 @@ export function CategoryForm({
               : 'border-red-200 text-red-600'
           }`}
         >
-          {submitting ? 'Deleting…' : confirmingDelete ? 'Tap again to confirm' : 'Delete category'}
+          {submitting
+            ? formatMessage({ id: 'categoryForm.deleting' })
+            : confirmingDelete
+              ? formatMessage({ id: 'categoryForm.deleteConfirm' })
+              : formatMessage({ id: 'categoryForm.delete' })}
         </button>
       )}
     </form>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useIntl } from 'react-intl'
 
 import type { LedgerFilterRequest } from './App'
 import { RecurringCostsScreen } from './RecurringCostsScreen'
@@ -20,6 +21,7 @@ export function RecurringScreen({
    * tap surface (ADR-0026). Optional so tests can render the screen bare. */
   requestLedgerFilter?: (request: LedgerFilterRequest) => void
 }) {
+  const { formatMessage } = useIntl()
   const [side, setSide] = useState<RecurringSide>(getRecurringSide)
 
   const handleSelect = (next: RecurringSide) => {
@@ -29,7 +31,7 @@ export function RecurringScreen({
 
   return (
     <>
-      <div className="flex gap-2" role="group" aria-label="Recurring side">
+      <div className="flex gap-2" role="group" aria-label={formatMessage({ id: 'recurring.sideAria' })}>
         <button
           type="button"
           onClick={() => handleSelect('costs')}
@@ -40,7 +42,7 @@ export function RecurringScreen({
               : 'bg-slate-100 text-slate-600'
           }`}
         >
-          Costs
+          {formatMessage({ id: 'recurring.costsTab' })}
         </button>
         <button
           type="button"
@@ -52,7 +54,7 @@ export function RecurringScreen({
               : 'bg-slate-100 text-slate-600'
           }`}
         >
-          Incomes
+          {formatMessage({ id: 'recurring.incomesTab' })}
         </button>
       </div>
       <div className="mt-4">

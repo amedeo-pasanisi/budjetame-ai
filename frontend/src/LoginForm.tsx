@@ -1,11 +1,10 @@
 import { useState, type FormEvent } from 'react'
+import { useIntl } from 'react-intl'
 
 import { ApiError } from './api'
 import { GoogleButton } from './GoogleButton'
 import { Card, Screen } from './Screen'
 
-/** The auth screen's views: the two doors (password, Google) plus the
- * forgot-password flow. */
 type Mode = 'signin' | 'signup' | 'forgot'
 
 type LoginFormProps = {
@@ -16,6 +15,7 @@ type LoginFormProps = {
 }
 
 export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword }: LoginFormProps) {
+  const { formatMessage } = useIntl()
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -38,20 +38,20 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
       }
     } catch (err) {
       if (mode === 'forgot') {
-        setError('Could not send the reset link. Please try again.')
+        setError(formatMessage({ id: 'auth.error.forgot' }))
       } else if (mode === 'signin') {
         setError(
           err instanceof ApiError && err.status === 401
-            ? 'Incorrect email or password.'
-            : 'Could not sign in. Please try again.',
+            ? formatMessage({ id: 'auth.error.signIn.401' })
+            : formatMessage({ id: 'auth.error.signIn.other' }),
         )
       } else {
         setError(
           err instanceof ApiError && err.status === 409
-            ? 'An Account with this email already exists.'
+            ? formatMessage({ id: 'auth.error.signUp.409' })
             : err instanceof ApiError && err.status === 422
-              ? 'Check the fields and try again.'
-              : 'Could not sign up. Please try again.',
+              ? formatMessage({ id: 'auth.error.signUp.422' })
+              : formatMessage({ id: 'auth.error.signUp.other' }),
         )
       }
     } finally {
@@ -73,10 +73,10 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
         <h1 className="text-2xl font-semibold text-slate-900">Budjetame</h1>
         <p className="mt-1 text-sm text-slate-500">
           {mode === 'forgot'
-            ? 'We will email you a link to reset your password.'
+            ? formatMessage({ id: 'auth.forgotTitle' })
             : signUp
-              ? 'Create an Account to see your money.'
-              : 'Sign in to see your money.'}
+              ? formatMessage({ id: 'auth.signUpTitle' })
+              : formatMessage({ id: 'auth.signInTitle' })}
         </p>
         {mode !== 'forgot' && (
           <>
@@ -85,7 +85,7 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
             </div>
             <div className="mt-4 flex items-center gap-3">
               <div className="h-px flex-1 bg-slate-200" />
-              <span className="text-xs text-slate-400">or</span>
+              <span className="text-xs text-slate-400">{formatMessage({ id: 'auth.or' })}</span>
               <div className="h-px flex-1 bg-slate-200" />
             </div>
           </>
@@ -93,21 +93,21 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
         {resetSent ? (
           <div className="mt-6 space-y-4">
             <p className="text-sm text-slate-700">
-              Check your inbox — the link works once and expires soon.
+              {formatMessage({ id: 'auth.resetSentTitle' })}
             </p>
             <button
               type="button"
               onClick={() => switchMode('signin')}
               className="w-full rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white"
             >
-              Back to sign in
+              {formatMessage({ id: 'auth.backToSignIn' })}
             </button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700">
-                Email
+                {formatMessage({ id: 'auth.email' })}
               </label>
               <input
                 id="email"
@@ -116,14 +116,14 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
                 autoComplete="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
+                placeholder={formatMessage({ id: 'auth.emailPlaceholder' })}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
               />
             </div>
             {mode !== 'forgot' && (
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-slate-700">
-                  Password
+                  {formatMessage({ id: 'auth.password' })}
                 </label>
                 <input
                   id="password"
@@ -145,28 +145,28 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
             >
               {submitting
                 ? mode === 'forgot'
-                  ? 'Sending…'
+                  ? formatMessage({ id: 'auth.sending' })
                   : signUp
-                    ? 'Creating…'
-                    : 'Signing in…'
+                    ? formatMessage({ id: 'auth.creating' })
+                    : formatMessage({ id: 'auth.signingIn' })
                 : mode === 'forgot'
-                  ? 'Send reset link'
+                  ? formatMessage({ id: 'auth.sendReset' })
                   : signUp
-                    ? 'Create account'
-                    : 'Sign in'}
+                    ? formatMessage({ id: 'auth.signUp' })
+                    : formatMessage({ id: 'auth.signIn' })}
             </button>
           </form>
         )}
         <p className="mt-4 text-center text-sm text-slate-500">
           {mode === 'signin' && (
             <>
-              Forgot your password?{' '}
+              {formatMessage({ id: 'auth.forgotPassword' })}{' '}
               <button
                 type="button"
                 onClick={() => switchMode('forgot')}
                 className="font-medium text-indigo-600"
               >
-                Reset it
+                {formatMessage({ id: 'auth.resetIt' })}
               </button>
             </>
           )}
@@ -174,35 +174,35 @@ export function LoginForm({ onLogin, onSignUp, onGoogleSignIn, onForgotPassword 
         <p className="mt-2 text-center text-sm text-slate-500">
           {mode === 'forgot' ? (
             <>
-              Remembered it?{' '}
+              {formatMessage({ id: 'auth.remembered' })}{' '}
               <button
                 type="button"
                 onClick={() => switchMode('signin')}
                 className="font-medium text-indigo-600"
               >
-                Sign in
+                {formatMessage({ id: 'auth.signInLink' })}
               </button>
             </>
           ) : signUp ? (
             <>
-              Already have an Account?{' '}
+              {formatMessage({ id: 'auth.alreadyAccount' })}{' '}
               <button
                 type="button"
                 onClick={() => switchMode('signin')}
                 className="font-medium text-indigo-600"
               >
-                Sign in
+                {formatMessage({ id: 'auth.signInLink' })}
               </button>
             </>
           ) : (
             <>
-              Don't have an Account?{' '}
+              {formatMessage({ id: 'auth.noAccount' })}{' '}
               <button
                 type="button"
                 onClick={() => switchMode('signup')}
                 className="font-medium text-indigo-600"
               >
-                Sign up
+                {formatMessage({ id: 'auth.signUpLink' })}
               </button>
             </>
           )}

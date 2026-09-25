@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useIntl } from 'react-intl'
 
 import {
   ApiError,
@@ -19,11 +20,12 @@ import { intervalText } from './recurringCosts'
 import { FieldError } from './FieldError'
 import { fieldErrorProps, parseAmount, type FieldErrors } from './validation'
 
-const UNIT_OPTIONS: { value: IntervalUnit; one: string; many: string }[] = [
-  { value: 'days', one: 'Day', many: 'Days' },
-  { value: 'weeks', one: 'Week', many: 'Weeks' },
-  { value: 'months', one: 'Month', many: 'Months' },
-  { value: 'years', one: 'Year', many: 'Years' },
+/** Interval unit options with singular/plural display labels. */
+const UNIT_OPTIONS: { value: IntervalUnit; oneId: string; manyId: string }[] = [
+  { value: 'days', oneId: 'interval.day', manyId: 'interval.days' },
+  { value: 'weeks', oneId: 'interval.week', manyId: 'interval.weeks' },
+  { value: 'months', oneId: 'interval.month', manyId: 'interval.months' },
+  { value: 'years', oneId: 'interval.year', manyId: 'interval.years' },
 ]
 
 type RecurringCostFormProps = {
@@ -70,40 +72,44 @@ type RecurringCostDraft = {
 }
 
 /** Submit-and-validate (ADR-0029): the Recurring Cost form's pure
- * validation. Returns one Field Error per wrong field — keyed by the error
- * keys the fields render under — and nothing for a valid form. Runs on
- * every Save click before any API call; a form with errors submits
- * nothing. Reuses the shared tolerant amount parser from the validation
- * layer (issue #102), never re-implementing it: an empty Amount is its own
- * message, an unparseable one (letters, signs, malformed groupings)
- * another, and a parseable-but-non-positive one a third. The interval is
- * a whole number of units: empty, non-integer, or below 1 is one message.
- * The Start date is only mandatory while editing (ADR-0024): at creation
- * an empty one stays allowed — the first Occurrence becomes today. */
+ * validation. Returns i18n message IDs keyed by field — the form translates
+ * them through `formatMessage` before passing to FieldError. Runs on every
+ * Save click before any API call; a form with errors submits nothing.
+ * Reuses the shared tolerant amount parser from the validation layer (issue
+ * #102), never re-implementing it. The interval is a whole number of units:
+ * empty, non-integer, or below 1 is one message. The Start date is only
+ * mandatory while editing (ADR-0024): at creation an empty one stays
+ * allowed — the first Occurrence becomes today. */
 function validate(draft: RecurringCostDraft): FieldErrors {
   const errors: FieldErrors = {}
   if (draft.name.trim() === '') {
-    errors.name = 'Enter a name'
+    errors.name = 'recurringCostForm.validation.nameEmpty'
   }
   const trimmedAmount = draft.amount.trim()
   if (trimmedAmount === '') {
-    errors.amount = 'Enter an amount'
+    errors.amount = 'recurringCostForm.validation.amountEmpty'
   } else if (parseAmount(trimmedAmount) === null) {
-    // parseAmount reads a finite positive number, or null for everything
-    // else. Split the nulls the way users experience them: text that is
-    // not an amount at all, vs a number that just is not positive.
     errors.amount = /^-?\d+([.,]\d+)?$/.test(trimmedAmount)
-      ? 'Amount must be a positive number'
-      : "That doesn't look like an amount — use digits and one . or , for decimals"
+      ? 'recurringCostForm.validation.amountNotPositive'
+      : 'recurringCostForm.validation.amountInvalid'
   }
   const interval = draft.interval.trim()
   if (interval === '' || !/^\d+$/.test(interval) || Number(interval) < 1) {
-    errors.interval = 'The interval must be at least 1'
+    errors.interval = 'recurringCostForm.validation.intervalEmpty'
   }
   if (draft.editing && draft.startDate.trim() === '') {
-    errors.start = 'Choose a start date'
+    errors.start = 'recurringCostForm.validation.startEmpty'
   }
   return errors
+}
+
+/** Translate FieldErrors from i18n message IDs to human-readable strings. */
+function translateErrors(errors: FieldErrors, formatMessage: (descriptor: { id: string }) => string): FieldErrors {
+  const translated: FieldErrors = {}
+  for (const [field, key] of Object.entries(errors)) {
+    translated[field] = formatMessage({ id: key })
+  }
+  return translated
 }
 
 export function RecurringCostForm({
@@ -113,6 +119,7 @@ export function RecurringCostForm({
   onUnfreeze,
   onCancel,
 }: RecurringCostFormProps) {
+  const { formatMessage } = useIntl()
   const editing = cost !== undefined
   const readOnly = cost?.frozen === true
 
@@ -162,13 +169,13 @@ export function RecurringCostForm({
       })
       .catch(() => {
         if (!cancelled) {
-          setOccurrencesError('Could not load the occurrences.')
+          setOccurrencesError(formatMessage({ id: 'recurringCostForm.occurrencesError' }))
         }
       })
     return () => {
       cancelled = true
     }
-  }, [token, costId])
+  }, [token, costId, formatMessage])
 
   // One row's Skip/Un-skip (ADR-0026): state the row's skipped state — the
   // response is the refreshed read, so the section swaps its rows in
@@ -182,7 +189,7 @@ export function RecurringCostForm({
     setOccurrencesError(null)
     setRecurringCostOccurrenceSkipped(token, costId, row.date, !row.skipped)
       .then((rows) => setOccurrences(rows))
-      .catch(() => setOccurrencesError('Could not update the occurrence.'))
+      .catch(() => setOccurrencesError(formatMessage({ id: 'recurringCostForm.error.occurrenceUpdate' })))
       .finally(() => setTogglingDate(null))
   }
 
@@ -190,9 +197,6 @@ export function RecurringCostForm({
 
   const buildInput = (): RecurringCostInput => ({
     name: name.trim(),
-    // The tolerant Amount Input (ADR-0029) sends the canonical cents value —
-    // "1.000,45" or "17,5" reach the API as "1000.45"/"17.50" — the
-    // backend's Decimal would reject the comma or the groups.
     amount: (parseAmount(amount) ?? 0).toFixed(2),
     intervalValue: intervalNumber,
     intervalUnit,
@@ -201,11 +205,6 @@ export function RecurringCostForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    // Submit-and-validate (ADR-0029): judge the draft first. Any Field
-    // Error reveals inline under its field, and the submit ends here —
-    // nothing reaches the API. A valid draft clears the errors (they
-    // refresh only on this next Save attempt) and proceeds exactly as
-    // before.
     const fieldErrors = validate({
       name,
       amount,
@@ -214,7 +213,7 @@ export function RecurringCostForm({
       startDate,
     })
     if (Object.keys(fieldErrors).length > 0) {
-      setErrors(fieldErrors)
+      setErrors(translateErrors(fieldErrors, formatMessage))
       return
     }
     setErrors({})
@@ -230,12 +229,12 @@ export function RecurringCostForm({
         err instanceof ApiError
           ? apiErrorMessage(
               err,
-              'A recurring cost with this name already exists.',
+              formatMessage({ id: 'recurringCostForm.error.conflict' }),
               editing
-                ? 'Could not save the recurring cost.'
-                : 'Could not create the recurring cost.',
+                ? formatMessage({ id: 'recurringCostForm.error.save' })
+                : formatMessage({ id: 'recurringCostForm.error.create' }),
             )
-          : 'Something went wrong.',
+          : formatMessage({ id: 'recurringCostForm.error.generic' }),
       )
     } finally {
       setSubmitting(false)
@@ -257,7 +256,7 @@ export function RecurringCostForm({
       setConfirmingFreeze(false)
       onFreeze?.(frozen)
     } catch {
-      setError('Could not freeze the recurring cost.')
+      setError(formatMessage({ id: 'recurringCostForm.error.freeze' }))
       setSubmitting(false)
     }
   }
@@ -272,26 +271,24 @@ export function RecurringCostForm({
       const unfrozen = await unfreezeRecurringCost(token, cost.id)
       onUnfreeze?.(unfrozen)
     } catch {
-      setError('Could not unfreeze the recurring cost.')
+      setError(formatMessage({ id: 'recurringCostForm.error.unfreeze' }))
       setSubmitting(false)
     }
   }
 
   return (
-    // noValidate (ADR-0029): the browser's native bubbles never appear;
-    // the Field Errors are the only validation voice.
     <form
       onSubmit={handleSubmit}
       noValidate
       className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h2 className="font-medium text-slate-900">
-        {editing ? 'Edit recurring cost' : 'New recurring cost'}
+        {formatMessage({ id: editing ? 'recurringCostForm.title.edit' : 'recurringCostForm.title.new' })}
       </h2>
 
       <div>
         <label htmlFor={readOnly ? undefined : "recurring-cost-name"} className="block text-sm font-medium text-slate-700">
-          Name
+          {formatMessage({ id: 'recurringCostForm.name' })}
         </label>
         {readOnly ? (
           <p className="mt-1 text-sm text-slate-900">{name}</p>
@@ -303,7 +300,7 @@ export function RecurringCostForm({
             maxLength={80}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. Rent"
+            placeholder={formatMessage({ id: 'recurringCostForm.namePlaceholder' })}
             {...fieldErrorProps('name', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
@@ -313,14 +310,11 @@ export function RecurringCostForm({
 
       <div>
         <label htmlFor={readOnly ? undefined : "recurring-cost-amount"} className="block text-sm font-medium text-slate-700">
-          Amount
+          {formatMessage({ id: 'recurringCostForm.amount' })}
         </label>
         {readOnly ? (
           <p className="mt-1 text-sm text-slate-900">{amount}</p>
         ) : (
-          // The browser-owned type="number" swallowed "17.5" in
-          // comma-locales (ADR-0029): parsing is ours now — a tolerant text
-          // field read by parseAmount, with the Error's aria wiring.
           <input
             id="recurring-cost-amount"
             type="text"
@@ -328,7 +322,7 @@ export function RecurringCostForm({
             required
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
-            placeholder="0.00"
+            placeholder={formatMessage({ id: 'recurringCostForm.amountPlaceholder' })}
             {...fieldErrorProps('amount', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
@@ -338,7 +332,7 @@ export function RecurringCostForm({
 
       <div>
         <label htmlFor={readOnly ? undefined : "recurring-cost-interval"} className="block text-sm font-medium text-slate-700">
-          Repeats every
+          {formatMessage({ id: 'recurringCostForm.repeatsEvery' })}
         </label>
         {readOnly ? (
           <p className="mt-1 text-sm text-slate-900">
@@ -354,7 +348,7 @@ export function RecurringCostForm({
               required
               value={intervalValue}
               onChange={(event) => setIntervalValue(event.target.value)}
-              aria-label="Every N"
+              aria-label={formatMessage({ id: 'recurringCostForm.everyNAria' })}
               {...fieldErrorProps('interval', errors)}
               className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
             />
@@ -362,12 +356,12 @@ export function RecurringCostForm({
               id="recurring-cost-unit"
               value={intervalUnit}
               onChange={(event) => setIntervalUnit(event.target.value as IntervalUnit)}
-              aria-label="Interval unit"
+              aria-label={formatMessage({ id: 'recurringCostForm.intervalUnitAria' })}
               className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
             >
               {UNIT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {intervalNumber === 1 ? option.one : option.many}
+                  {formatMessage({ id: intervalNumber === 1 ? option.oneId : option.manyId })}
                 </option>
               ))}
             </select>
@@ -378,7 +372,7 @@ export function RecurringCostForm({
 
       <div>
         <label htmlFor={readOnly ? undefined : "recurring-cost-start"} className="block text-sm font-medium text-slate-700">
-          Start date
+          {formatMessage({ id: 'recurringCostForm.startDate' })}
         </label>
         {readOnly ? (
           <p className="mt-1 text-sm text-slate-900">{startDate}</p>
@@ -396,7 +390,7 @@ export function RecurringCostForm({
         <FieldError field="start" errors={errors} />
         {!editing && (
           <p className="mt-1 text-xs text-slate-500">
-            The first occurrence. Leave empty to start today.
+            {formatMessage({ id: 'recurringCostForm.startHint' })}
           </p>
         )}
       </div>
@@ -405,13 +399,13 @@ export function RecurringCostForm({
           are no unpaid occurrences to skip. */}
       {editing && !readOnly && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-slate-700">Occurrences</h3>
+          <h3 className="text-sm font-medium text-slate-700">{formatMessage({ id: 'recurringCostForm.occurrences' })}</h3>
           {occurrencesError !== null && (
             <p className="text-sm text-red-600">{occurrencesError}</p>
           )}
           {occurrences === null ? (
             occurrencesError === null && (
-              <p className="text-xs text-slate-500">Loading occurrences…</p>
+              <p className="text-xs text-slate-500">{formatMessage({ id: 'recurringCostForm.occurrencesLoading' })}</p>
             )
           ) : (
             <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -432,7 +426,7 @@ export function RecurringCostForm({
                     </span>
                     {row.skipped && (
                       <span className="block text-xs text-slate-400">
-                        Skipped — un-skip to pay it
+                        {formatMessage({ id: 'recurringCostForm.occurrenceSkipped' })}
                       </span>
                     )}
                   </span>
@@ -442,16 +436,14 @@ export function RecurringCostForm({
                     disabled={togglingDate === row.date}
                     className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
                   >
-                    {row.skipped ? 'Un-skip' : 'Skip'}
+                    {row.skipped ? formatMessage({ id: 'recurringCostForm.unskip' }) : formatMessage({ id: 'recurringCostForm.skip' })}
                   </button>
                 </li>
               ))}
             </ul>
           )}
           <p className="text-xs text-slate-500">
-            Skip excuses an occurrence: it never counts as unpaid, and a
-            payment covers it only after un-skipping. Paid ones live in the
-            ledger.
+            {formatMessage({ id: 'recurringCostForm.occurrenceHelp' })}
           </p>
         </div>
       )}
@@ -460,16 +452,16 @@ export function RecurringCostForm({
 
       {!readOnly && (
         <div className="flex gap-3">
-          {/* Submit-and-validate (ADR-0029): disabled only while work is
-          actually in flight (saving, an Occurrence toggle) — never because
-          the draft is invalid. An invalid draft reveals Field Errors
-          instead of a dead button. */}
           <button
             type="submit"
             disabled={submitting || togglingDate !== null}
             className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
           >
-            {submitting ? 'Saving…' : editing ? 'Save' : 'Create recurring cost'}
+            {submitting
+              ? formatMessage({ id: 'recurringCostForm.saving' })
+              : editing
+                ? formatMessage({ id: 'recurringCostForm.save' })
+                : formatMessage({ id: 'recurringCostForm.create' })}
           </button>
           <button
             type="button"
@@ -477,7 +469,7 @@ export function RecurringCostForm({
             disabled={submitting}
             className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
           >
-            Cancel
+            {formatMessage({ id: 'recurringCostForm.cancel' })}
           </button>
         </div>
       )}
@@ -490,7 +482,9 @@ export function RecurringCostForm({
             disabled={submitting}
             className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
           >
-            {submitting ? 'Unfreezing…' : 'Unfreeze recurring cost'}
+            {submitting
+              ? formatMessage({ id: 'recurringCostForm.unfreezing' })
+              : formatMessage({ id: 'recurringCostForm.unfreeze' })}
           </button>
           <button
             type="button"
@@ -498,7 +492,7 @@ export function RecurringCostForm({
             disabled={submitting}
             className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
           >
-            Cancel
+            {formatMessage({ id: 'recurringCostForm.cancel' })}
           </button>
         </div>
       )}
@@ -515,10 +509,10 @@ export function RecurringCostForm({
           }`}
         >
           {submitting
-            ? 'Freezing…'
+            ? formatMessage({ id: 'recurringCostForm.freezing' })
             : confirmingFreeze
-              ? 'Tap again to confirm freeze'
-              : 'Freeze recurring cost'}
+              ? formatMessage({ id: 'recurringCostForm.freezeConfirm' })
+              : formatMessage({ id: 'recurringCostForm.freeze' })}
         </button>
       )}
     </form>

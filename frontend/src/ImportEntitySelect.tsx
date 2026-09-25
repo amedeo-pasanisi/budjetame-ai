@@ -1,4 +1,5 @@
 import { type ChangeEvent } from 'react'
+import { useIntl } from 'react-intl'
 
 import { SENTINEL_VALUE } from './EntitySelect'
 
@@ -7,24 +8,12 @@ export type ImportEntityOption = { name: string; label: string }
 type ImportEntitySelectProps = {
   id: string
   label: string
-  /** The field's current value: an entity *name* ('' for None on optional
-   * fields). The row editor stores names, not ids — the backend re-resolves
-   * them — so this select keys its options by name. */
   value: string
   onChange: (name: string) => void
   options: ImportEntityOption[]
-  /** The entity's singular name for the sentinel's label, e.g. "wallet"
-   * renders "＋ Add wallet…". */
   entity: string
-  /** Opens the entity's create modal, hosted by the screen, prefilled with
-   * the field's current name when it does not resolve to an existing option
-   * (the missing name from the file) and '' otherwise. */
   onAdd: (prefillName: string) => void
   required?: boolean
-  /** ADR-0029: the Field Error's aria wiring for this select
-   * ('aria-invalid' + 'aria-describedby' pointing at the error element),
-   * spread onto the <select>. Absent while the field has no error, so a
-   * valid form carries no error aria at all. */
   errorProps?: { 'aria-invalid'?: true; 'aria-describedby'?: string }
 }
 
@@ -48,23 +37,16 @@ export function ImportEntitySelect({
   required = false,
   errorProps,
 }: ImportEntitySelectProps) {
+  const { formatMessage } = useIntl()
   const trimmed = value.trim()
   const resolved = options.find(
     (option) => option.name.toLowerCase() === trimmed.toLowerCase(),
   )
-  // The pending option exists exactly while the field's value does not
-  // resolve: the file's name, kept as the current value.
   const pending = resolved === undefined && trimmed !== ''
-  // What the select shows as current: the resolved entity's canonical name
-  // (the file may have spelled it differently), the raw name while pending,
-  // or '' for None.
   const displayed = resolved !== undefined ? resolved.name : pending ? value : ''
 
   const handleChange = (event: ChangeEvent<HTMLSelectElement>) => {
     if (event.target.value === SENTINEL_VALUE) {
-      // Revert on the DOM node directly: the field's value does not change,
-      // so React would not re-render the select and the sentinel pick would
-      // stay visible (ADR-0013).
       event.target.value = displayed
       onAdd(pending ? trimmed : '')
       return
@@ -85,14 +67,14 @@ export function ImportEntitySelect({
         {...errorProps}
         className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
       >
-        {!required && <option value="">None</option>}
-        {pending && <option value={value}>{trimmed} (doesn&apos;t exist yet)</option>}
+        {!required && <option value="">{formatMessage({ id: 'importEntitySelect.none' })}</option>}
+        {pending && <option value={value}>{formatMessage({ id: 'importEntitySelect.doesNotExist' }, { name: trimmed })}</option>}
         {options.map((option) => (
           <option key={option.name} value={option.name}>
             {option.label}
           </option>
         ))}
-        <option value={SENTINEL_VALUE}>＋ Add {entity}…</option>
+        <option value={SENTINEL_VALUE}>{formatMessage({ id: 'importEntitySelect.add' }, { entity })}</option>
       </select>
     </div>
   )

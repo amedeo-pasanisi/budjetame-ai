@@ -5,7 +5,8 @@
  * Google button is a separate component (issue #81) — mocked here as a bare
  * button so this file tests the auth screen's own wiring. */
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { renderWithIntl } from "./test/renderWithIntl"
 
 import { ApiError } from './api'
 import { LoginForm } from './LoginForm'
@@ -28,7 +29,7 @@ const renderForm = (
     onForgotPassword: (email: string) => Promise<void>
   }> = {},
 ) =>
-  render(
+renderWithIntl(
     <LoginForm
       onLogin={noop}
       onSignUp={noop}

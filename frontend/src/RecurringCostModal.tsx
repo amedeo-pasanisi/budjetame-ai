@@ -1,3 +1,4 @@
+import { useIntl } from 'react-intl'
 import type { RecurringCost } from './api'
 import { ModalShell } from './ModalShell'
 import { RecurringCostForm } from './RecurringCostForm'
@@ -22,9 +23,13 @@ export function RecurringCostModal({
   onUnfreeze,
   onClose,
 }: RecurringCostModalProps) {
+  const { formatMessage } = useIntl()
   const editing = cost !== undefined
   return (
-    <ModalShell label={editing ? 'Edit recurring cost' : 'New recurring cost'} onClose={onClose}>
+    <ModalShell
+      label={formatMessage({ id: editing ? 'recurringCostModal.label.edit' : 'recurringCostModal.label.new' })}
+      onClose={onClose}
+    >
       <RecurringCostForm
         key={editing ? cost.id : 'create'}
         cost={cost}

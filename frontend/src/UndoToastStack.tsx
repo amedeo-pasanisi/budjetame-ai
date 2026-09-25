@@ -8,6 +8,7 @@
  * after its createdAt. */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useIntl } from 'react-intl'
 import { UNDO_WINDOW_MS, type UndoEntry } from './undoStack'
 
 export type { UndoEntry } from './undoStack'
@@ -26,6 +27,7 @@ type UndoToastStackProps = {
 const TICK_MS = 1000
 
 export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps) {
+  const { formatMessage } = useIntl()
   // Track countdowns: remaining seconds for each entry id.
   // Re-computed every TICK_MS from the entries' createdAt.
   const [countdowns, setCountdowns] = useState<Record<number, number>>({})
@@ -65,7 +67,7 @@ export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps
 
   return (
     <div
-      aria-label="Undo opportunities"
+      aria-label={formatMessage({ id: 'undoToast.label' })}
       className="fixed bottom-0 left-1/2 z-50 flex w-full max-w-md -translate-x-1/2 flex-col-reverse gap-2 p-4"
     >
       {stack.map((entry) => {
@@ -77,25 +79,25 @@ export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps
             role="status"
           >
             <span className="min-w-0 text-sm text-slate-700">
-              <span className="font-medium">Transaction deleted</span>
+              <span className="font-medium">{formatMessage({ id: 'undoToast.transactionDeleted' })}</span>
               {entry.transaction.description !== null && entry.transaction.description.trim() !== '' && (
-                <span> · {entry.transaction.description}</span>
+                <span>{formatMessage({ id: 'undoToast.descriptionSeparator' }, { description: entry.transaction.description })}</span>
               )}
             </span>
             <div className="flex shrink-0 items-center gap-3">
               <span className="text-xs tabular-nums text-slate-400">
-                {remaining}s
+                {formatMessage({ id: 'undoToast.seconds' }, { remaining })}
               </span>
               <button
                 type="button"
                 onClick={() => onUndo(entry)}
                 className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 active:bg-indigo-800"
               >
-                Undo
+                {formatMessage({ id: 'undoToast.undo' })}
               </button>
               <button
                 type="button"
-                aria-label="Dismiss"
+                aria-label={formatMessage({ id: 'undoToast.dismiss' })}
                 onClick={() => onDismiss(entry.transaction.id)}
                 className="text-xs text-slate-400 hover:text-slate-600"
               >

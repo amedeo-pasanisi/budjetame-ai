@@ -9,7 +9,9 @@
  * draft reveals a Field Error under each wrong field instead of calling the
  * API. The API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { RecurringIncomeForm } from './RecurringIncomeForm'
 import type { RecurringIncome } from './api'
@@ -99,7 +101,7 @@ function renderForm(editing?: RecurringIncome) {
   const onFreeze = vi.fn()
   const onUnfreeze = vi.fn()
   const onCancel = vi.fn()
-  const view = render(
+  const view = renderWithIntl(
     <RecurringIncomeForm
       income={editing}
       onSaved={onSaved}

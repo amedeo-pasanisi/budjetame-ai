@@ -4,8 +4,9 @@
  * renders exactly as before; the Incomes side mirrors it. The API client is
  * mocked; both sides' loads are stubbed. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 
+import { renderWithIntl } from './test/renderWithIntl'
 import { RecurringScreen } from './RecurringScreen'
 import { setRecurringSide } from './recurringSide'
 import type { RecurringCost, RecurringIncome } from './api'
@@ -97,7 +98,7 @@ afterEach(() => {
 
 describe('RecurringScreen toggle', () => {
   it('defaults to the Costs side', async () => {
-    render(<RecurringScreen />)
+    renderWithIntl(<RecurringScreen />)
 
     expect(await screen.findByRole('button', { name: 'New recurring cost' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New recurring income' })).not.toBeInTheDocument()
@@ -113,7 +114,7 @@ describe('RecurringScreen toggle', () => {
   })
 
   it('switching to Incomes renders the incomes side and back to Costs the costs side', async () => {
-    render(<RecurringScreen />)
+    renderWithIntl(<RecurringScreen />)
     await screen.findByRole('button', { name: 'New recurring cost' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Incomes' }))
@@ -129,7 +130,7 @@ describe('RecurringScreen toggle', () => {
 
   it('remembers the last side across the screen unmounting (tab switch)', async () => {
     // First mount: switch to Incomes, then unmount — as a tab switch would.
-    const first = render(<RecurringScreen />)
+    const first = renderWithIntl(<RecurringScreen />)
     await screen.findByRole('button', { name: 'New recurring cost' })
     fireEvent.click(screen.getByRole('button', { name: 'Incomes' }))
     await screen.findByRole('button', { name: 'New recurring income' })
@@ -137,13 +138,13 @@ describe('RecurringScreen toggle', () => {
 
     // The session memory survives: a fresh mount lands on Incomes, not the
     // Costs default.
-    render(<RecurringScreen />)
+    renderWithIntl(<RecurringScreen />)
     expect(await screen.findByRole('button', { name: 'New recurring income' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New recurring cost' })).not.toBeInTheDocument()
   })
 
   it('only fetches the side it renders', async () => {
-    render(<RecurringScreen />)
+    renderWithIntl(<RecurringScreen />)
     await screen.findByRole('button', { name: 'New recurring cost' })
     expect(fetchRecurringCostsMock).toHaveBeenCalled()
     expect(fetchRecurringIncomesMock).not.toHaveBeenCalled()

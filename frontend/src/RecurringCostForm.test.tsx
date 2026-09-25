@@ -10,6 +10,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
+import { renderWithIntl } from './test/renderWithIntl'
+
 import { RecurringCostForm } from './RecurringCostForm'
 import type { RecurringCost } from './api'
 
@@ -98,7 +100,7 @@ function renderForm(editing?: RecurringCost) {
   const onFreeze = vi.fn()
   const onUnfreeze = vi.fn()
   const onCancel = vi.fn()
-  const view = render(
+  const view = renderWithIntl(
     <RecurringCostForm
       cost={editing}
       onSaved={onSaved}

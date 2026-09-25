@@ -12,8 +12,9 @@
  * API client is mocked; the real display helpers (interval text, euro
  * formatting) stay live. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 
+import { renderWithIntl } from './test/renderWithIntl'
 import { RecurringCostsScreen } from './RecurringCostsScreen'
 import type { RecurringCost } from './api'
 
@@ -144,7 +145,7 @@ function mainSurface(name: string): HTMLElement {
 
 describe('RecurringCostsScreen rows', () => {
   it('renders every cost sorted by next due date with name, amount, interval, and due date', async () => {
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     const rows = ['Coffee', 'Rent', 'Insurance'].map(mainSurface)
@@ -160,7 +161,7 @@ describe('RecurringCostsScreen rows', () => {
 
   it('keeps the empty state when there are no costs', async () => {
     fetchRecurringCostsMock.mockResolvedValue([])
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
 
     expect(
       await screen.findByText("No recurring costs yet. Add your first one to track what's due."),
@@ -169,7 +170,7 @@ describe('RecurringCostsScreen rows', () => {
 
   it('shows the load error when the list cannot be fetched', async () => {
     fetchRecurringCostsMock.mockRejectedValue(new Error('down'))
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
 
     expect(
       await screen.findByText('Could not load your recurring costs.'),
@@ -180,7 +181,7 @@ describe('RecurringCostsScreen rows', () => {
 describe('RecurringCostsScreen row actions (ADR-0026)', () => {
   it('a main-surface tap requests the ledger jump for that cost and opens no modal', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<RecurringCostsScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<RecurringCostsScreen requestLedgerFilter={requestLedgerFilter} />)
     await screen.findByText('Coffee')
 
     fireEvent.click(mainSurface('Rent'))
@@ -191,7 +192,7 @@ describe('RecurringCostsScreen row actions (ADR-0026)', () => {
   })
 
   it('the ✎ button opens the edit modal for exactly that cost', async () => {
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Rent' }))
@@ -200,7 +201,7 @@ describe('RecurringCostsScreen row actions (ADR-0026)', () => {
   })
 
   it('the card Skip/Un-skip button is gone: no Skip action on the rows', async () => {
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument()
@@ -223,7 +224,7 @@ describe('RecurringCostsScreen create flow', () => {
       frozen: false,
       created_at: createdAt,
     })
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'New recurring cost' }))
@@ -257,7 +258,7 @@ describe('RecurringCostsScreen create flow', () => {
 
   it('shows the validation error when the API rejects the create', async () => {
     createRecurringCostMock.mockRejectedValue(new ApiError('Conflict', 409))
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'New recurring cost' }))
@@ -282,7 +283,7 @@ describe('RecurringCostsScreen edit and freeze flows', () => {
       next_due_date: '2026-09-01',
       next_unpaid_occurrence_date: '2026-09-01',
     })
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Rent' }))
@@ -305,7 +306,7 @@ describe('RecurringCostsScreen edit and freeze flows', () => {
   })
 
   it('loads the Occurrences section into the edit modal (ADR-0026)', async () => {
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Rent' }))
@@ -326,7 +327,7 @@ describe('RecurringCostsScreen edit and freeze flows', () => {
       next_unpaid_occurrence_date: null,
       backlog_count: 0,
     })
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Coffee' }))
@@ -342,7 +343,7 @@ describe('RecurringCostsScreen edit and freeze flows', () => {
   })
 
   it('backdrop tap, Escape, and Cancel all close the create modal without creating', async () => {
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'New recurring cost' }))
@@ -366,7 +367,7 @@ describe('RecurringCostsScreen edit and freeze flows', () => {
 
 describe('RecurringCostsScreen backlog badge', () => {
   it('renders the badge only on a cost with a Backlog', async () => {
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     expect(mainSurface('Coffee').textContent).toContain('3 unpaid')
@@ -382,7 +383,7 @@ describe('RecurringCostsScreen backlog badge', () => {
       amount: '900.00',
       backlog_count: 2,
     })
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Rent' }))
@@ -408,7 +409,7 @@ describe('RecurringCostsScreen backlog badge', () => {
       frozen: false,
       created_at: createdAt,
     })
-    render(<RecurringCostsScreen />)
+    renderWithIntl(<RecurringCostsScreen />)
     await screen.findByText('Coffee')
 
     fireEvent.click(screen.getByRole('button', { name: 'New recurring cost' }))

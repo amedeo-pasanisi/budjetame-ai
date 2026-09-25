@@ -18,7 +18,8 @@
  * UI. The API client is mocked; the form is driven like a user would
  * (click, type, submit). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { renderWithIntl } from "./test/renderWithIntl"
 
 import { CategoriesScreen } from './CategoriesScreen'
 import type { Category } from './api'
@@ -111,7 +112,7 @@ afterEach(() => {
 
 describe('CategoriesScreen header (issue #49)', () => {
   it('puts the New category button in the header row with the heading, always enabled, and no bottom button', () => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
 
     // Asserted before the list resolves: the button needs nothing from the
     // list, so it is available while loading (issue #49).
@@ -127,7 +128,7 @@ describe('CategoriesScreen header (issue #49)', () => {
 
 describe('CategoriesScreen sections (issue #41)', () => {
   it('groups categories into Expenses and Incomes, each sorted A→Z case-insensitively', async () => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
 
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
     const expenseRows = rowTapButtons(expenses).map((b) => b.textContent)
@@ -143,7 +144,7 @@ describe('CategoriesScreen sections (issue #41)', () => {
 
   it('renders only the sections that have categories', async () => {
     fetchCategoriesMock.mockResolvedValue([categories[1]])
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
 
     expect(
       await screen.findByRole('region', { name: 'Incomes' }),
@@ -154,7 +155,7 @@ describe('CategoriesScreen sections (issue #41)', () => {
 
 describe('CategoriesScreen search (issue #41)', () => {
   it('filters both sections live as the user types and restores the full list on clear', async () => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     await screen.findByRole('region', { name: 'Expenses' })
 
     const search = screen.getByRole('searchbox', { name: 'Search categories' })
@@ -178,7 +179,7 @@ describe('CategoriesScreen search (issue #41)', () => {
   })
 
   it('matches case-insensitively, hides a section with no matches, and shows the empty message', async () => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     await screen.findByRole('region', { name: 'Expenses' })
 
     const search = screen.getByRole('searchbox', { name: 'Search categories' })
@@ -200,7 +201,7 @@ describe('CategoriesScreen search (issue #41)', () => {
 
 describe('CategoriesScreen category modal (issue #41)', () => {
   const openEdit = async (name: string) => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
     fireEvent.click(within(expenses).getByRole('button', { name: `Edit ${name}` }))
     return screen.findByRole('dialog', { name: 'Edit category' })
@@ -270,7 +271,7 @@ describe('CategoriesScreen category modal (issue #41)', () => {
       color: '#ef4444',
       created_at: createdAt,
     })
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     await screen.findByRole('region', { name: 'Incomes' })
 
     fireEvent.click(screen.getByRole('button', { name: 'New category' }))
@@ -327,7 +328,7 @@ describe('CategoriesScreen category modal (issue #41)', () => {
 
 describe('CategoriesScreen Category form submit-and-validate (ADR-0029, issue #106)', () => {
   const openCreateDialog = async () => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     await screen.findByRole('region', { name: 'Expenses' })
     fireEvent.click(screen.getByRole('button', { name: 'New category' }))
     return screen.findByRole('dialog', { name: 'New category' })
@@ -387,7 +388,7 @@ describe('CategoriesScreen Category form submit-and-validate (ADR-0029, issue #1
 
   it('editing: clearing the Name reveals "Enter a name" on Save, restoring it saves without error', async () => {
     updateCategoryMock.mockResolvedValue({ ...categories[0], name: 'apple' })
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     await screen.findByRole('region', { name: 'Expenses' })
     fireEvent.click(within(screen.getByRole('region', { name: 'Expenses' })).getByRole('button', {
       name: 'Edit apple',
@@ -433,7 +434,7 @@ describe('CategoriesScreen Category form submit-and-validate (ADR-0029, issue #1
 describe('CategoriesScreen row taps open the ledger (issue #94)', () => {
   it('an expense row tap requests the ledger jump for that category and opens no modal', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
 
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
     fireEvent.click(within(expenses).getByRole('button', { name: /^apple/ }))
@@ -445,7 +446,7 @@ describe('CategoriesScreen row taps open the ledger (issue #94)', () => {
 
   it('an income row tap requests the ledger jump too', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
     await screen.findByRole('region', { name: 'Expenses' })
 
     fireEvent.click(
@@ -463,7 +464,7 @@ describe('CategoriesScreen row taps open the ledger (issue #94)', () => {
 describe('CategoriesScreen trailing ✎ buttons (issue #94)', () => {
   it('✎ opens the prefilled edit modal on an expense row, without jumping', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
 
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
     fireEvent.click(within(expenses).getByRole('button', { name: 'Edit apple' }))
@@ -475,7 +476,7 @@ describe('CategoriesScreen trailing ✎ buttons (issue #94)', () => {
 
   it('✎ opens the edit modal on an income row too', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<CategoriesScreen requestLedgerFilter={requestLedgerFilter} />)
     await screen.findByRole('region', { name: 'Expenses' })
 
     fireEvent.click(
@@ -501,7 +502,7 @@ describe('CategoriesScreen merge confirm flow (issue #45)', () => {
   })
 
   const openEdit = async (name: string) => {
-    render(<CategoriesScreen />)
+    renderWithIntl(<CategoriesScreen />)
     const expenses = await screen.findByRole('region', { name: 'Expenses' })
     fireEvent.click(within(expenses).getByRole('button', { name: `Edit ${name}` }))
     return screen.findByRole('dialog', { name: 'Edit category' })

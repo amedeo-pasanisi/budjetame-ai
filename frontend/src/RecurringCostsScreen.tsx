@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useIntl } from 'react-intl'
 
 import type { LedgerFilterRequest } from './App'
 import {
@@ -42,6 +43,7 @@ export function RecurringCostsScreen({
    * surface (ADR-0026). Optional so tests can render the screen bare. */
   requestLedgerFilter?: (request: LedgerFilterRequest) => void
 }) {
+  const { formatMessage } = useIntl()
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [costs, setCosts] = useState<RecurringCost[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -71,12 +73,12 @@ export function RecurringCostsScreen({
         setCosts(sortByNextDue(loadedCosts))
       })
       .catch(() => {
-        if (!cancelled) setLoadError('Could not load your recurring costs.')
+        if (!cancelled) setLoadError(formatMessage({ id: 'recurringCosts.loadError' }))
       })
     return () => {
       cancelled = true
     }
-  }, [token, dataVersion])
+  }, [token, dataVersion, formatMessage])
 
   const closeModal = () => {
     setModal(null)
@@ -125,23 +127,23 @@ export function RecurringCostsScreen({
   return (
     <>
       <div className="flex items-center justify-between">
-        <h2 className="font-semibold text-slate-900">Recurring Costs</h2>
+        <h2 className="font-semibold text-slate-900">{formatMessage({ id: 'recurringCosts.title' })}</h2>
         <button
           type="button"
           onClick={() => setModal({ kind: 'create' })}
           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
         >
-          New recurring cost
+          {formatMessage({ id: 'recurringCosts.new' })}
         </button>
       </div>
 
       {loadError !== null && <p className="mb-4 mt-2 text-sm text-red-600">{loadError}</p>}
 
       {costs === null ? (
-        <p className="mt-3 text-sm text-slate-500">Loading recurring costs…</p>
+        <p className="mt-3 text-sm text-slate-500">{formatMessage({ id: 'recurringCosts.loading' })}</p>
       ) : activeCosts !== null && activeCosts.length === 0 && frozenCosts?.length === 0 ? (
         <p className="mt-3 text-sm text-slate-500">
-          No recurring costs yet. Add your first one to track what&apos;s due.
+          {formatMessage({ id: 'recurringCosts.empty' })}
         </p>
       ) : (
         <>
@@ -162,8 +164,10 @@ export function RecurringCostsScreen({
                           {cost.name}
                         </span>
                         <span className="block truncate text-xs text-slate-500">
-                          {intervalText(cost.interval_value, cost.interval_unit)} · next
-                          due {cost.next_due_date}
+                          {formatMessage({ id: 'recurringCosts.nextDue' }, {
+                            interval: intervalText(cost.interval_value, cost.interval_unit),
+                            date: cost.next_due_date,
+                          })}
                         </span>
                       </span>
                       <span className="shrink-0 text-right">
@@ -172,14 +176,14 @@ export function RecurringCostsScreen({
                         </span>
                         {cost.backlog_count > 0 && (
                           <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
-                            {cost.backlog_count} unpaid
+                            {formatMessage({ id: 'recurringCosts.backlog' }, { count: cost.backlog_count })}
                           </span>
                         )}
                       </span>
                     </button>
                     <button
                       type="button"
-                      aria-label={`Edit ${cost.name}`}
+                      aria-label={formatMessage({ id: 'recurringCosts.editLabel' }, { name: cost.name })}
                       onClick={() => setModal({ kind: 'edit', cost })}
                       className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
                     >
@@ -199,7 +203,7 @@ export function RecurringCostsScreen({
                 onClick={() => setFrozenExpanded((open) => !open)}
                 className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
               >
-                Frozen recurring costs ({frozenCosts.length})
+                {formatMessage({ id: 'recurringCosts.frozen.header' }, { count: frozenCosts.length })}
               </button>
               {frozenExpanded && (
                 <ul className="mt-2 space-y-3">
@@ -218,7 +222,9 @@ export function RecurringCostsScreen({
                               {cost.name}
                             </span>
                             <span className="block text-xs text-slate-500">
-                              {intervalText(cost.interval_value, cost.interval_unit)} · Frozen
+                              {formatMessage({ id: 'recurringCosts.nextDueFrozen' }, {
+                                interval: intervalText(cost.interval_value, cost.interval_unit),
+                              })}
                             </span>
                           </span>
                           <span className="shrink-0 font-semibold text-slate-900">
@@ -227,7 +233,7 @@ export function RecurringCostsScreen({
                         </button>
                         <button
                           type="button"
-                          aria-label={`Edit ${cost.name}`}
+                          aria-label={formatMessage({ id: 'recurringCosts.editLabel' }, { name: cost.name })}
                           onClick={() => setModal({ kind: 'edit', cost })}
                           className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
                         >

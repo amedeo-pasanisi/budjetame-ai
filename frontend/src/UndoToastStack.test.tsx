@@ -5,7 +5,8 @@
  * props: stack, onUndo, onDismiss — no API mocking needed. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from "@testing-library/react"
+import { renderWithIntl } from "./test/renderWithIntl"
 import type { Transaction } from './api'
 import { UndoToastStack, type UndoEntry } from './UndoToastStack'
 
@@ -44,7 +45,7 @@ afterEach(() => {
 
 describe('UndoToastStack', () => {
   it('renders nothing when the stack is empty', () => {
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={[]}
         onUndo={vi.fn()}
@@ -60,7 +61,7 @@ describe('UndoToastStack', () => {
       { transaction: t2, createdAt: Date.now() + 10000 },
       { transaction: t1, createdAt: Date.now() },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={vi.fn()}
@@ -79,7 +80,7 @@ describe('UndoToastStack', () => {
     const stack: UndoEntry[] = [
       { transaction: t1, createdAt: Date.now() },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={vi.fn()}
@@ -96,7 +97,7 @@ describe('UndoToastStack', () => {
     const stack: UndoEntry[] = [
       { transaction: t1, createdAt: now },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={vi.fn()}
@@ -122,7 +123,7 @@ describe('UndoToastStack', () => {
     const stack: UndoEntry[] = [
       { transaction: t1, createdAt: now },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={vi.fn()}
@@ -142,7 +143,7 @@ describe('UndoToastStack', () => {
     const stack: UndoEntry[] = [
       { transaction: t1, createdAt: now },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={onUndo}
@@ -161,7 +162,7 @@ describe('UndoToastStack', () => {
     const stack: UndoEntry[] = [
       { transaction: t1, createdAt: now },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={vi.fn()}
@@ -181,7 +182,7 @@ describe('UndoToastStack', () => {
       { transaction: t2, createdAt: now + 20000 },
       { transaction: t1, createdAt: now },
     ]
-    render(
+    renderWithIntl(
       <UndoToastStack
         stack={stack}
         onUndo={vi.fn()}
