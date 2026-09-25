@@ -5,13 +5,54 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
-## [Unreleased]
+## [v1.9.0] — 2026-09-25
 
 ### Added
 
+- **Undo — single-tap delete with 10-second undo toast stack** (ADR-0031) —
+  deleting a Transaction is now a single tap (the two-tap "Tap again to
+  confirm" is gone); the deletion happens immediately, and a stack of up to
+  three **Undo toasts** appears at the bottom of the screen, each with its
+  own 10-second countdown. Tapping **Undo** re-creates the very same
+  Transaction through a dedicated endpoint. If the linked Recurring
+  Occurrence was already paid by another Transaction in the meantime, the
+  undo fails with an explicit message instead of silently re-linking.
+  The window is client-enforced (10s per toast, dies with the session).
+- **Undo preserves the recurring pin** — an undone Transaction that was
+  linked to a Recurring Cost or Recurring Income comes back with its
+  original link and Occurrence pin intact (issue #116).
+- **Backup — export all** — a new **Backup** section in Settings with an
+  "Export all" button that downloads a complete multi-sheet .xlsx of the
+  whole Account state: Transactions (including Opening Balances), Wallets,
+  Categories, Recurring Costs and Incomes, and skips, keyed by entity names
+  with original database ids carried alongside. The file is the user's
+  offline safety net (issue #112).
+- **Restore — atomic rollback** — also in the Backup section, a restore
+  flow that atomically replaces the Account's current data with a Backup
+  file's contents in one all-or-nothing step, guarded by a two-step
+  confirmation that first offers a fresh Export of the current state.
+  A Backup whose origin marker doesn't match the signed-in Account warns
+  before proceeding (issue #115).
+- **i18n: Account Locale with Italian number/date formatting** — a Locale
+  stored on the Account (not just the browser), auto-detected from the
+  browser locale on first load, and changeable in Settings. Under `it`,
+  amounts display Italian notation (`1.000,42 €`) and dates localize
+  (issue #114).
+- **i18n: react-intl UI catalogs** — `react-intl` with two message catalogs
+  (`en`, `it`) wrapping the whole app in an `IntlProvider` on the Account's
+  Locale. Italian translations for all core screens: dashboard, wallets,
+  transactions, categories, recurring, and settings (issue #117).
+- **i18n: remaining screens + client-side error catalogue** — Italian
+  translations for the import, backup/restore, and onboarding screens, plus
+  a client-side error catalogue mapping known backend messages and frontend
+  fallbacks to Locale keys. Unknown server strings fall back to English
+  (issue #118).
+
 ### Fixed
 
-### Changed
+- **Frontend Docker build** — removed unused `render` imports in
+  `RecurringCostForm.test.tsx` and `UndoToastStack.test.tsx` that blocked
+  the TypeScript compilation step (`tsc -b`).
 
 ## [v1.8.0] — 2026-09-23
 
@@ -313,3 +354,4 @@ behind the live deployment at budjetame.de.
 [v1.1.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.0
 [v1.1.1]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.1
 [v1.8.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.8.0
+[v1.9.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.9.0
