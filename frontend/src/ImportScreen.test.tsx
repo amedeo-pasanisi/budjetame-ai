@@ -34,7 +34,9 @@
  * file, read, toggle, edit a row, confirm). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect, useState } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { ImportScreen } from './ImportScreen'
 import { useImportDraft } from './importDraft'
@@ -742,7 +744,7 @@ async function openPreview(
   harnessProps: { initialWallets?: Wallet[]; initialCategories?: Category[] } = {},
 ) {
   previewImportMock.mockResolvedValue(previewOverride)
-  const view = render(<Harness {...harnessProps} />)
+  const view = renderWithIntl(<Harness {...harnessProps} />)
   const file = new File(['rows'], 'rows.csv', { type: 'text/csv' })
   const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
   fireEvent.change(input!, { target: { files: [file] } })

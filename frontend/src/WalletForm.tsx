@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useIntl } from 'react-intl'
 
 import {
   ApiError,
@@ -15,16 +16,17 @@ import {
 import { FieldError } from './FieldError'
 import { fieldErrorProps, parseAmount, type FieldErrors } from './validation'
 
-const TYPE_LABELS: Record<WalletType, string> = {
-  checking: 'Checking',
-  credit_card: 'Credit Card',
-  cash: 'Cash',
-  contact: 'Contact',
+/** The message id for each Wallet type (issue #117): the form's Type
+ * selector shows the singular label, like the Wallets screen's row
+ * subtitles. */
+const TYPE_MESSAGE_IDS: Record<WalletType, string> = {
+  checking: 'wallets.type.checking',
+  credit_card: 'wallets.type.creditCard',
+  cash: 'wallets.type.cash',
+  contact: 'wallets.type.contact',
 }
 
-const WALLET_TYPE_OPTIONS = (Object.entries(TYPE_LABELS) as [WalletType, string][]).map(
-  ([value, label]) => ({ value, label }),
-)
+const WALLET_TYPE_VALUES = Object.keys(TYPE_MESSAGE_IDS) as WalletType[]
 
 type WalletFormProps = {
   wallet?: Wallet
@@ -53,9 +55,11 @@ type WalletFormProps = {
  * malformed groupings) is one message and a parseable-but-not-positive
  * one another, because an Opening balance is a money amount. */
 function validate(name: string, openingBalance: string): FieldErrors {
+  // The pure validator returns message ids (issue #117); the caller
+  // formats them through react-intl.
   const errors: FieldErrors = {}
   if (name.trim() === '') {
-    errors.name = 'Enter a name'
+    errors.name = 'txForm.validation.nameEmpty'
   }
   const trimmedBalance = openingBalance.trim()
   if (trimmedBalance !== '' && parseAmount(trimmedBalance) === null) {
@@ -63,8 +67,8 @@ function validate(name: string, openingBalance: string): FieldErrors {
     // else. Split the nulls the way users experience them: text that is
     // not an amount at all vs a number that just is not positive.
     errors.openingBalance = /^-?\d+([.,]\d+)?$/.test(trimmedBalance)
-      ? 'Amount must be a positive number'
-      : "That doesn't look like an amount — use digits and one . or , for decimals"
+      ? 'txForm.validation.amountNotPositive'
+      : 'txForm.validation.amountInvalid'
   }
   return errors
 }
@@ -92,6 +96,8 @@ export function WalletForm({
   onUnfrozen,
   onCancel,
 }: WalletFormProps) {
+  const { formatMessage } = useIntl()
+  const typeLabel = (type: WalletType) => formatMessage({ id: TYPE_MESSAGE_IDS[type] })
   const editing = wallet !== undefined
   const readOnly = wallet?.frozen === true
   const [name, setName] = useState(wallet?.name ?? prefillName ?? '')
@@ -120,7 +126,13 @@ export function WalletForm({
     // nothing reaches the API. A valid draft clears the errors (they
     // refresh only on this next Save attempt) and proceeds exactly as
     // before.
-    const fieldErrors = validate(name, openingBalance)
+    const fieldErrorsRaw = validate(name, openingBalance)
+    const fieldErrors = Object.fromEntries(
+      Object.entries(fieldErrorsRaw).map(([field, id]) => [
+        field,
+        formatMessage({ id }),
+      ]),
+    )
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors)
       return
@@ -150,12 +162,14 @@ export function WalletForm({
         err instanceof ApiError
           ? apiErrorMessage(
               err,
-              'A wallet with this name already exists.',
-              editing ? 'Could not rename the wallet.' : 'Could not create the wallet.',
+              formatMessage({ id: 'walletForm.error.conflict' }),
+              editing
+                ? formatMessage({ id: 'walletForm.error.rename' })
+                : formatMessage({ id: 'walletForm.error.create' }),
             )
           : editing
-            ? 'Could not rename the wallet.'
-            : 'Could not create the wallet.',
+            ? formatMessage({ id: 'walletForm.error.rename' })
+            : formatMessage({ id: 'walletForm.error.create' }),
       )
     } finally {
       setSubmitting(false)
@@ -181,8 +195,8 @@ export function WalletForm({
       setConfirmingFreeze(false)
       setFreezeError(
         err instanceof ApiError && err.status === 422
-          ? 'A wallet can only be frozen when its balance is exactly €0.00.'
-          : 'Could not freeze the wallet.',
+          ? formatMessage({ id: 'walletForm.freeze.balanceRequired' })
+          : formatMessage({ id: 'walletForm.freeze.error' }),
       )
       setFreezing(false)
     }
@@ -199,7 +213,7 @@ export function WalletForm({
       await unfreezeWallet(token, wallet.id)
       onUnfrozen?.(wallet)
     } catch {
-      setFreezeError('Could not unfreeze the wallet.')
+      setFreezeError(formatMessage({ id: 'walletForm.unfreeze.error' }))
       setFreezing(false)
     }
   }
@@ -213,17 +227,17 @@ export function WalletForm({
       className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h2 className="font-medium text-slate-900">
-        {editing ? 'Edit wallet' : 'New wallet'}
+        {formatMessage({ id: editing ? 'walletForm.title.edit' : 'walletForm.title.new' })}
       </h2>
       {editing && (
         <p className="text-xs text-slate-500">
-          {TYPE_LABELS[wallet.type]} · type cannot be changed
+          {typeLabel(wallet.type)} · {formatMessage({ id: 'walletForm.typeLocked' })}
         </p>
       )}
 
       <div>
         <label htmlFor={readOnly ? undefined : "wallet-name"} className="block text-sm font-medium text-slate-700">
-          Name
+          {formatMessage({ id: 'walletForm.name' })}
         </label>
         {readOnly ? (
           <p className="mt-1 text-sm text-slate-900">{name}</p>
@@ -235,7 +249,7 @@ export function WalletForm({
             maxLength={80}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. Intesa checking"
+            placeholder={formatMessage({ id: 'walletForm.namePlaceholder' })}
             {...fieldErrorProps('name', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
@@ -247,7 +261,7 @@ export function WalletForm({
         <>
           <div>
             <label htmlFor="wallet-type" className="block text-sm font-medium text-slate-700">
-              Type
+              {formatMessage({ id: 'walletForm.type' })}
             </label>
             <select
               id="wallet-type"
@@ -255,24 +269,23 @@ export function WalletForm({
               onChange={(event) => setType(event.target.value as WalletType)}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
             >
-              {WALLET_TYPE_OPTIONS.filter(
-                (option) => allowedTypes === undefined || allowedTypes.includes(option.value),
-              ).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              {WALLET_TYPE_VALUES.filter(
+                (value) => allowedTypes === undefined || allowedTypes.includes(value),
+              ).map((value) => (
+                <option key={value} value={value}>
+                  {formatMessage({ id: TYPE_MESSAGE_IDS[value] })}
                 </option>
               ))}
             </select>
             {allowedTypes !== undefined && (
               <p className="mt-1 text-xs text-slate-500">
-                {allowedTypes.map((type) => TYPE_LABELS[type]).join(', ')} · fixed for this
-                form
+                {allowedTypes.map(typeLabel).join(', ')} · {formatMessage({ id: 'walletForm.typesFixed' })}
               </p>
             )}
           </div>
           <div>
             <label htmlFor="opening-balance" className="block text-sm font-medium text-slate-700">
-              Opening balance (optional)
+              {formatMessage({ id: 'walletForm.openingBalance' })}
             </label>
             <input
               id="opening-balance"
@@ -292,8 +305,8 @@ export function WalletForm({
             <FieldError field="openingBalance" errors={errors} />
             <p className="mt-1 text-xs text-slate-500">
               {type === 'contact'
-                ? 'Contact wallets start at €0 — money moves only through transfers.'
-                : 'Money you already have. Defaults to €0.00.'}
+                ? formatMessage({ id: 'walletForm.openingBalance.contact' })
+                : formatMessage({ id: 'walletForm.openingBalance.hint' })}
             </p>
           </div>
         </>
@@ -312,7 +325,11 @@ export function WalletForm({
             disabled={submitting || freezing}
             className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
           >
-            {submitting ? 'Saving…' : editing ? 'Save' : 'Create wallet'}
+            {submitting
+              ? formatMessage({ id: 'walletForm.saving' })
+              : editing
+                ? formatMessage({ id: 'walletForm.save' })
+                : formatMessage({ id: 'walletForm.create' })}
           </button>
           <button
             type="button"
@@ -320,7 +337,7 @@ export function WalletForm({
             disabled={submitting}
             className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
           >
-            Cancel
+            {formatMessage({ id: 'txForm.cancel' })}
           </button>
         </div>
       )}
@@ -333,7 +350,9 @@ export function WalletForm({
             disabled={freezing || submitting}
             className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
           >
-            {freezing ? 'Unfreezing…' : 'Unfreeze wallet'}
+            {freezing
+              ? formatMessage({ id: 'walletForm.unfreezing' })
+              : formatMessage({ id: 'walletForm.unfreeze' })}
           </button>
           <button
             type="button"
@@ -341,17 +360,16 @@ export function WalletForm({
             disabled={submitting}
             className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
           >
-            Cancel
+            {formatMessage({ id: 'txForm.cancel' })}
           </button>
         </div>
       )}
 
       {editing && !readOnly && (
         <div className="border-t border-slate-100 pt-4">
-          <h3 className="text-sm font-medium text-slate-900">Freeze wallet</h3>
+          <h3 className="text-sm font-medium text-slate-900">{formatMessage({ id: 'walletForm.freeze.title' })}</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Hides the wallet and makes it read-only. Only possible at €0.00 balance;
-            its transactions stay visible.
+            {formatMessage({ id: 'walletForm.freeze.hint' })}
           </p>
           {freezeError !== null && <p className="mt-2 text-sm text-red-600">{freezeError}</p>}
           <button
@@ -365,12 +383,12 @@ export function WalletForm({
             }`}
           >
             {freezing
-              ? 'Freezing…'
+              ? formatMessage({ id: 'walletForm.freeze.freezing' })
               : !canFreeze
-                ? `Freeze requires €0.00 balance (currently ${formatEuros(wallet.balance)})`
+                ? formatMessage({ id: 'walletForm.freeze.balance' }, { balance: formatEuros(wallet.balance) })
                 : confirmingFreeze
-                  ? 'Tap again to confirm freeze'
-                  : 'Freeze wallet'}
+                  ? formatMessage({ id: 'walletForm.freeze.confirm' })
+                  : formatMessage({ id: 'walletForm.freeze.button' })}
           </button>
         </div>
       )}

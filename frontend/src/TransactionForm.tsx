@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useIntl } from 'react-intl'
 
 import {
   ApiError,
@@ -111,8 +112,10 @@ type TransactionDraft = {
 
 /** Submit-and-validate (ADR-0029): the Transaction form's pure validation.
  * Returns one Field Error per wrong field — keyed by the error keys the
- * fields render under — and nothing for a valid form. Runs on every Save
- * click before any API call; a form with errors submits nothing. Reuses
+ * fields render under and carrying the message id (issue #117, catalogs.ts)
+ * — and nothing for a valid form. Runs on every Save click before any API
+ * call; a form with errors submits nothing. The caller formats the ids
+ * through react-intl so the field text follows the Account Locale. Reuses
  * the shared tolerant amount parser from the validation layer (issue
  * #102), never re-implementing it: an empty Amount is its own message, an
  * unparseable one (letters, signs, malformed groupings) another, and a
@@ -121,38 +124,38 @@ function validate(draft: TransactionDraft): FieldErrors {
   const errors: FieldErrors = {}
   const trimmedAmount = draft.amount.trim()
   if (trimmedAmount === '') {
-    errors.amount = 'Enter an amount'
+    errors.amount = 'txForm.validation.amountEmpty'
   } else if (parseAmount(trimmedAmount) === null) {
     // parseAmount reads a finite positive number, or null for everything
     // else. Split the nulls the way users experience them: text that is
     // not an amount at all, vs a number that just is not positive.
     errors.amount = /^-?\d+([.,]\d+)?$/.test(trimmedAmount)
-      ? 'Amount must be a positive number'
-      : "That doesn't look like an amount — use digits and one . or , for decimals"
+      ? 'txForm.validation.amountNotPositive'
+      : 'txForm.validation.amountInvalid'
   }
   if (draft.date.trim() === '') {
-    errors.date = 'Choose a date'
+    errors.date = 'txForm.validation.dateEmpty'
   }
   if (draft.type === 'transfer') {
     if (draft.sourceWalletId === undefined) {
-      errors.source = 'Choose the source wallet.'
+      errors.source = 'txForm.validation.sourceRequired'
     }
     if (draft.destinationWalletId === undefined) {
-      errors.destination = 'Choose the destination wallet.'
+      errors.destination = 'txForm.validation.destinationRequired'
     }
     if (
       draft.sourceWalletId !== undefined &&
       draft.sourceWalletId === draft.destinationWalletId
     ) {
       // Both legs are equally wrong: the same message rides under each.
-      errors.source = 'Source and destination must be different wallets.'
-      errors.destination = 'Source and destination must be different wallets.'
+      errors.source = 'txForm.validation.sameWallet'
+      errors.destination = 'txForm.validation.sameWallet'
     }
   } else {
     if (draft.walletId === undefined) {
-      errors.wallet = 'Choose a wallet.'
+      errors.wallet = 'txForm.validation.walletRequired'
     } else if (draft.type === 'income' && draft.selectedWalletType === 'contact') {
-      errors.wallet = "Incomes can't be recorded on contact wallets."
+      errors.wallet = 'txForm.validation.incomeNoContact'
     }
   }
   return errors
@@ -180,6 +183,7 @@ export function TransactionForm({
   onAddRecurringIncome,
   recurringIncomeToSelect,
 }: TransactionFormProps) {
+  const { formatMessage } = useIntl()
   const [type, setType] = useState<TransactionFormType>(
     editing?.type === 'transfer'
       ? 'transfer'
@@ -430,7 +434,9 @@ export function TransactionForm({
     // nothing reaches the API. A valid draft clears the errors (they
     // refresh only on this next Save attempt) and proceeds exactly as
     // before.
-    const fieldErrors = validate({
+    // The pure validator returns message ids (issue #117); translate them
+    // here so the Field Errors render in the Account Locale.
+    const fieldErrorsRaw = validate({
       type,
       amount,
       date,
@@ -439,6 +445,12 @@ export function TransactionForm({
       sourceWalletId,
       destinationWalletId,
     })
+    const fieldErrors = Object.fromEntries(
+      Object.entries(fieldErrorsRaw).map(([field, id]) => [
+        field,
+        formatMessage({ id }),
+      ]),
+    )
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors)
       return
@@ -513,10 +525,12 @@ export function TransactionForm({
         err instanceof ApiError
           ? apiErrorMessage(
               err,
-              'A wallet or category with this name already exists.',
-              isEditing ? 'Could not save the transaction.' : 'Could not create the transaction.',
+              formatMessage({ id: 'txForm.error.conflict' }),
+              isEditing
+                ? formatMessage({ id: 'txForm.error.save' })
+                : formatMessage({ id: 'txForm.error.create' }),
             )
-          : 'Something went wrong.',
+          : formatMessage({ id: 'txForm.error.generic' }),
       )
     } finally {
       setSubmitting(false)
@@ -536,8 +550,12 @@ export function TransactionForm({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? apiErrorMessage(err, 'A wallet or category with this name already exists.', 'Could not delete the transaction.')
-          : 'Something went wrong.',
+          ? apiErrorMessage(
+              err,
+              formatMessage({ id: 'txForm.error.conflict' }),
+              formatMessage({ id: 'txForm.error.delete' }),
+            )
+          : formatMessage({ id: 'txForm.error.generic' }),
       )
       setSubmitting(false)
     }
@@ -557,7 +575,7 @@ export function TransactionForm({
       } else {
         // Denied, timed out, or unavailable: say so instead of failing
         // silently, with the map picker still one tap away (issue #35).
-        setGpsError("Couldn't get your location — check permissions or pick it on the map.")
+        setGpsError(formatMessage({ id: 'txForm.location.gpsError' }))
       }
     } finally {
       setLocating(false)
@@ -573,7 +591,7 @@ export function TransactionForm({
       className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <h3 className="font-medium text-slate-900">
-        {isEditing ? 'Edit transaction' : 'New transaction'}
+        {formatMessage({ id: isEditing ? 'txForm.title.edit' : 'txForm.title.new' })}
       </h3>
 
       <TypeSelector active={type} disabled={isEditing} onSelect={setType} />
@@ -581,7 +599,7 @@ export function TransactionForm({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label htmlFor="tx-amount" className="block text-sm font-medium text-slate-700">
-            Amount (€)
+            {formatMessage({ id: 'txForm.amount' })}
           </label>
           {/* The browser-owned type="number" is what swallowed "17.5" in
           comma-locales (ADR-0029): parsing is ours now — a tolerant text
@@ -593,7 +611,7 @@ export function TransactionForm({
             required
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
-            placeholder="0.00"
+            placeholder={formatMessage({ id: 'txForm.amountPlaceholder' })}
             {...fieldErrorProps('amount', errors)}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
           />
@@ -601,7 +619,7 @@ export function TransactionForm({
         </div>
         <div>
           <label htmlFor="tx-date" className="block text-sm font-medium text-slate-700">
-            Date
+            {formatMessage({ id: 'txForm.date' })}
           </label>
           <input
             id="tx-date"
@@ -660,7 +678,7 @@ export function TransactionForm({
       ) : null}
 
       {isTransfer ? (
-        <p className="text-xs text-slate-500">Transfers never carry a category.</p>
+        <p className="text-xs text-slate-500">{formatMessage({ id: 'txForm.transferNoCategory' })}</p>
       ) : (
         <CategoryField
           categories={categories}
@@ -718,7 +736,7 @@ export function TransactionForm({
 
       <div>
         <label htmlFor="tx-description" className="block text-sm font-medium text-slate-700">
-          Description
+          {formatMessage({ id: 'txForm.description' })}
         </label>
         <textarea
           ref={descriptionField}
@@ -727,13 +745,13 @@ export function TransactionForm({
           maxLength={500}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="Optional note"
+          placeholder={formatMessage({ id: 'txForm.descriptionPlaceholder' })}
           className="mt-1 w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
         />
       </div>
 
       <div>
-        <span className="block text-sm font-medium text-slate-700">Location</span>
+        <span className="block text-sm font-medium text-slate-700">{formatMessage({ id: 'txForm.location' })}</span>
         {location !== null ? (
           <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
             <span className="text-sm text-slate-700">
@@ -745,7 +763,7 @@ export function TransactionForm({
               rel="noreferrer"
               className="text-sm font-medium text-indigo-600"
             >
-              Open in Google Maps ↗
+              {formatMessage({ id: 'txForm.location.openMaps' })}
             </a>
             <button
               type="button"
@@ -759,11 +777,11 @@ export function TransactionForm({
               }}
               className="rounded px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 active:bg-red-100"
             >
-              Remove
+              {formatMessage({ id: 'txForm.location.remove' })}
             </button>
           </div>
         ) : (
-          <p className="mt-1 text-xs text-slate-500">No location attached.</p>
+          <p className="mt-1 text-xs text-slate-500">{formatMessage({ id: 'txForm.location.none' })}</p>
         )}
         {showingPicker ? (
           <div className="mt-2 space-y-2">
@@ -784,7 +802,7 @@ export function TransactionForm({
               onClick={() => setShowingPicker(false)}
               className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 active:bg-slate-200"
             >
-              Cancel
+              {formatMessage({ id: 'txForm.location.cancel' })}
             </button>
           </div>
         ) : (
@@ -795,7 +813,7 @@ export function TransactionForm({
                 onClick={() => setShowingPicker(true)}
                 className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 active:bg-slate-200"
               >
-                {location !== null ? 'Change location' : 'Add location'}
+                {formatMessage({ id: location !== null ? 'txForm.location.change' : 'txForm.location.add' })}
               </button>
               <button
                 type="button"
@@ -809,10 +827,10 @@ export function TransactionForm({
                       aria-hidden="true"
                       className="h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent"
                     />
-                    Locating…
+                    {formatMessage({ id: 'txForm.location.locating' })}
                   </span>
                 ) : (
-                  'Use my location'
+                  formatMessage({ id: 'txForm.location.useGps' })
                 )}
               </button>
             </div>
@@ -833,7 +851,11 @@ export function TransactionForm({
           disabled={submitting || locating || lookingUpForPlace}
           className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60"
         >
-          {submitting ? 'Saving…' : isEditing ? 'Save' : 'Save transaction'}
+          {submitting
+            ? formatMessage({ id: 'txForm.saving' })
+            : isEditing
+              ? formatMessage({ id: 'txForm.save' })
+              : formatMessage({ id: 'txForm.saveTransaction' })}
         </button>
         <button
           type="button"
@@ -841,7 +863,7 @@ export function TransactionForm({
           disabled={submitting}
           className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
         >
-          Cancel
+          {formatMessage({ id: 'txForm.cancel' })}
         </button>
       </div>
 
@@ -852,7 +874,9 @@ export function TransactionForm({
           disabled={submitting}
           className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:border-red-300 hover:bg-red-50"
         >
-          {submitting ? 'Deleting…' : 'Delete transaction'}
+          {submitting
+            ? formatMessage({ id: 'txForm.deleting' })
+            : formatMessage({ id: 'txForm.delete' })}
         </button>
       )}
     </form>

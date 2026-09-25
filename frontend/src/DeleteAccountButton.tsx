@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useIntl } from 'react-intl'
 
 type DeleteAccountButtonProps = {
   /** Deletes the Account; must throw on failure. */
@@ -11,11 +12,12 @@ type DeleteAccountButtonProps = {
  * before the irreversible call, a clean error if it fails, and a call-back
  * on success so the app can sign out. */
 export function DeleteAccountButton({ onDelete, onDeleted }: DeleteAccountButtonProps) {
+  const { formatMessage } = useIntl()
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleClick = async () => {
-    if (!window.confirm('This permanently deletes your Account and all its data. Continue?')) {
+    if (!window.confirm(formatMessage({ id: 'settings.deleteAccount.confirm' }))) {
       return
     }
     setDeleting(true)
@@ -24,7 +26,7 @@ export function DeleteAccountButton({ onDelete, onDeleted }: DeleteAccountButton
       await onDelete()
       onDeleted()
     } catch {
-      setError('Could not delete the Account. Please try again.')
+      setError(formatMessage({ id: 'settings.deleteAccount.error' }))
       setDeleting(false)
     }
   }
@@ -37,7 +39,7 @@ export function DeleteAccountButton({ onDelete, onDeleted }: DeleteAccountButton
         onClick={handleClick}
         className="text-sm font-medium text-red-600 disabled:opacity-60"
       >
-        {deleting ? 'Deleting…' : 'Delete account'}
+        {deleting ? formatMessage({ id: 'settings.deleteAccount.deleting' }) : formatMessage({ id: 'settings.deleteAccount' })}
       </button>
       {error !== null && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>

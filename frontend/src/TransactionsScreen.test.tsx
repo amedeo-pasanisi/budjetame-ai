@@ -8,10 +8,12 @@
  * and the map picker are mocked; the real form is driven like a user would
  * (click, type, submit) for the reset-on-write path. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 
 import type { LedgerFilterRequest } from './App'
+import { renderWithIntl } from './test/renderWithIntl'
+
 import { TransactionsScreen } from './TransactionsScreen'
 import { useImportDraft } from './importDraft'
 import type {
@@ -351,7 +353,7 @@ describe('TransactionsScreen row title (description-led)', () => {
       items: [{ ...coffee, category_id: 1 }, { ...baseTransaction, id: 2 }],
       next_cursor: null,
     }))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     // Category leads, the whole Description follows on the bold line.
     expect(await screen.findByText('Food · Coffee')).toBeInTheDocument()
@@ -376,7 +378,7 @@ describe('TransactionsScreen row location pin (issue #91)', () => {
       ],
       next_cursor: null,
     }))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     // The pin reads the Place name instead of standing bare.
     expect(await screen.findByText('2026-08-01 · Cash · 📍 Esselunga')).toBeInTheDocument()
@@ -387,7 +389,7 @@ describe('TransactionsScreen row location pin (issue #91)', () => {
       items: [{ ...coffee, latitude: '41.9028', longitude: '12.4964' }],
       next_cursor: null,
     }))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     // No Place: the subtitle keeps the bare pin (the Place is cleared
     // together with the coordinates when the Location is not a Place).
@@ -395,7 +397,7 @@ describe('TransactionsScreen row location pin (issue #91)', () => {
   })
 
   it('shows neither pin nor Place when the Transaction has no location', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     expect(await screen.findByText('2026-08-01 · Cash')).toBeInTheDocument()
     expect(screen.queryByText('📍')).not.toBeInTheDocument()
@@ -404,14 +406,14 @@ describe('TransactionsScreen row location pin (issue #91)', () => {
 
 describe('TransactionsScreen infinite scroll', () => {
   it('renders the first page of the ledger', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     expect(await screen.findByText(/Coffee/)).toBeInTheDocument()
     expect(fetchTransactionsMock).toHaveBeenCalledWith('', {})
   })
 
   it('loads the next page when the sentinel enters the viewport, without duplicates', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     await enterSentinel()
@@ -425,7 +427,7 @@ describe('TransactionsScreen infinite scroll', () => {
   })
 
   it('does not fetch further pages once the last page is reached', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     await enterSentinel()
@@ -440,7 +442,7 @@ describe('TransactionsScreen infinite scroll', () => {
   })
 
   it('resets to the first page after saving a transaction', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     await enterSentinel()
     await screen.findByText(/Rent/)
@@ -462,7 +464,7 @@ describe('TransactionsScreen infinite scroll', () => {
 
 describe('TransactionsScreen merged filters (issue #33)', () => {
   it('keeps the filter bar closed by default and toggles it', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     const toggle = await screen.findByRole('button', { name: /filters/i })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -478,7 +480,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
 
   it('lists active and Frozen Wallets in the Wallet dropdown, marked and with balances', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     fireEvent.click(await screen.findByRole('button', { name: /filters/i }))
     const select = await screen.findByLabelText('Wallet')
@@ -500,7 +502,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.walletId === 2 ? { items: [frozenLunch], next_cursor: null } : page1,
     )
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
@@ -521,7 +523,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.fromDate === '2026-01-01' ? { items: [], next_cursor: null } : page1,
     )
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
@@ -538,7 +540,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
 
   it('resets filters when the screen unmounts (a tab switch)', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    const { unmount } = render(<Harness />)
+    const { unmount } = renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
     fireEvent.change(await screen.findByLabelText('Wallet'), { target: { value: '2' } })
@@ -548,7 +550,7 @@ describe('TransactionsScreen merged filters (issue #33)', () => {
 
     unmount()
     fetchTransactionsMock.mockClear()
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     await screen.findByText(/Coffee/)
     // Fresh mount: bar closed, no wallet selected, unfiltered first page.
@@ -580,7 +582,7 @@ describe('TransactionsScreen search (issue #54)', () => {
   const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
   it('renders the toolbar row under the header: search with the Filters toggle to its right', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const search = screen.getByRole('searchbox', { name: 'Search transactions' })
@@ -603,7 +605,7 @@ describe('TransactionsScreen search (issue #54)', () => {
       items: [],
       next_cursor: null,
     }))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     expect(await screen.findByText('Nothing here yet.')).toBeInTheDocument()
     // Search AND the Filters toggle disappear together: with nothing to
@@ -620,7 +622,7 @@ describe('TransactionsScreen search (issue #54)', () => {
         ? { items: [newCoffee], next_cursor: null }
         : page1,
     )
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     withFakeTimers()
@@ -649,7 +651,7 @@ describe('TransactionsScreen search (issue #54)', () => {
         ? { items: [secondCoffee], next_cursor: null }
         : { items: [coffee], next_cursor: 'c1' }
     })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     withFakeTimers()
@@ -680,7 +682,7 @@ describe('TransactionsScreen search (issue #54)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.q === 'zzz' ? { items: [], next_cursor: null } : page1,
     )
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     withFakeTimers()
@@ -717,7 +719,7 @@ describe('TransactionsScreen search (issue #54)', () => {
       }
       return page1
     })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
@@ -792,7 +794,7 @@ describe('TransactionsScreen search (issue #54)', () => {
       }
       return page1
     })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
@@ -828,7 +830,7 @@ describe('TransactionsScreen search (issue #54)', () => {
   })
 
   it('resets the search when the screen unmounts (a tab switch)', async () => {
-    const { unmount } = render(<Harness />)
+    const { unmount } = renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     withFakeTimers()
     await typeSearch('coffee')
@@ -840,7 +842,7 @@ describe('TransactionsScreen search (issue #54)', () => {
 
     unmount()
     fetchTransactionsMock.mockClear()
-    render(<Harness />)
+    renderWithIntl(<Harness />)
 
     await screen.findByText(/Coffee/)
     expect(
@@ -850,7 +852,7 @@ describe('TransactionsScreen search (issue #54)', () => {
   })
 
   it('refreshes with the search applied after saving a transaction', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     withFakeTimers()
     await typeSearch('coffee')
@@ -872,7 +874,7 @@ describe('TransactionsScreen search (issue #54)', () => {
   })
 
   it('refreshes with the search applied after deleting a transaction', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     withFakeTimers()
     await typeSearch('coffee')
@@ -912,7 +914,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
       items: [coffee, salary],
       next_cursor: null,
     }))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // Create mode, Expense (the default type): the sentinel sits last.
@@ -939,7 +941,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
 
   it('picking the sentinel opens the New category modal locked to the current type and reverts the dropdown', async () => {
     fetchCategoriesMock.mockResolvedValue([foodCategory, salaryCategory])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -977,7 +979,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
     fetchCategoriesMock.mockResolvedValue([foodCategory])
     createCategoryMock.mockResolvedValue(groceryCategory)
     createTransactionMock.mockResolvedValue({ ...newCoffee, category_id: 5 })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1035,7 +1037,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
       type: 'income',
       category_id: 6,
     })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1076,7 +1078,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
   })
 
   it('Cancel, backdrop tap, and Escape close only the category modal and leave the form draft intact', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1129,7 +1131,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
   it('a duplicate category name shows the validation error inside the modal and selects nothing', async () => {
     fetchCategoriesMock.mockResolvedValue([foodCategory])
     createCategoryMock.mockRejectedValue(new ApiError('Conflict', 409))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1158,7 +1160,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
   })
 
   it('the Transfer form shows no Category field and no sentinel', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1170,7 +1172,7 @@ describe('TransactionsScreen inline category creation (ADR-0013)', () => {
   it('works in edit mode: the inline Category is auto-selected and the edit carries its id', async () => {
     createCategoryMock.mockResolvedValue(groceryCategory)
     updateTransactionMock.mockResolvedValue({ ...baseTransaction, category_id: 5 })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByText('Coffee'))
@@ -1223,7 +1225,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
 
   it('shows the sentinel as the last option in the Expense/Income Wallet select, in create and edit modes', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // Create mode: the sentinel sits after the spendable Wallet. This
@@ -1242,7 +1244,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
 
   it('offers a Contact Wallet in the Expense form and explains it, but never in the Income form', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // Expense (the default type): Marco is offered — an Expense on a
@@ -1269,7 +1271,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
 
   it('creates an Expense on a Contact Wallet and submits its id', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1291,7 +1293,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
 
   it('switching an Expense that picked a Contact Wallet to Income keeps the Wallet and blocks Save with a Field Error', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1331,7 +1333,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
     // inline. The Expense form, by contrast, may record on the Contact
     // Wallet (ADR-0017).
     fetchWalletsMock.mockResolvedValue([frozenWallet, marcoWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1341,7 +1343,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
   })
 
   it('the Expense sentinel opens the New wallet modal with all four types, the Income sentinel without Contact', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // Expense: Contact Wallets belong in the modal too (ADR-0017).
@@ -1376,7 +1378,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
 
   it('a Transfer From/To sentinel opens the modal with all four types and reverts only the picked field', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, marcoWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1433,7 +1435,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
       created_at: '2026-01-01T00:00:00Z',
     })
     createTransactionMock.mockResolvedValue({ ...newCoffee, wallet_id: 7 })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1498,7 +1500,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
       source_wallet_id: 7,
       destination_wallet_id: 4,
     })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1550,7 +1552,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
   })
 
   it('Cancel, backdrop tap, and Escape close only the wallet modal and leave the form draft intact', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1602,7 +1604,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
 
   it('a duplicate wallet name shows the validation error inside the modal and selects nothing', async () => {
     createWalletMock.mockRejectedValue(new ApiError('Conflict', 409))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1630,7 +1632,7 @@ describe('TransactionsScreen inline wallet creation (issue #72)', () => {
   })
 
   it('edit mode locks the Wallet select, so the sentinel is inert there', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByText('Coffee'))
@@ -1669,7 +1671,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
       items: [coffee, salary],
       next_cursor: null,
     }))
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // Create mode, Expense (the default type): the sentinel sits last.
@@ -1714,7 +1716,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
 
   it('picking the sentinel opens the New recurring cost modal and reverts the dropdown', async () => {
     fetchRecurringCostsMock.mockResolvedValue([rentCost])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1737,7 +1739,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
   it('the full flow — sentinel, create, auto-select, submit — carries the new cost id and shows the paid occurrence', async () => {
     fetchRecurringCostsMock.mockResolvedValue([])
     createTransactionMock.mockResolvedValue({ ...newCoffee, recurring_cost_id: 11 })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1804,7 +1806,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
       type: 'income',
       recurring_income_id: 12,
     })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1850,7 +1852,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
   })
 
   it('Cancel, backdrop tap, and Escape close only the recurring modal and leave the form draft intact', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const dialog = await openCreateForm()
@@ -1909,7 +1911,7 @@ describe('TransactionsScreen inline recurring cost creation (issue #73)', () => 
   it('works in edit mode: the inline Recurring Cost is auto-selected and the edit carries its id', async () => {
     fetchRecurringCostsMock.mockResolvedValue([])
     updateTransactionMock.mockResolvedValue({ ...baseTransaction, recurring_cost_id: 11 })
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByText('Coffee'))
@@ -1962,7 +1964,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
   const withFakeTimers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
   it('has no "All transactions" heading row under the header', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // The Transactions h2 is the only heading: the duplicate h3 row that
@@ -1976,7 +1978,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
   it('never shows a count on the Filters toggle — the chips on the filtered line say what is applied', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
     fetchCategoriesMock.mockResolvedValue([foodCategory])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // The toggle never carries a count: even with filters set it reads
@@ -2018,7 +2020,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
     fetchCategoriesMock.mockResolvedValue([foodCategory])
     fetchRecurringCostsMock.mockResolvedValue([rentCost])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
@@ -2070,7 +2072,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
   it('a chip ✕ removes just that filter and refetches, leaving the rest', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
     fetchCategoriesMock.mockResolvedValue([foodCategory])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
@@ -2100,7 +2102,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
   })
 
   it('the date chips read From …/To … alone and merge into one chip that clears both', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // From alone: one chip named From …, and its ✕ clears just that side.
@@ -2151,7 +2153,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
 
   it('the line Clear all removes the five filters AND the search in one tap', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
@@ -2198,7 +2200,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
   })
 
   it('a search-only state shows no filtered line', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     withFakeTimers()
@@ -2223,7 +2225,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
 
   it('the panel footer Clear all filters clears only the five, leaving the search', async () => {
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Filters ▸' }))
@@ -2273,7 +2275,7 @@ describe('TransactionsScreen chrome (issue #92)', () => {
   })
 
   it('header actions: Import is a muted text link left of New transaction', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     const importButton = screen.getByRole('button', { name: 'Import' })
@@ -2309,7 +2311,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
         downloaded.name = this.download
       })
 
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     // The panel footer's Export is always there once the panel opens; with
     // nothing set this is the full-ledger export path.
@@ -2330,7 +2332,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
     // override before render, so the select has the option when the change
     // fires.
     fetchWalletsMock.mockResolvedValue([wallet, frozenWallet])
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
 
     // Set a filter through the panel...
@@ -2355,7 +2357,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
       new ApiError('Could not export transactions', 500),
     )
 
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     fireEvent.click(screen.getByRole('button', { name: /filters/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Export to Excel' }))
@@ -2366,7 +2368,7 @@ describe('TransactionsScreen export (US 7.3)', () => {
   })
 
   it('hides Import, New transaction, and Export while the import draft is open', async () => {
-    render(<Harness />)
+    renderWithIntl(<Harness />)
     await screen.findByText(/Coffee/)
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
@@ -2394,7 +2396,7 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.walletId === 2 ? { items: [], next_cursor: null } : page1,
     )
-    const view = render(
+    const view = renderWithIntl(
       <Harness initialRequest={{ kind: 'wallet', id: 2 }} onConsumed={onConsumed} />,
     )
 
@@ -2432,7 +2434,7 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
       filters.categoryId === 5 ? { items: [], next_cursor: null } : page1,
     )
     const onConsumed = vi.fn()
-    render(<Harness onConsumed={onConsumed} />)
+    renderWithIntl(<Harness onConsumed={onConsumed} />)
     await screen.findByText(/Coffee/)
 
     // Dirty every piece of state the jump must replace: an open Filters
@@ -2496,7 +2498,7 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
 
   it('a newer request replaces one still pending, applying only the latest', async () => {
     const onConsumed = vi.fn()
-    render(<Harness onConsumed={onConsumed} />)
+    renderWithIntl(<Harness onConsumed={onConsumed} />)
     await screen.findByText(/Coffee/)
     fetchTransactionsMock.mockClear()
 
@@ -2531,7 +2533,7 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
         : page1,
     )
     const onConsumed = vi.fn()
-    render(<Harness onConsumed={onConsumed} />)
+    renderWithIntl(<Harness onConsumed={onConsumed} />)
     await screen.findByText(/Coffee/)
 
     // Open the Import Draft: the screen swaps to the Import screen.
@@ -2567,7 +2569,7 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
     fetchTransactionsMock.mockImplementation(async (_token, filters = {}) =>
       filters.recurringCostId === 11 ? { items: [], next_cursor: null } : page1,
     )
-    const view = render(
+    const view = renderWithIntl(
       <Harness
         initialRequest={{ kind: 'recurring-cost', id: 11 }}
         onConsumed={onConsumed}
@@ -2617,7 +2619,7 @@ describe('TransactionsScreen ledger jump (issue #90)', () => {
       filters.recurringIncomeId === 12 ? { items: [], next_cursor: null } : page1,
     )
     const onConsumed = vi.fn()
-    render(<Harness onConsumed={onConsumed} />)
+    renderWithIntl(<Harness onConsumed={onConsumed} />)
     await screen.findByText(/Coffee/)
 
     // Dirty every piece of state the jump must replace: an open Filters

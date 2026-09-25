@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useIntl } from 'react-intl'
 
 import {
   TOKEN_KEY,
@@ -32,6 +33,7 @@ import { chipLeftForBar, chipTopForBar, trendChartGeometry } from './trendChart'
  * current month (issue #66) and the trend card has its own range (US27,
  * US28). */
 export function DashboardScreen() {
+  const { formatMessage } = useIntl()
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const currentMonth = todayInRome().slice(0, 7)
   // The category pie's reference month: the selector lives inside the pie
@@ -88,12 +90,12 @@ export function DashboardScreen() {
         if (!cancelled) setSummary(data)
       })
       .catch(() => {
-        if (!cancelled) setLoadError('Could not load your dashboard.')
+        if (!cancelled) setLoadError(formatMessage({ id: 'dashboard.loadError' }))
       })
     return () => {
       cancelled = true
     }
-  }, [token, pieMonth, dataVersion])
+  }, [token, pieMonth, dataVersion, formatMessage])
 
   useEffect(() => {
     let cancelled = false
@@ -110,7 +112,7 @@ export function DashboardScreen() {
         if (!cancelled) setBudget(data)
       })
       .catch(() => {
-        if (!cancelled) setBudgetError('Could not load the budget.')
+        if (!cancelled) setBudgetError(formatMessage({ id: 'dashboard.budget.loadError' }))
       })
     // The hasDefinitions check stays on token only (not budgetMonth): it
     // checks whether the account has any definitions at all, and doesn't
@@ -125,7 +127,7 @@ export function DashboardScreen() {
     return () => {
       cancelled = true
     }
-  }, [token, budgetMonth, dataVersion])
+  }, [token, budgetMonth, dataVersion, formatMessage])
 
   useEffect(() => {
     let cancelled = false
@@ -135,17 +137,17 @@ export function DashboardScreen() {
         if (!cancelled) setTrend({ kind: trendKind, data })
       })
       .catch(() => {
-        if (!cancelled) setTrendError('Could not load the trend.')
+        if (!cancelled) setTrendError(formatMessage({ id: 'dashboard.trend.loadError' }))
       })
     return () => {
       cancelled = true
     }
-  }, [token, trendKind, trendFrom, trendTo])
+  }, [token, trendKind, trendFrom, trendTo, formatMessage])
 
   if (loadError !== null) {
     return (
       <>
-        <h2 className="font-semibold text-slate-900">Dashboard</h2>
+        <h2 className="font-semibold text-slate-900">{formatMessage({ id: 'dashboard.title' })}</h2>
         <p className="mt-2 text-sm text-red-600">{loadError}</p>
       </>
     )
@@ -153,25 +155,25 @@ export function DashboardScreen() {
   if (summary === null) {
     return (
       <>
-        <h2 className="font-semibold text-slate-900">Dashboard</h2>
-        <p className="mt-3 text-sm text-slate-500">Loading…</p>
+        <h2 className="font-semibold text-slate-900">{formatMessage({ id: 'dashboard.title' })}</h2>
+        <p className="mt-3 text-sm text-slate-500">{formatMessage({ id: 'dashboard.loading' })}</p>
       </>
     )
   }
 
   return (
     <>
-      <h2 className="font-semibold text-slate-900">Dashboard</h2>
+      <h2 className="font-semibold text-slate-900">{formatMessage({ id: 'dashboard.title' })}</h2>
 
       <section className="mt-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-          Net Worth
+          {formatMessage({ id: 'dashboard.netWorth' })}
         </p>
         <p className="mt-1 text-3xl font-semibold text-slate-900">
           {formatEuros(summary.net_worth)}
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          The sum of every wallet balance — contact wallets included.
+          {formatMessage({ id: 'dashboard.netWorth.description' })}
         </p>
       </section>
 
@@ -189,7 +191,7 @@ export function DashboardScreen() {
       {summary.month === pieMonth ? (
         <PieCard summary={summary} month={pieMonth} onMonthChange={setPieMonth} />
       ) : (
-        <p className="mt-4 text-sm text-slate-500">Loading…</p>
+        <p className="mt-4 text-sm text-slate-500">{formatMessage({ id: 'dashboard.loading' })}</p>
       )}
 
       <TrendCard
@@ -236,6 +238,7 @@ function BudgetCard({
   month: string
   onMonthChange: (month: string) => void
 }) {
+  const { formatMessage } = useIntl()
   if (hasDefinitions === false) {
     return null
   }
@@ -249,15 +252,15 @@ function BudgetCard({
       {error !== null ? (
         <p className="text-sm text-red-600">{error}</p>
       ) : budget === null ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <p className="text-sm text-slate-500">{formatMessage({ id: 'dashboard.loading' })}</p>
       ) : (
         <>
           <label className="sr-only" htmlFor="budget-month">
-            Month
+            {formatMessage({ id: 'dashboard.budget.month' })}
           </label>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-              Spendable Today
+              {formatMessage({ id: 'dashboard.budget.spendableToday' })}
             </p>
             <input
               id="budget-month"
@@ -271,26 +274,25 @@ function BudgetCard({
             {negative ? formatEuros('0.00') : formatEuros(budget.spendable_today)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {formatEuros(budget.monthly_spendable)} this month
-            ({formatEuros(budget.recurring_incomes_total)} income −{' '}
-            {formatEuros(budget.recurring_costs_total)} costs)
+            {formatEuros(budget.monthly_spendable)} {formatMessage({ id: 'dashboard.budget.thisMonth' })}{' '}
+            ({formatEuros(budget.recurring_incomes_total)} {formatMessage({ id: 'dashboard.budget.income' })} −{' '}
+            {formatEuros(budget.recurring_costs_total)} {formatMessage({ id: 'dashboard.budget.costs' })})
           </p>
           <p className="text-xs text-slate-500">
-            {formatEuros(budget.daily_allowance)} per day
+            {formatEuros(budget.daily_allowance)} {formatMessage({ id: 'dashboard.budget.perDay' })}
           </p>
           {negative && !monthNegative && (
             <p className="mt-1 text-xs text-red-600">
-              {formatEuros(budget.spendable_today.slice(1))} over today's budget
+              {formatMessage({ id: 'dashboard.budget.overToday' }, { amount: formatEuros(budget.spendable_today.slice(1)) })}
             </p>
           )}
           {monthNegative ? (
             <p className="mt-1 text-xs text-red-600">
-              {formatEuros(budget.remaining_monthly_spendable.slice(1))} over this
-              month's budget
+              {formatMessage({ id: 'dashboard.budget.overMonth' }, { amount: formatEuros(budget.remaining_monthly_spendable.slice(1)) })}
             </p>
           ) : (
             <p className="mt-1 text-xs text-slate-500">
-              {formatEuros(budget.remaining_monthly_spendable)} left this month
+              {formatMessage({ id: 'dashboard.budget.leftMonth' }, { amount: formatEuros(budget.remaining_monthly_spendable) })}
             </p>
           )}
         </>
@@ -308,6 +310,7 @@ function PieCard({
   month: string
   onMonthChange: (month: string) => void
 }) {
+  const { formatMessage } = useIntl()
   const [kind, setKind] = useState<TrendKind>('expense')
   const slices = kind === 'expense' ? summary.expenses_by_category : summary.incomes_by_category
   const total = slices.reduce(
@@ -320,16 +323,16 @@ function PieCard({
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-          {monthLabel(month)} · {kind === 'expense' ? 'Expenses' : 'Incomes'} by Category
+          {monthLabel(month)} · {formatMessage({ id: kind === 'expense' ? 'dashboard.pie.expensesByCategory' : 'dashboard.pie.incomesByCategory' })}
         </p>
-        <KindToggle kind={kind} onKindChange={setKind} label="Pie side" />
+        <KindToggle kind={kind} onKindChange={setKind} label={formatMessage({ id: 'dashboard.pie.sideLabel' })} />
       </div>
 
       {/* The card's own month selector, like the trend card's From/To range
        * (US27): changing it refetches the summary for that month. */}
       <div className="mt-3">
         <label htmlFor="pie-month" className="block text-sm font-medium text-slate-700">
-          Month
+          {formatMessage({ id: 'dashboard.pie.month' })}
         </label>
         <input
           id="pie-month"
@@ -342,11 +345,11 @@ function PieCard({
 
       {slices.length === 0 ? (
         <p className="mt-3 text-sm text-slate-500">
-          No {kind === 'expense' ? 'expenses' : 'incomes'} recorded in {monthLabel(month)}.
+          {formatMessage({ id: kind === 'expense' ? 'dashboard.pie.noExpenses' : 'dashboard.pie.noIncomes' }, { month: monthLabel(month) })}
         </p>
       ) : (
         <div className="mt-4 flex flex-col items-center gap-5 sm:flex-row sm:items-center sm:justify-around">
-          <DonutChart slices={slices} total={total} centerLabel={formatEuros(totalLabel)} kind={kind} />
+          <DonutChart slices={slices} total={total} centerLabel={formatEuros(totalLabel)} kind={kind} formatMessage={formatMessage} />
           <PieLegend slices={slices} total={total} />
         </div>
       )}
@@ -369,11 +372,13 @@ function DonutChart({
   total,
   centerLabel,
   kind,
+  formatMessage,
 }: {
   slices: CategoryExpense[]
   total: number
   centerLabel: string
   kind: TrendKind
+  formatMessage: (descriptor: { id: string }, values?: Record<string, unknown>) => string
 }) {
   const radius = 40
   const circumference = 2 * Math.PI * radius
@@ -383,7 +388,7 @@ function DonutChart({
       viewBox="0 0 100 100"
       className="h-44 w-44"
       role="img"
-      aria-label={`${kind === 'expense' ? 'Expenses' : 'Incomes'} by category`}
+      aria-label={formatMessage({ id: 'dashboard.pie.ariaLabel' }, { kind: formatMessage({ id: kind === 'expense' ? 'kind.expense' : 'kind.income' }) })}
     >
       <circle
         cx="50"
@@ -438,6 +443,7 @@ function KindToggle({
   onKindChange: (kind: TrendKind) => void
   label: string
 }) {
+  const { formatMessage } = useIntl()
   return (
     <div
       className="inline-flex gap-1 rounded-lg bg-slate-100 p-1"
@@ -454,7 +460,7 @@ function KindToggle({
             kind === option ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
           }`}
         >
-          {option === 'expense' ? 'Expenses' : 'Incomes'}
+          {option === 'expense' ? formatMessage({ id: 'kind.expense' }) : formatMessage({ id: 'kind.income' })}
         </button>
       ))}
     </div>
@@ -511,6 +517,7 @@ function TrendCard({
   onToChange: (month: string) => void
   error: string | null
 }) {
+  const { formatMessage } = useIntl()
   // The loaded trend's own kind guards the title: after a toggle, the stale
   // data of the other side must never render under the new side's title.
   const loaded =
@@ -521,21 +528,21 @@ function TrendCard({
   const empty =
     loaded &&
     trend.data.months.every((bucket) => Number.parseFloat(bucket.amount) === 0)
-  const side = kind === 'expense' ? 'Expenses' : 'Incomes'
+  const side = kind === 'expense' ? formatMessage({ id: 'kind.expense' }) : formatMessage({ id: 'kind.income' })
 
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
-          {side} Trend · {monthLabel(fromMonth)} – {monthLabel(toMonth)}
+          {formatMessage({ id: 'dashboard.trend.title' }, { side, from: monthLabel(fromMonth), to: monthLabel(toMonth) })}
         </p>
-        <KindToggle kind={kind} onKindChange={onKindChange} label="Trend side" />
+        <KindToggle kind={kind} onKindChange={onKindChange} label={formatMessage({ id: 'dashboard.trend.sideLabel' })} />
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3">
         <div>
           <label htmlFor="trend-from" className="block text-sm font-medium text-slate-700">
-            From
+            {formatMessage({ id: 'dashboard.trend.from' })}
           </label>
           <input
             id="trend-from"
@@ -547,7 +554,7 @@ function TrendCard({
         </div>
         <div>
           <label htmlFor="trend-to" className="block text-sm font-medium text-slate-700">
-            To
+            {formatMessage({ id: 'dashboard.trend.to' })}
           </label>
           <input
             id="trend-to"
@@ -561,11 +568,10 @@ function TrendCard({
 
       {error !== null && <p className="mt-3 text-sm text-red-600">{error}</p>}
       {!loaded ? (
-        <p className="mt-4 text-sm text-slate-500">Loading…</p>
+        <p className="mt-4 text-sm text-slate-500">{formatMessage({ id: 'dashboard.loading' })}</p>
       ) : empty ? (
         <p className="mt-4 text-sm text-slate-500">
-          No {kind === 'expense' ? 'expenses' : 'incomes'} recorded between{' '}
-          {monthLabel(fromMonth)} and {monthLabel(toMonth)}.
+          {formatMessage({ id: kind === 'expense' ? 'dashboard.trend.noExpenses' : 'dashboard.trend.noIncomes' }, { from: monthLabel(fromMonth), to: monthLabel(toMonth) })}
         </p>
       ) : (
         <TrendChart months={trend.data.months} kind={kind} />
@@ -615,6 +621,7 @@ const GRIDLINE_FRACTIONS = [0, 0.25, 0.5, 0.75, 1]
  * clicks pass through to the columns underneath.
  */
 function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }) {
+  const { formatMessage } = useIntl()
   const [selected, setSelected] = useState<number | null>(null)
   // The card's measured inner width: the plot fills it when it is wider
   // than the fixed geometry (issue #95). Null until the first measure —
@@ -703,7 +710,7 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
           height={CHART_HEIGHT}
           className="block"
           role="img"
-          aria-label={`Monthly ${kind === 'expense' ? 'expenses' : 'incomes'} trend`}
+          aria-label={formatMessage({ id: 'dashboard.trend.ariaLabel' }, { kind: formatMessage({ id: kind === 'expense' ? 'kind.expense.lower' : 'kind.income.lower' }) })}
         >
           {GRIDLINE_FRACTIONS.map((fraction) => {
             const y = TOP_PAD + plotHeight * (1 - fraction)
@@ -784,7 +791,7 @@ function TrendChart({ months, kind }: { months: MonthBucket[]; kind: TrendKind }
                   fill="transparent"
                   role="button"
                   tabIndex={0}
-                  aria-label={`${monthLabel(bucket.month)}: ${formatEuros(bucket.amount)}`}
+                  aria-label={formatMessage({ id: 'dashboard.trend.barAria' }, { month: monthLabel(bucket.month), amount: formatEuros(bucket.amount) })}
                   aria-pressed={selected === index}
                   className="cursor-pointer"
                   onClick={() => setSelected(selected === index ? null : index)}

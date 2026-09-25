@@ -1,7 +1,9 @@
 /** Account deletion (issue #84): the confirm gate, the error surfaced on
  * failure, and the sign-out hand-off on success. */
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { DeleteAccountButton } from './DeleteAccountButton'
 
@@ -10,7 +12,7 @@ describe('DeleteAccountButton (issue #84)', () => {
     const onDelete = vi.fn().mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(false)
 
-    render(<DeleteAccountButton onDelete={onDelete} onDeleted={vi.fn()} />)
+    renderWithIntl(<DeleteAccountButton onDelete={onDelete} onDeleted={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
 
     expect(onDelete).not.toHaveBeenCalled()
@@ -21,7 +23,7 @@ describe('DeleteAccountButton (issue #84)', () => {
     const onDeleted = vi.fn()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
 
-    render(<DeleteAccountButton onDelete={onDelete} onDeleted={onDeleted} />)
+    renderWithIntl(<DeleteAccountButton onDelete={onDelete} onDeleted={onDeleted} />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
 
     await waitFor(() => expect(onDelete).toHaveBeenCalled())
@@ -33,7 +35,7 @@ describe('DeleteAccountButton (issue #84)', () => {
     const onDeleted = vi.fn()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
 
-    render(<DeleteAccountButton onDelete={onDelete} onDeleted={onDeleted} />)
+    renderWithIntl(<DeleteAccountButton onDelete={onDelete} onDeleted={onDeleted} />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
 
     await waitFor(() =>

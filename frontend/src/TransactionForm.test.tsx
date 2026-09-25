@@ -5,7 +5,9 @@
  * mocked; the location module is real except for getGpsPosition (device GPS
  * does not exist in jsdom). */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { TransactionForm } from './TransactionForm'
 import type { Category, RecurringCost, RecurringIncome, Transaction, Wallet } from './api'
@@ -189,7 +191,7 @@ function renderForm(
   incomes: RecurringIncome[] = recurringIncomes,
   wallets: Wallet[] = [wallet],
 ) {
-  return render(
+  return renderWithIntl(
     <TransactionForm
       wallets={wallets}
       categories={categories}

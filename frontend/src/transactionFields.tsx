@@ -9,6 +9,8 @@
  * JSX, moved.
  */
 
+import { useIntl } from 'react-intl'
+
 import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
 import { formatEuros } from './api'
 import type { TransferProjection } from './balanceProjection'
@@ -35,6 +37,7 @@ export function TypeSelector({
   disabled: boolean
   onSelect: (type: TransactionFormType) => void
 }) {
+  const { formatMessage } = useIntl()
   return (
     <div className="flex gap-2">
       {(['expense', 'income', 'transfer'] as const).map((type) => (
@@ -47,7 +50,11 @@ export function TypeSelector({
             active === type ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
           } disabled:opacity-60`}
         >
-          {type === 'expense' ? 'Expense' : type === 'income' ? 'Income' : 'Transfer'}
+          {type === 'expense'
+            ? formatMessage({ id: 'txForm.type.expense' })
+            : type === 'income'
+              ? formatMessage({ id: 'txForm.type.income' })
+              : formatMessage({ id: 'txForm.type.transfer' })}
         </button>
       ))}
     </div>
@@ -86,6 +93,7 @@ export function WalletField({
    * onto it. */
   errors: FieldErrors
 }) {
+  const { formatMessage } = useIntl()
   const spendableWallets =
     type === 'expense'
       ? wallets
@@ -94,7 +102,7 @@ export function WalletField({
     <div>
       <EntitySelect
         id="tx-wallet"
-        label="Wallet"
+        label={formatMessage({ id: 'txForm.wallet' })}
         required
         disabled={disabled}
         value={value ?? ''}
@@ -112,8 +120,8 @@ export function WalletField({
       <FieldError field="wallet" errors={errors} />
       <p className="mt-1 text-xs text-slate-500">
         {type === 'expense'
-          ? 'An expense on a contact wallet means the contact paid for this.'
-          : "Incomes can't be recorded on contact wallets."}
+          ? formatMessage({ id: 'txForm.wallet.contactExplanation' })
+          : formatMessage({ id: 'txForm.validation.incomeNoContact' })}
       </p>
     </div>
   )
@@ -147,11 +155,12 @@ export function TransferWalletFields({
   /** The form's Field Errors (ADR-0029), handed to both legs. */
   errors: FieldErrors
 }) {
+  const { formatMessage } = useIntl()
   return (
     <div className="grid grid-cols-2 gap-3">
       <WalletSelect
         id="tx-source"
-        label="From"
+        label={formatMessage({ id: 'txForm.transfer.from' })}
         field="source"
         wallets={wallets}
         value={sourceWalletId}
@@ -162,7 +171,7 @@ export function TransferWalletFields({
       />
       <WalletSelect
         id="tx-destination"
-        label="To"
+        label={formatMessage({ id: 'txForm.transfer.to' })}
         field="destination"
         wallets={wallets}
         value={destinationWalletId}
@@ -195,11 +204,12 @@ export function CategoryField({
   /** Opens the Category create modal, hosted by the screen. */
   onAdd: () => void
 }) {
+  const { formatMessage } = useIntl()
   const matchingCategories = categories.filter((category) => category.type === type)
   return (
     <EntitySelect
       id="tx-category"
-      label="Category"
+      label={formatMessage({ id: 'txForm.category' })}
       value={value ?? ''}
       onChange={(categoryId) => onChange(categoryId === '' ? null : categoryId)}
       options={matchingCategories.map((category) => ({
@@ -239,11 +249,12 @@ export function RecurringCostField({
   /** Opens the Recurring Cost create modal, hosted by the screen. */
   onAdd: () => void
 }) {
+  const { formatMessage } = useIntl()
   return (
     <div>
       <EntitySelect
         id="tx-recurring-cost"
-        label="Recurring Cost"
+        label={formatMessage({ id: 'txForm.recurringCost' })}
         value={value ?? ''}
         onChange={(costId) => onChange(costId === '' ? null : costId)}
         options={costs.map((cost) => ({ id: cost.id, label: cost.name }))}
@@ -284,11 +295,12 @@ export function RecurringIncomeField({
   /** Opens the Recurring Income create modal, hosted by the screen. */
   onAdd: () => void
 }) {
+  const { formatMessage } = useIntl()
   return (
     <div>
       <EntitySelect
         id="tx-recurring-income"
-        label="Recurring Income"
+        label={formatMessage({ id: 'txForm.recurringIncome' })}
         value={value ?? ''}
         onChange={(incomeId) => onChange(incomeId === '' ? null : incomeId)}
         options={incomes.map((income) => ({ id: income.id, label: income.name }))}
@@ -297,7 +309,7 @@ export function RecurringIncomeField({
       />
       {value !== null && occurrenceDate !== null && (
         <p className="mt-1 text-xs text-slate-500">
-          Pays the occurrence of {occurrenceDate}.
+          {formatMessage({ id: 'txForm.paysOccurrence' }, { date: occurrenceDate })}
         </p>
       )}
     </div>
@@ -316,13 +328,14 @@ export function WalletBalancePreview({
   after: number
   willWarn: boolean
 }) {
+  const { formatMessage } = useIntl()
   return (
     <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
       {wallet.name}: {formatEuros(before.toFixed(2))} →{' '}
       <span className="font-semibold">{formatEuros(after.toFixed(2))}</span>
       {willWarn && (
         <span className="mt-1 block text-amber-700">
-          ⚠ This will make your Cash wallet negative.
+          ⚠ {formatMessage({ id: 'txForm.negativeCashWarning' })}
         </span>
       )}
     </p>
@@ -341,6 +354,7 @@ export function TransferBalancePreview({
   projection: TransferProjection
   willWarn: boolean
 }) {
+  const { formatMessage } = useIntl()
   return (
     <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
       {source.name}: {formatEuros(projection.source.before.toFixed(2))} →{' '}
@@ -354,7 +368,7 @@ export function TransferBalancePreview({
       </span>
       {willWarn && (
         <span className="mt-1 block text-amber-700">
-          ⚠ This will make your Cash wallet negative.
+          ⚠ {formatMessage({ id: 'txForm.negativeCashWarning' })}
         </span>
       )}
     </p>

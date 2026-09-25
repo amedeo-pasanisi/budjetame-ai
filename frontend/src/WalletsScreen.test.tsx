@@ -19,7 +19,9 @@
  * Input — text, both separators, empty stays valid (the Wallet starts at
  * €0). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { WalletsScreen } from './WalletsScreen'
 import type { Wallet } from './api'
@@ -106,7 +108,7 @@ afterEach(() => {
 
 describe('WalletsScreen header (issue #49)', () => {
   it('puts the New wallet button in the header row with the heading, always enabled, and no bottom button', () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     // Asserted before the list resolves: the button needs nothing from the
     // list, so it is available while loading (issue #49).
@@ -122,7 +124,7 @@ describe('WalletsScreen header (issue #49)', () => {
 
 describe('WalletsScreen sections (issue #47)', () => {
   it('groups wallets into sections in the fixed order with plural headers, hiding empty sections', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     const contactRows = rowTapButtons(contacts).map((b) => b.textContent)
@@ -143,7 +145,7 @@ describe('WalletsScreen sections (issue #47)', () => {
   })
 
   it('sorts each section A→Z case-insensitively and keeps the singular type subtitles', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     const contactRows = rowTapButtons(contacts).map((b) => b.textContent)
@@ -156,7 +158,7 @@ describe('WalletsScreen sections (issue #47)', () => {
   })
 
   it('signs every balance in the transaction-amount convention: +€, -€, and unsigned €0.00', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     const rows = (region: HTMLElement) =>
       rowTapButtons(region).map((b) => b.textContent)
@@ -182,7 +184,7 @@ describe('WalletsScreen sections (issue #47)', () => {
 
   it('keeps the empty state when there are no wallets at all', async () => {
     fetchWalletsMock.mockResolvedValue([])
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     expect(
       await screen.findByText('No wallets yet. Add your first one to start tracking.'),
@@ -199,7 +201,7 @@ describe('WalletsScreen sections (issue #47)', () => {
       frozen: false,
       created_at: createdAt,
     })
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: 'New wallet' }))
@@ -232,7 +234,7 @@ describe('WalletsScreen sections (issue #47)', () => {
       frozen: false,
       created_at: createdAt,
     })
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: 'New wallet' }))
@@ -258,7 +260,7 @@ describe('WalletsScreen sections (issue #47)', () => {
   })
 
   it('backdrop tap, Escape, and Cancel all close the create modal without creating', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: 'New wallet' }))
@@ -281,7 +283,7 @@ describe('WalletsScreen sections (issue #47)', () => {
 
   it('a renamed wallet moves to its new sorted position within its section', async () => {
     renameWalletMock.mockResolvedValue({ ...wallets[3], name: 'alberto' })
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Marco' }))
@@ -300,7 +302,7 @@ describe('WalletsScreen sections (issue #47)', () => {
   })
 
   it('the edit modal fixes the Type, hides the opening balance, and shows the rename-only form', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Marco' }))
@@ -316,7 +318,7 @@ describe('WalletsScreen sections (issue #47)', () => {
 
   it('freezing a settled contact still works: tap-again confirm in the edit modal, wallet moves to the frozen list', async () => {
     freezeWalletMock.mockResolvedValue(undefined)
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Leo' }))
@@ -349,7 +351,7 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
 
   it('keeps frozen wallets out of the type sections and shows a collapsed Frozen wallets row with the count', async () => {
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     expect(
@@ -363,7 +365,7 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
 
   it('expands and collapses the frozen list in place; rows read "Type · Frozen" with unsigned €0.00', async () => {
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     expect(screen.queryByText('Old Card')).not.toBeInTheDocument()
@@ -381,7 +383,7 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
   it('unfreezes from the edit modal: lands in its type section at its sorted position and the footer row disappears', async () => {
     unfreezeWalletMock.mockResolvedValue({ ...frozenWallet, frozen: false })
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
@@ -401,7 +403,7 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
   it('unfreezing a wallet whose type section is hidden creates the section', async () => {
     unfreezeWalletMock.mockResolvedValue({ ...frozenCash, frozen: false })
     fetchWalletsMock.mockResolvedValue([...wallets, frozenCash])
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
     expect(screen.queryByRole('region', { name: 'Cash' })).not.toBeInTheDocument()
 
@@ -421,7 +423,7 @@ describe('WalletsScreen frozen wallets (issue #48)', () => {
 describe('WalletsScreen row taps open the ledger (issue #93)', () => {
   it('an active row tap requests the ledger jump for that wallet and opens no modal', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     fireEvent.click(within(contacts).getByRole('button', { name: /^anna/ }))
@@ -434,7 +436,7 @@ describe('WalletsScreen row taps open the ledger (issue #93)', () => {
   it('a frozen row tap requests the ledger jump too — it neither unfreezes nor edits', async () => {
     const requestLedgerFilter = vi.fn()
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
-    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
@@ -450,7 +452,7 @@ describe('WalletsScreen row taps open the ledger (issue #93)', () => {
 describe('WalletsScreen trailing row buttons (issue #93)', () => {
   it('✎ opens the prefilled edit modal on an active row, without jumping', async () => {
     const requestLedgerFilter = vi.fn()
-    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     fireEvent.click(within(contacts).getByRole('button', { name: 'Edit anna' }))
@@ -463,7 +465,7 @@ describe('WalletsScreen trailing row buttons (issue #93)', () => {
   it('✎ opens the edit modal on a frozen row too (renaming a frozen wallet works), without jumping or unfreezing', async () => {
     const requestLedgerFilter = vi.fn()
     fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
-    render(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
+    renderWithIntl(<WalletsScreen requestLedgerFilter={requestLedgerFilter} />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
@@ -495,7 +497,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
   }
 
   it('keeps Create clickable on an invalid draft, reveals "Enter a name" under the field, and calls no API', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     const dialog = await openCreateDialog()
@@ -517,7 +519,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
   })
 
   it('keeps the Name error while typing the fix, clearing only on the next Save', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     const dialog = await openCreateDialog()
@@ -543,7 +545,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
   })
 
   it('the Opening balance is a tolerant text Amount Input: a malformed value reveals the parser\'s error and submits nothing', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     const dialog = await openCreateDialog()
@@ -574,7 +576,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
   })
 
   it('a non-positive Opening balance reveals the positive-amount error', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     const dialog = await openCreateDialog()
@@ -595,7 +597,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
       frozen: false,
       created_at: createdAt,
     })
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     // Comma decimals (17,5) parse and reach the API as canonical cents.
@@ -628,7 +630,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
   })
 
   it('an empty Opening balance stays valid: the new Wallet starts at €0', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     const dialog = await openCreateDialog()
@@ -648,7 +650,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
   })
 
   it('clearing the Name while editing reveals the same error and rename is not called', async () => {
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
     fireEvent.click(within(contacts).getByRole('button', { name: 'Edit Marco' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
@@ -665,7 +667,7 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
 
   it('a 409 duplicate-name rejection keeps the form-level banner and never becomes a Field Error', async () => {
     createWalletMock.mockRejectedValue(new ApiError('Conflict', 409))
-    render(<WalletsScreen />)
+    renderWithIntl(<WalletsScreen />)
     await screen.findByRole('region', { name: 'Contacts' })
 
     const dialog = await openCreateDialog()

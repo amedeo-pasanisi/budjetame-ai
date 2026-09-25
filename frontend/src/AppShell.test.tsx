@@ -5,9 +5,11 @@
  * and desktop mouse behavior are unchanged. The API client is mocked;
  * gestures are fired as real touch events, never via internal state. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
-import { AppShell } from './App'
+import { renderWithIntl } from './test/renderWithIntl'
+
+import App, { AppShell } from './App'
 import { bumpDataVersion } from './api/dataVersion'
 
 vi.mock('./api', async () => {
@@ -98,6 +100,7 @@ import {
   fetchDashboardSummary,
   fetchTrend,
   fetchAccountLanguage,
+  fetchCurrentAccount,
   fetchRecurringCosts,
   fetchRecurringIncomes,
   fetchTransactions,
@@ -106,7 +109,7 @@ import {
 } from './api'
 import { getLocale, setLocale } from './api/format'
 import { TOKEN_KEY } from './api'
-import type { Category, RecurringCost, RecurringIncome, Wallet } from './api'
+import type { Account, Category, RecurringCost, RecurringIncome, Wallet } from './api'
 
 const fetchWalletsMock = vi.mocked(fetchWallets)
 const fetchCategoriesMock = vi.mocked(fetchCategories)
@@ -117,6 +120,7 @@ const fetchBudgetMock = vi.mocked(fetchBudget)
 const fetchRecurringCostsMock = vi.mocked(fetchRecurringCosts)
 const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 const fetchAccountLanguageMock = vi.mocked(fetchAccountLanguage)
+const fetchCurrentAccountMock = vi.mocked(fetchCurrentAccount)
 const updateAccountLanguageMock = vi.mocked(updateAccountLanguage)
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
@@ -144,7 +148,15 @@ async function expectTab(tab: Tab) {
 }
 
 async function renderShell() {
-  render(<AppShell email="demo@budjetame.example" onSignOut={vi.fn()} onDeleteAccount={vi.fn()} />)
+  renderWithIntl(
+    <AppShell
+      email="demo@budjetame.example"
+      onSignOut={vi.fn()}
+      onDeleteAccount={vi.fn()}
+      locale="en"
+      onChangeLanguage={vi.fn()}
+    />,
+  )
   await expectTab('dashboard')
 }
 
@@ -732,6 +744,11 @@ describe('AppShell recurring ledger jump (ADR-0026)', () => {
 describe('AppShell Locale (issue #114)', () => {
   beforeEach(() => {
     localStorage.setItem(TOKEN_KEY, 'test-token')
+    fetchCurrentAccountMock.mockResolvedValue({
+      id: 1,
+      email: 'demo@budjetame.example',
+      language: 'en',
+    } satisfies Account)
   })
 
   afterEach(() => {
@@ -739,12 +756,22 @@ describe('AppShell Locale (issue #114)', () => {
     setLocale('en')
   })
 
+  /** The locale sync lives in App (issue #117), so these render the whole
+   * app: the auth check resolves, the shell mounts, and App's locale
+   * effect runs with the mocked Account language. */
+  async function renderApp() {
+    renderWithIntl(<App />)
+    // The header email is locale-independent; the dashboard strings are
+    // localized under `it`, so the tab's own marker is not reliable here.
+    await screen.findByText('demo@budjetame.example')
+  }
+
   it('auto-detects an Italian browser and saves the locale via the API once', async () => {
     // A first load with a stored 'en' locale and an Italian browser: the
-    // shell detects it, saves it, and switches display to it-IT.
+    // app detects it, saves it, and switches display to it-IT.
     const languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue('it-IT')
     try {
-      await renderShell()
+      await renderApp()
       await waitFor(() =>
         expect(updateAccountLanguageMock).toHaveBeenCalledWith('test-token', 'it'),
       )
@@ -757,7 +784,7 @@ describe('AppShell Locale (issue #114)', () => {
   it('keeps en when the browser is not Italian', async () => {
     const languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-GB')
     try {
-      await renderShell()
+      await renderApp()
       // No write: the stored en is correct.
       expect(updateAccountLanguageMock).not.toHaveBeenCalled()
       expect(getLocale()).toBe('en')
@@ -770,7 +797,7 @@ describe('AppShell Locale (issue #114)', () => {
     fetchAccountLanguageMock.mockResolvedValue('it')
     const languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-US')
     try {
-      await renderShell()
+      await renderApp()
       await waitFor(() => expect(getLocale()).toBe('it'))
       // Stored it: never overwritten by an English browser.
       expect(updateAccountLanguageMock).not.toHaveBeenCalled()

@@ -7,9 +7,11 @@
  * The shell is rendered and driven like a user would (click tabs, pick a
  * file, read, toggle rows, confirm); the API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import { AppShell } from './App'
+import { renderWithIntl } from './test/renderWithIntl'
+
 import { bumpDataVersion } from './api/dataVersion'
 import type { ImportPreview, Transaction, Wallet } from './api'
 
@@ -242,12 +244,20 @@ afterEach(() => {
 })
 
 function renderShell() {
-  return render(<AppShell email="user@example.com" onSignOut={vi.fn()} onDeleteAccount={vi.fn()} />)
+  return renderWithIntl(
+    <AppShell
+      email="user@example.com"
+      onSignOut={vi.fn()}
+      onDeleteAccount={vi.fn()}
+      locale="en"
+      onChangeLanguage={vi.fn()}
+    />,
+  )
 }
 
 /** From the Transactions tab: taps Import, picks a file, reads it, and lands
  * on the Preview with both ready rows selected. */
-async function openPreview(view: ReturnType<typeof render>) {
+async function openPreview(view: ReturnType<typeof renderWithIntl>) {
   fireEvent.click(screen.getByRole('button', { name: 'Transactions' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Import' }))
   const file = new File(['rows'], 'rows.csv', { type: 'text/csv' })

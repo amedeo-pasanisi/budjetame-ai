@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useIntl } from 'react-intl'
 
 import {
   PAGE_LIMIT,
@@ -31,7 +32,6 @@ import { TransactionModal } from './TransactionModal'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
 import { UndoToastStack } from './UndoToastStack'
 import {
-  clearStack,
   expireEntries,
   pushEntry,
   removeEntry,
@@ -69,6 +69,7 @@ export function TransactionsScreen({
    * applied, so the shell clears it and no later render can reapply it. */
   onConsumeLedgerRequest: () => void
 }) {
+  const { formatMessage } = useIntl()
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [categories, setCategories] = useState<Category[] | null>(null)
@@ -354,7 +355,7 @@ export function TransactionsScreen({
           setLedgerEmpty(page.items.length === 0)
         }
       })
-      .catch(() => setLoadError('Could not load your data.'))
+      .catch(() => setLoadError(formatMessage({ id: 'transactions.error.load' })))
     // The picker's "which Occurrence will this link pay" depends on the
     // current links, so the costs refetch on every reload (any save or
     // delete changes them). Failure is silent: the ledger still loads.
@@ -365,7 +366,7 @@ export function TransactionsScreen({
     fetchRecurringIncomes(token)
       .then((data) => setRecurringIncomes(data))
       .catch(() => {})
-  }, [token, requestFilters])
+  }, [token, requestFilters, formatMessage])
 
   // Any filter change — or a write anywhere (dataVersion bump, ADR-0022) —
   // refetches with it applied and resets to the first page. A bump that
@@ -408,7 +409,7 @@ export function TransactionsScreen({
       })
       .catch(() => {
         if (gen === generation.current) {
-          setLoadError('Could not load more transactions.')
+          setLoadError(formatMessage({ id: 'transactions.error.loadMore' }))
         }
       })
       .finally(() => setLoadingMore(false))
@@ -442,10 +443,11 @@ export function TransactionsScreen({
 
   const selectedWallet = wallets?.find((w) => w.id === filterWalletId)
 
+  const frozenWalletLabel = formatMessage({ id: 'transactions.frozenSuffix' })
   const walletName = (walletId: number | null): string =>
     walletId === null
-      ? 'Frozen wallet'
-      : (wallets?.find((w) => w.id === walletId)?.name ?? 'Frozen wallet')
+      ? frozenWalletLabel
+      : (wallets?.find((w) => w.id === walletId)?.name ?? frozenWalletLabel)
 
   const categoryName = (categoryId: number | null): string | null => {
     if (categoryId === null) return null
@@ -488,8 +490,8 @@ export function TransactionsScreen({
       filterFromDate !== '' && filterToDate !== ''
         ? `${filterFromDate} – ${filterToDate}`
         : filterFromDate !== ''
-          ? `From ${filterFromDate}`
-          : `To ${filterToDate}`
+          ? `${formatMessage({ id: 'transactions.filter.from' })} ${filterFromDate}`
+          : `${formatMessage({ id: 'transactions.filter.to' })} ${filterToDate}`
     activeSegments.push({
       key: 'dates',
       label,
@@ -605,7 +607,9 @@ export function TransactionsScreen({
     // banner must survive that background reload, so reload never clears it
     // — each write sets or clears it itself ("last write wins").
     reload()
-    setSavedWarning(transaction.warning ? 'Saved — this made a Cash wallet negative.' : null)
+    setSavedWarning(
+      transaction.warning ? formatMessage({ id: 'transactions.warning.negativeCash' }) : null,
+    )
   }
 
   const handleDeleted = (deleted: Transaction) => {
@@ -630,7 +634,9 @@ export function TransactionsScreen({
       // from the stack so the toast disappears.
       setUndoStack((current) => removeEntry(current, entry.transaction.id))
       setUndoError(
-        error instanceof ApiError ? error.message : 'Could not undo transaction',
+        error instanceof ApiError
+          ? error.message
+          : formatMessage({ id: 'transactions.error.undo' }),
       )
       reload()
     }
@@ -688,7 +694,9 @@ export function TransactionsScreen({
       URL.revokeObjectURL(url)
     } catch (error) {
       setExportError(
-        error instanceof ApiError ? error.message : 'Could not export transactions',
+        error instanceof ApiError
+          ? error.message
+          : formatMessage({ id: 'transactions.error.export' }),
       )
     }
   }
@@ -696,7 +704,7 @@ export function TransactionsScreen({
   return (
     <>
       <div className="flex items-center justify-between">
-        <h2 className="font-semibold text-slate-900">Transactions</h2>
+        <h2 className="font-semibold text-slate-900">{formatMessage({ id: 'transactions.title' })}</h2>
         {importState.draft === null && (
           <div className="flex items-center gap-3">
             <button
@@ -704,7 +712,7 @@ export function TransactionsScreen({
               onClick={importState.open}
               className="text-sm font-medium text-slate-600 hover:text-slate-900"
             >
-              Import
+              {formatMessage({ id: 'transactions.import' })}
             </button>
             <button
               type="button"
@@ -712,7 +720,7 @@ export function TransactionsScreen({
               disabled={wallets === null || categories === null}
               className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
             >
-              New transaction
+              {formatMessage({ id: 'transactions.newTransaction' })}
             </button>
           </div>
         )}
@@ -753,11 +761,11 @@ export function TransactionsScreen({
           {!ledgerEmpty && (
             <div className="mt-3 flex items-center gap-3">
               <input
-                aria-label="Search transactions"
+                aria-label={formatMessage({ id: 'transactions.searchLabel' })}
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search transactions…"
+                placeholder={formatMessage({ id: 'transactions.searchPlaceholder' })}
                 className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
               />
               <button
@@ -766,7 +774,7 @@ export function TransactionsScreen({
                 onClick={() => setFiltersOpen((open) => !open)}
                 className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600"
               >
-                Filters {filtersOpen ? '▾' : '▸'}
+                {formatMessage({ id: 'transactions.filters' })} {filtersOpen ? '▾' : '▸'}
               </button>
             </div>
           )}
@@ -798,7 +806,7 @@ export function TransactionsScreen({
                       <span className="max-w-[12rem] truncate">{segment.label}</span>
                       <button
                         type="button"
-                        aria-label={`Remove ${segment.label} filter`}
+                        aria-label={formatMessage({ id: 'transactions.filter.removeFilter' }, { label: segment.label })}
                         onClick={segment.clear}
                         className="text-slate-400 hover:text-slate-700"
                       >
@@ -816,7 +824,7 @@ export function TransactionsScreen({
                 onClick={clearFiltersAndSearch}
                 className="shrink-0 text-xs font-medium text-slate-600 hover:text-slate-900"
               >
-                Clear all
+                {formatMessage({ id: 'transactions.clearAll' })}
               </button>
             </div>
           )}
@@ -825,7 +833,7 @@ export function TransactionsScreen({
             <div className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div>
                 <label htmlFor="filters-wallet" className="block text-sm font-medium text-slate-700">
-                  Wallet
+                  {formatMessage({ id: 'transactions.filter.wallet' })}
                 </label>
                 <select
                   id="filters-wallet"
@@ -837,11 +845,11 @@ export function TransactionsScreen({
                   }
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value="">All wallets</option>
+                  <option value="">{formatMessage({ id: 'transactions.filter.allWallets' })}</option>
                   {wallets?.map((wallet) => (
                     <option key={wallet.id} value={wallet.id}>
                       {wallet.name}
-                      {wallet.frozen ? ' · Frozen' : ''} ({formatEuros(wallet.balance)})
+                      {wallet.frozen ? ` · ${formatMessage({ id: 'transactions.filter.frozen' })}` : ''} ({formatEuros(wallet.balance)})
                     </option>
                   ))}
                 </select>
@@ -850,7 +858,7 @@ export function TransactionsScreen({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="filters-from" className="block text-sm font-medium text-slate-700">
-                    From
+                    {formatMessage({ id: 'transactions.filter.from' })}
                   </label>
                   <input
                     id="filters-from"
@@ -862,7 +870,7 @@ export function TransactionsScreen({
                 </div>
                 <div>
                   <label htmlFor="filters-to" className="block text-sm font-medium text-slate-700">
-                    To
+                    {formatMessage({ id: 'transactions.filter.to' })}
                   </label>
                   <input
                     id="filters-to"
@@ -876,7 +884,7 @@ export function TransactionsScreen({
 
               <div>
                 <label htmlFor="filters-recurring" className="block text-sm font-medium text-slate-700">
-                  Recurring
+                  {formatMessage({ id: 'transactions.filter.recurring' })}
                 </label>
                 <select
                   id="filters-recurring"
@@ -896,15 +904,15 @@ export function TransactionsScreen({
                   }}
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value="">All transactions</option>
-                  <optgroup label="Recurring costs">
+                  <option value="">{formatMessage({ id: 'transactions.filter.allTransactions' })}</option>
+                  <optgroup label={formatMessage({ id: 'transactions.filter.recurringCosts' })}>
                     {recurringCosts.map((cost) => (
                       <option key={cost.id} value={`cost:${cost.id}`}>
                         {cost.name}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="Recurring incomes">
+                  <optgroup label={formatMessage({ id: 'transactions.filter.recurringIncomes' })}>
                     {recurringIncomes.map((income) => (
                       <option key={income.id} value={`income:${income.id}`}>
                         {income.name}
@@ -916,7 +924,7 @@ export function TransactionsScreen({
 
               <div>
                 <label htmlFor="filters-category" className="block text-sm font-medium text-slate-700">
-                  Category
+                  {formatMessage({ id: 'transactions.filter.category' })}
                 </label>
                 <select
                   id="filters-category"
@@ -924,7 +932,7 @@ export function TransactionsScreen({
                   onChange={(event) => setFilterCategoryId(Number(event.target.value))}
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value={ALL_CATEGORIES}>All categories</option>
+                  <option value={ALL_CATEGORIES}>{formatMessage({ id: 'transactions.filter.allCategories' })}</option>
                   {categories?.map((category) => (
                     <option key={category.id} value={category.id}>
                       {category.icon !== null ? `${category.icon} ` : ''}
@@ -946,7 +954,7 @@ export function TransactionsScreen({
                     onClick={clearPanelFilters}
                     className="text-xs font-medium text-slate-600 hover:text-slate-900"
                   >
-                    Clear all filters
+                    {formatMessage({ id: 'transactions.filter.clearAllFilters' })}
                   </button>
                 )}
                 <button
@@ -954,7 +962,7 @@ export function TransactionsScreen({
                   onClick={handleExport}
                   className="text-xs font-medium text-slate-600 hover:text-slate-900"
                 >
-                  Export to Excel
+                  {formatMessage({ id: 'transactions.filter.exportToExcel' })}
                 </button>
               </div>
             </div>
@@ -962,19 +970,19 @@ export function TransactionsScreen({
 
           {selectedWallet?.frozen && (
             <p className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-              This wallet is frozen — its history is viewable but read-only.
+              {formatMessage({ id: 'transactions.frozenBanner' })}
             </p>
           )}
 
           {wallets === null || categories === null || transactions === null ? (
-            <p className="mt-3 text-sm text-slate-500">Loading…</p>
+            <p className="mt-3 text-sm text-slate-500">{formatMessage({ id: 'transactions.loading' })}</p>
           ) : transactions.length === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
               {searchNeedle !== ''
-                ? 'No transactions match your search.'
+                ? formatMessage({ id: 'transactions.empty.search' })
                 : panelFiltersActive
-                  ? 'No transactions match these filters.'
-                  : 'Nothing here yet.'}
+                  ? formatMessage({ id: 'transactions.empty.filters' })
+                  : formatMessage({ id: 'transactions.empty.noSearch' })}
             </p>
           ) : (
             <ul className="mt-2 space-y-2">
@@ -1022,7 +1030,7 @@ export function TransactionsScreen({
               ref={sentinelRef}
               className="flex items-center justify-center py-3 text-xs text-slate-500"
             >
-              {loadingMore ? 'Loading more…' : ''}
+              {loadingMore ? formatMessage({ id: 'transactions.loadingMore' }) : ''}
             </div>
           )}
         </>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useIntl } from 'react-intl'
 
 import type { LedgerFilterRequest } from './App'
 import {
@@ -12,20 +13,22 @@ import {
 import { useDataVersion } from './api/dataVersion'
 import { WalletModal } from './WalletModal'
 
-const TYPE_LABELS: Record<WalletType, string> = {
-  checking: 'Checking',
-  credit_card: 'Credit Card',
-  cash: 'Cash',
-  contact: 'Contact',
+/** The message ids for each Wallet type (issue #117): the row subtitle keeps
+ * the singular label, the section header the plural. */
+const TYPE_MESSAGE_IDS: Record<WalletType, string> = {
+  checking: 'wallets.type.checking',
+  credit_card: 'wallets.type.creditCard',
+  cash: 'wallets.type.cash',
+  contact: 'wallets.type.contact',
 }
 
 // Section headers are plural, like the Categories tab's Expenses/Incomes;
 // "Cash" has no English plural. Row subtitles keep the singular labels above.
-const SECTION_LABELS: Record<WalletType, string> = {
-  contact: 'Contacts',
-  checking: 'Checking Accounts',
-  credit_card: 'Credit Cards',
-  cash: 'Cash',
+const SECTION_MESSAGE_IDS: Record<WalletType, string> = {
+  contact: 'wallets.section.contacts',
+  checking: 'wallets.section.checking',
+  credit_card: 'wallets.section.creditCards',
+  cash: 'wallets.section.cash',
 }
 
 // Fixed order: Contacts first, so who owes me / whom do I owe is answered the
@@ -60,6 +63,7 @@ export function WalletsScreen({
    * (issue #93). */
   requestLedgerFilter?: (request: LedgerFilterRequest) => void
 }) {
+  const { formatMessage } = useIntl()
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const [wallets, setWallets] = useState<Wallet[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -78,12 +82,12 @@ export function WalletsScreen({
         if (!cancelled) setWallets(data)
       })
       .catch(() => {
-        if (!cancelled) setLoadError('Could not load your wallets.')
+        if (!cancelled) setLoadError(formatMessage({ id: 'wallets.loadError' }))
       })
     return () => {
       cancelled = true
     }
-  }, [token, dataVersion])
+  }, [token, dataVersion, formatMessage])
 
   // Create and edit share one save path: upsert the saved Wallet and close
   // the modal.
@@ -124,7 +128,7 @@ export function WalletsScreen({
       )
       setModal(null)
     } catch {
-      setUnfreezeError('Could not unfreeze the wallet.')
+      setUnfreezeError(formatMessage({ id: 'wallets.unfreezeError' }))
     }
   }
 
@@ -142,12 +146,12 @@ export function WalletsScreen({
     }
     return SECTION_TYPES.map((type) => ({
       type,
-      label: SECTION_LABELS[type],
+      label: formatMessage({ id: SECTION_MESSAGE_IDS[type] }),
       items: wallets
         .filter((wallet) => wallet.type === type && !wallet.frozen)
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
     }))
-  }, [wallets])
+  }, [wallets, formatMessage])
 
   // One flat A→Z list across types, matching the active sections' sort (#48).
   const frozenWallets = useMemo(() => {
@@ -162,23 +166,23 @@ export function WalletsScreen({
   return (
     <>
       <div className="flex items-center justify-between">
-        <h2 className="font-semibold text-slate-900">Wallets</h2>
+        <h2 className="font-semibold text-slate-900">{formatMessage({ id: 'wallets.title' })}</h2>
         <button
           type="button"
           onClick={() => setModal({ kind: 'create' })}
           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
         >
-          New wallet
+          {formatMessage({ id: 'wallets.newWallet' })}
         </button>
       </div>
 
       {loadError !== null && <p className="mb-4 mt-2 text-sm text-red-600">{loadError}</p>}
 
       {wallets === null ? (
-        <p className="mt-3 text-sm text-slate-500">Loading wallets…</p>
+        <p className="mt-3 text-sm text-slate-500">{formatMessage({ id: 'wallets.loading' })}</p>
       ) : wallets.length === 0 ? (
         <p className="mt-3 text-sm text-slate-500">
-          No wallets yet. Add your first one to start tracking.
+          {formatMessage({ id: 'wallets.empty' })}
         </p>
       ) : (
         sections
@@ -215,7 +219,7 @@ export function WalletsScreen({
                             {wallet.name}
                           </span>
                           <span className="block text-xs text-slate-500">
-                            {TYPE_LABELS[wallet.type]}
+                            {formatMessage({ id: TYPE_MESSAGE_IDS[wallet.type] })}
                           </span>
                         </span>
                         <span className="shrink-0 font-semibold text-slate-900">
@@ -224,7 +228,7 @@ export function WalletsScreen({
                       </button>
                       <button
                         type="button"
-                        aria-label={`Edit ${wallet.name}`}
+                        aria-label={formatMessage({ id: 'wallets.editLabel' }, { name: wallet.name })}
                         onClick={() => setModal({ kind: 'edit', wallet })}
                         className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
                       >
@@ -246,7 +250,7 @@ export function WalletsScreen({
             onClick={() => setFrozenExpanded((open) => !open)}
             className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600"
           >
-            Frozen wallets ({frozenWallets.length})
+            {formatMessage({ id: 'wallets.frozen.header' }, { count: frozenWallets.length })}
           </button>
           {frozenExpanded && (
             <ul className="mt-2 space-y-3">
@@ -268,7 +272,8 @@ export function WalletsScreen({
                           {wallet.name}
                         </span>
                         <span className="block text-xs text-slate-500">
-                          {TYPE_LABELS[wallet.type]} · Frozen
+                          {formatMessage({ id: TYPE_MESSAGE_IDS[wallet.type] })} ·{' '}
+                          {formatMessage({ id: 'wallets.frozen.suffix' })}
                         </span>
                       </span>
                       <span className="shrink-0 font-semibold text-slate-900">
@@ -277,7 +282,7 @@ export function WalletsScreen({
                     </button>
                     <button
                       type="button"
-                      aria-label={`Edit ${wallet.name}`}
+                      aria-label={formatMessage({ id: 'wallets.editLabel' }, { name: wallet.name })}
                       onClick={() => setModal({ kind: 'edit', wallet })}
                       className="mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg text-slate-400 hover:text-slate-700"
                     >

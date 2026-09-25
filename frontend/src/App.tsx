@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { IntlProvider, useIntl } from 'react-intl'
 
 import { fetchAccountLanguage, setLocale, TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account, updateAccountLanguage } from './api'
+import { enMessages, itMessages } from './i18n/catalogs'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft, type ImportDraftController } from './importDraft'
@@ -52,6 +54,54 @@ function App() {
   const [resetToken, setResetToken] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('token'),
   )
+  // The Account's display Locale (issue #114): loaded from the API at sign-in
+  // and updated when the user changes it in Settings. The module-level
+  // setLocale() is kept in sync so every format helper sees the right locale.
+  // This state lives here (not in AppShell) so the IntlProvider wrapping the
+  // entire app tree re-renders when the locale changes (issue #117).
+  const [locale, setLanguageState] = useState('en')
+  const autoDetectDone = useRef(false)
+
+  /** Sync locale from account and auto-detect once on first load (issue #114). */
+  const syncLocale = useCallback(
+    (token: string, accountLang: string) => {
+      if (!autoDetectDone.current && accountLang === 'en') {
+        autoDetectDone.current = true
+        const browserLang = navigator.language
+        if (browserLang.startsWith('it')) {
+          updateAccountLanguage(token, 'it').catch(() => {})
+          setLocale('it')
+          setLanguageState('it')
+          return
+        }
+      }
+      const lang = accountLang === 'it' ? 'it' : 'en'
+      setLocale(lang)
+      setLanguageState(lang)
+    },
+    [],
+  )
+
+  // Fetch locale when the auth state changes (first load, login, etc.)
+  useEffect(() => {
+    if (auth.kind !== 'signedIn') return
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token === null) return
+    fetchAccountLanguage(token)
+      .then((lang) => syncLocale(token, lang))
+      .catch(() => {})
+  }, [auth, syncLocale])
+
+  /** User changed the locale in Settings: save to the API and update UI. */
+  const handleChangeLanguage = async (language: 'en' | 'it') => {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token === null) return
+    try {
+      await updateAccountLanguage(token, language)
+    } catch { /* surface through the picker — keep the optimistic value */ }
+    setLocale(language)
+    setLanguageState(language)
+  }
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY)
@@ -126,29 +176,50 @@ function App() {
     // dead token and returns to the auth screen (issue #84).
   }
 
-  if (auth.kind === 'checking') {
-    return <CheckingScreen />
-  }
-  if (auth.kind === 'signedOut') {
-    if (resetToken !== null) {
-      return <ResetPassword token={resetToken} onReset={handleResetPassword} onDone={clearResetToken} />
+  // Pick the right message catalog for the current locale: 'it' → Italian,
+  // everything else → English (the fallback).
+  const messages = locale === 'it' ? itMessages : enMessages
+
+  const content = (() => {
+    if (auth.kind === 'checking') {
+      return <CheckingScreen />
+    }
+    if (auth.kind === 'signedOut') {
+      if (resetToken !== null) {
+        return <ResetPassword token={resetToken} onReset={handleResetPassword} onDone={clearResetToken} />
+      }
+      return (
+        <LoginForm
+          onLogin={handleLogin}
+          onSignUp={handleSignUp}
+          onGoogleSignIn={handleGoogleSignIn}
+          onForgotPassword={handleForgotPassword}
+        />
+      )
     }
     return (
-      <LoginForm
-        onLogin={handleLogin}
-        onSignUp={handleSignUp}
-        onGoogleSignIn={handleGoogleSignIn}
-        onForgotPassword={handleForgotPassword}
+      <AppShell
+        email={auth.account.email}
+        onSignOut={handleSignOut}
+        onDeleteAccount={handleDeleteAccount}
+        locale={locale}
+        onChangeLanguage={handleChangeLanguage}
       />
     )
-  }
-  return <AppShell email={auth.account.email} onSignOut={handleSignOut} onDeleteAccount={handleDeleteAccount} />
+  })()
+
+  return (
+    <IntlProvider messages={messages} locale={locale === 'it' ? 'it' : 'en'} defaultLocale="en">
+      {content}
+    </IntlProvider>
+  )
 }
 
 function CheckingScreen() {
+  const { formatMessage } = useIntl()
   return (
     <Screen>
-      <p className="text-sm text-slate-500">Signing you in…</p>
+      <p className="text-sm text-slate-500">{formatMessage({ id: 'app.checking' })}</p>
     </Screen>
   )
 }
@@ -157,11 +228,16 @@ export function AppShell({
   email,
   onSignOut,
   onDeleteAccount,
+  locale,
+  onChangeLanguage,
 }: {
   email: string
   onSignOut: () => void
   onDeleteAccount: () => Promise<void>
+  locale: string
+  onChangeLanguage: (language: 'en' | 'it') => void
 }) {
+  const { formatMessage } = useIntl()
   const [tab, setTab] = useState<Tab>('dashboard')
   // Tab keep-alive (ADR-0022): a tab mounts on its first visit and stays
   // mounted afterwards, hidden with the `hidden` attribute — switching back
@@ -185,11 +261,6 @@ export function AppShell({
   }
 
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // The Account's display Locale (issue #114): loaded from the API at sign-in
-  // and updated when the user changes it in Settings. The module-level
-  // setLocale() is kept in sync so every format helper sees the right locale.
-  const [locale, setLanguageState] = useState('en')
-  const autoDetectDone = useRef(false)
   // The Import Draft lives here, not in the Transactions screen, so it
   // survives tab switches (issue #43) — under keep-alive the screen never
   // unmounts, and the shell-owned draft is what it was from the start.
@@ -205,46 +276,8 @@ export function AppShell({
   const [pendingLedgerRequest, setPendingLedgerRequest] =
     useState<LedgerFilterRequest | null>(null)
 
-  /** Sync locale from account and auto-detect once on first load (issue #114).
-   *  On first session load, if the stored locale is 'en', check
-   *  navigator.language: if it starts with 'it', auto-set to 'it' and save. */
-  const syncLocale = useCallback(
-    (token: string, accountLang: string) => {
-      if (!autoDetectDone.current && accountLang === 'en') {
-        autoDetectDone.current = true
-        const browserLang = navigator.language
-        if (browserLang.startsWith('it')) {
-          updateAccountLanguage(token, 'it').catch(() => {})
-          setLocale('it')
-          setLanguageState('it')
-          return
-        }
-      }
-      const lang = accountLang === 'it' ? 'it' : 'en'
-      setLocale(lang)
-      setLanguageState(lang)
-    },
-    [],
-  )
-
-  useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (token === null) return
-    fetchAccountLanguage(token)
-      .then((lang) => syncLocale(token, lang))
-      .catch(() => {})
-  }, [syncLocale])
-
-  /** User changed the locale in Settings: save to the API and update UI. */
-  const handleChangeLanguage = async (language: 'en' | 'it') => {
-    const token = localStorage.getItem(TOKEN_KEY)
-    if (token === null) return
-    try {
-      await updateAccountLanguage(token, language)
-    } catch { /* surface through the picker — keep the optimistic value */ }
-    setLocale(language)
-    setLanguageState(language)
-  }
+  // The locale state is now lifted to App (issue #117), so the IntlProvider
+  // wrapping the whole tree re-renders when the locale changes.
 
   /** Send a ledger jump: hold the request pending and switch to the
    * Transactions tab — the screen applies it on first mount (initial
@@ -278,14 +311,14 @@ export function AppShell({
     <div className="min-h-svh bg-slate-50 px-4 pt-6 pb-24">
       <header className="mx-auto flex max-w-sm items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Budjetame</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">{formatMessage({ id: 'app.brand' })}</h1>
           <p className="mt-0.5 text-xs text-slate-500">{email}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            aria-label="Settings"
+            aria-label={formatMessage({ id: 'app.settingsLabel' })}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
           >
             ⚙
@@ -295,7 +328,7 @@ export function AppShell({
             onClick={onSignOut}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
           >
-            Sign out
+            {formatMessage({ id: 'app.signOut' })}
           </button>
         </div>
       </header>
@@ -304,7 +337,7 @@ export function AppShell({
         <SettingsModal
           email={email}
           language={locale}
-          onChangeLanguage={handleChangeLanguage}
+          onChangeLanguage={onChangeLanguage}
           onDeleteAccount={onDeleteAccount}
           onDeleted={onSignOut}
           onClose={() => setSettingsOpen(false)}
@@ -331,22 +364,22 @@ export function AppShell({
       <nav className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white">
         <div className="mx-auto grid max-w-sm grid-cols-5 gap-0.5 px-2 py-1.5">
           <TabButton active={tab === 'dashboard'} onClick={() => activate('dashboard')}>
-            Dashboard
+            {formatMessage({ id: 'app.tab.dashboard' })}
           </TabButton>
           <TabButton active={tab === 'wallets'} onClick={() => activate('wallets')}>
-            Wallets
+            {formatMessage({ id: 'app.tab.wallets' })}
           </TabButton>
           <TabButton
             active={tab === 'transactions'}
             onClick={() => activate('transactions')}
           >
-            Transactions
+            {formatMessage({ id: 'app.tab.transactions' })}
           </TabButton>
           <TabButton active={tab === 'categories'} onClick={() => activate('categories')}>
-            Categories
+            {formatMessage({ id: 'app.tab.categories' })}
           </TabButton>
           <TabButton active={tab === 'recurring'} onClick={() => activate('recurring')}>
-            Recurring
+            {formatMessage({ id: 'app.tab.recurring' })}
           </TabButton>
         </div>
       </nav>

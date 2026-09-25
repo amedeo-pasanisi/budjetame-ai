@@ -3,7 +3,9 @@
  * action with its own confirm step. Also hosts the Restore from backup flow
  * (issue #115). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { TOKEN_KEY } from './api'
 import { SettingsModal } from './SettingsModal'
@@ -29,7 +31,7 @@ const renderModal = (
     onClose: () => void
   }> = {},
 ) =>
-  render(
+    renderWithIntl(
     <SettingsModal
       email="owner@example.com"
       language="en"
@@ -40,13 +42,6 @@ const renderModal = (
       {...overrides}
     />,
   )
-
-/** Helper to select a file via the hidden input. */
-async function selectFile(file: File) {
-  const input = screen.getByLabelText('Restore from backup…').querySelector('input[type="file"]')
-  if (!input) throw new Error('File input not found')
-  fireEvent.change(input, { target: { files: [file] } })
-}
 
 describe('SettingsModal (issue #84)', () => {
   beforeEach(() => {

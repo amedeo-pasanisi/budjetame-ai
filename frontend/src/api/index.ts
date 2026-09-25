@@ -84,6 +84,7 @@ export {
 export {
   type BackupFile,
   exportBackup,
+  restoreBackup,
 } from './backup'
 
 export {

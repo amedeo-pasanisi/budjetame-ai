@@ -8,7 +8,9 @@
  * mocked; the cards only render what the endpoints return — no computation
  * on the client. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+
+import { renderWithIntl } from './test/renderWithIntl'
 
 import { DashboardScreen } from './DashboardScreen'
 import { todayInRome } from './transactions'
@@ -161,7 +163,7 @@ afterEach(() => {
 
 describe('Dashboard Budget card', () => {
   it('renders the big Spendable Today and the frame line with recurring breakdown from the endpoint', async () => {
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
     expect(
@@ -172,14 +174,14 @@ describe('Dashboard Budget card', () => {
   })
 
   it('renders the Remaining Monthly Spendable line from the endpoint', async () => {
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText('€333.40 left this month')).toBeInTheDocument()
   })
 
   it('shows 0 and an "over today\'s budget" note when the bucket is negative', async () => {
     fetchBudgetMock.mockResolvedValue({ ...budget, spendable_today: '-12.34' })
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText('€0.00')).toBeInTheDocument()
     expect(screen.getByText("€12.34 over today's budget")).toBeInTheDocument()
@@ -191,7 +193,7 @@ describe('Dashboard Budget card', () => {
       spendable_today: '-433.40',
       remaining_monthly_spendable: '-100.00',
     })
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(
       await screen.findByText("€100.00 over this month's budget"),
@@ -210,7 +212,7 @@ describe('Dashboard Budget card', () => {
       spendable_today: '-33.40',
       remaining_monthly_spendable: '300.00',
     })
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText("€33.40 over today's budget")).toBeInTheDocument()
     expect(screen.getByText('€300.00 left this month')).toBeInTheDocument()
@@ -219,7 +221,7 @@ describe('Dashboard Budget card', () => {
   it('is hidden when the account has no Recurring definitions at all', async () => {
     fetchRecurringCostsMock.mockResolvedValue([])
     fetchRecurringIncomesMock.mockResolvedValue([])
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     await screen.findByText('Net Worth')
     // The card must not render — not even an all-zero shell.
@@ -232,14 +234,14 @@ describe('Dashboard Budget card', () => {
   it('stays visible when only one side has definitions', async () => {
     fetchRecurringCostsMock.mockResolvedValue([])
     fetchRecurringIncomesMock.mockResolvedValue([income])
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText('€49.80')).toBeInTheDocument()
   })
 
   it('shows an error state on a failed load — never an empty Budget', async () => {
     fetchBudgetMock.mockRejectedValue(new Error('network down'))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText('Could not load the budget.')).toBeInTheDocument()
     expect(screen.queryByText(/per day/)).not.toBeInTheDocument()
@@ -249,7 +251,7 @@ describe('Dashboard Budget card', () => {
   it('stays visible when the definitions check itself fails', async () => {
     fetchRecurringCostsMock.mockRejectedValue(new Error('network down'))
     fetchRecurringIncomesMock.mockRejectedValue(new Error('network down'))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     // A failed load must never look like an empty Budget: the card renders
     // the data it has instead of hiding.
@@ -263,7 +265,7 @@ describe('Dashboard Budget card', () => {
         resolveBudget = resolve
       }),
     )
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     await screen.findByText('Net Worth')
     expect(screen.getByText('Loading…')).toBeInTheDocument()
@@ -273,7 +275,7 @@ describe('Dashboard Budget card', () => {
   })
 
   it('ignores the pie-month selector — the budget card has its own month selector', async () => {
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText('€49.80')
 
     const pieMonthInput = document.getElementById('pie-month') as HTMLInputElement
@@ -292,7 +294,7 @@ describe('Dashboard Budget card', () => {
 
 describe('Dashboard category pie', () => {
   it('shows the expense pie by default and its center label', async () => {
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText(/Expenses by Category/)).toBeInTheDocument()
     expect(screen.getByText('🍕 Food')).toBeInTheDocument()
@@ -304,7 +306,7 @@ describe('Dashboard category pie', () => {
   })
 
   it('toggles to the income pie without refetching the summary', async () => {
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses by Category/)
 
     fireEvent.click(within(screen.getByRole('group', { name: 'Pie side' })).getByRole('button', { name: 'Incomes' }))
@@ -320,7 +322,7 @@ describe('Dashboard category pie', () => {
   })
 
   it('has its own month selector inside the card and refetches the summary for the chosen month', async () => {
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses by Category/)
     expect(fetchDashboardSummaryMock).toHaveBeenCalledWith('', currentMonth)
 
@@ -345,7 +347,7 @@ describe('Dashboard category pie', () => {
       expenses_by_category: [expenseSlice],
       incomes_by_category: [],
     }))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses by Category/)
 
     fireEvent.click(within(screen.getByRole('group', { name: 'Pie side' })).getByRole('button', { name: 'Incomes' }))
@@ -361,7 +363,7 @@ describe('Dashboard trend', () => {
       to_month: toMonth,
       months: [{ month: '2026-03', amount: '42.00' }],
     }))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText(/Expenses Trend ·/)).toBeInTheDocument()
     expect(fetchTrendMock).toHaveBeenCalledWith('', 'expense', trendFromMonth, currentMonth)
@@ -380,7 +382,7 @@ describe('Dashboard trend', () => {
       to_month: toMonth,
       months: [{ month: '2026-03', amount: kind === 'income' ? '77.00' : '42.00' }],
     }))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses Trend ·/)
     expect(fetchTrendMock).toHaveBeenCalledWith('', 'expense', trendFromMonth, currentMonth)
 
@@ -399,7 +401,7 @@ describe('Dashboard trend', () => {
       to_month: toMonth,
       months: [{ month: '2026-03', amount: '42.00' }],
     }))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses Trend ·/)
 
     const bar = screen.getByRole('button', { name: /€42.00/ })
@@ -415,7 +417,7 @@ describe('Dashboard trend', () => {
       to_month: toMonth,
       months: [{ month: '2026-03', amount: '42.00' }],
     }))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses Trend ·/)
 
     // jsdom does no hit-testing, but the invariant is SVG paint order: an
@@ -439,7 +441,7 @@ describe('Dashboard trend', () => {
         { month: '2026-04', amount: '0.00' },
       ],
     }))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
     await screen.findByText(/Expenses Trend ·/)
 
     fireEvent.click(screen.getByRole('button', { name: /Apr 2026: €0.00/ }))
@@ -448,7 +450,7 @@ describe('Dashboard trend', () => {
 
   it('shows an error state on a failed trend load', async () => {
     fetchTrendMock.mockRejectedValue(new Error('network down'))
-    render(<DashboardScreen />)
+    renderWithIntl(<DashboardScreen />)
 
     expect(await screen.findByText('Could not load the trend.')).toBeInTheDocument()
   })

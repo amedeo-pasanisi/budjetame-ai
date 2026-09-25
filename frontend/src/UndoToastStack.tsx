@@ -7,7 +7,7 @@
  * each entry gets a decreasing counter that reaches 0 at UNDO_WINDOW_MS
  * after its createdAt. */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { UNDO_WINDOW_MS, type UndoEntry } from './undoStack'
 
 export type { UndoEntry } from './undoStack'
