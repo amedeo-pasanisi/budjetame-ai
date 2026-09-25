@@ -8,7 +8,7 @@
  * draft reveals a Field Error under each wrong field instead of calling the
  * API. The API client is mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import { renderWithIntl } from './test/renderWithIntl'
 

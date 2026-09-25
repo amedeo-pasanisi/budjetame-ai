@@ -5,7 +5,7 @@
  * props: stack, onUndo, onDismiss — no API mocking needed. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, screen } from "@testing-library/react"
 import { renderWithIntl } from "./test/renderWithIntl"
 import type { Transaction } from './api'
 import { UndoToastStack, type UndoEntry } from './UndoToastStack'
