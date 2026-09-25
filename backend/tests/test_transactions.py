@@ -2265,6 +2265,26 @@ async def _create_recurring_cost(
     return response.json()["id"]
 
 
+async def _create_recurring_income(
+    client: AsyncClient, token: str, name: str = "Income", start_date: str = "2030-03-01"
+) -> int:
+    """A monthly Recurring Income starting 2030-03-01 — the same stable
+    Occurrence sequence the link tests use."""
+    response = await client.post(
+        "/recurring-incomes",
+        json={
+            "name": name,
+            "amount": "100.00",
+            "interval_value": 1,
+            "interval_unit": "months",
+            "start_date": start_date,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
 async def test_undo_restores_the_same_transaction_with_its_id(
     client: AsyncClient,
 ) -> None:
@@ -2438,6 +2458,7 @@ async def test_undo_restores_recurring_pin_and_fails_when_occurrence_taken(
         headers=_auth(token),
     )
     assert other.status_code == 201
+    other_id = other.json()["id"]
 
     # The undo should fail: the pinned Occurrence is already paid
     undo = await client.post(
@@ -2463,6 +2484,224 @@ async def test_undo_restores_recurring_pin_and_fails_when_occurrence_taken(
         headers=_auth(token),
     )
     assert undo.status_code == 422
+    assert (
+        undo.json()["detail"]
+        == "This Occurrence was already paid by another Transaction"
+    )
+
+    # Verify nothing was created: the listing does not contain the undo id
+    all_txs = await _list_all(client, token)
+    assert not any(t["id"] == original["id"] for t in all_txs)
+    # The wallet balance is what the second expense left it at:
+    # 100.00 (initial) → -30.00 (first expense) = 70.00
+    # → +30.00 (delete undoes first expense) = 100.00 → -5.00 (second expense) = 95.00
+    assert await _wallet_balance(client, token, wallet_id) == "95.00"
+
+    # The other transaction that took the pin still exists
+    assert any(t["id"] == other_id for t in all_txs)
+
+
+async def test_undo_happy_path_restores_recurring_cost_pin(
+    client: AsyncClient,
+) -> None:
+    """Undo restores the original recurring_cost_id and occurrence_date
+    when the pinned Occurrence has not been taken by another Transaction."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Undo Happy Cost", "checking", "100.00")
+    cost_id = await _create_recurring_cost(client, token, "Happy Pin Cost", "2030-04-01")
+
+    # Link to the cost: pays the oldest Unpaid Occurrence (2030-04-01)
+    expense = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "25.00",
+            "date": "2030-03-15",
+            "wallet_id": wallet_id,
+            "recurring_cost_id": cost_id,
+        },
+        headers=_auth(token),
+    )
+    assert expense.status_code == 201
+    original = expense.json()
+    assert original["occurrence_date"] == "2030-04-01"
+    assert original["recurring_cost_id"] == cost_id
+
+    # Delete it
+    await client.delete(f"/transactions/{original['id']}", headers=_auth(token))
+
+    # Undo with the original pin
+    undo = await client.post(
+        "/transactions/undo",
+        json={
+            "id": original["id"],
+            "type": "expense",
+            "amount": original["amount"],
+            "date": original["date"],
+            "wallet_id": original["wallet_id"],
+            "source_wallet_id": None,
+            "destination_wallet_id": None,
+            "category_id": original["category_id"],
+            "recurring_cost_id": cost_id,
+            "recurring_income_id": None,
+            "occurrence_date": "2030-04-01",
+            "description": original["description"],
+            "latitude": None,
+            "longitude": None,
+            "place_name": None,
+            "place_id": None,
+        },
+        headers=_auth(token),
+    )
+    assert undo.status_code == 201
+    restored = undo.json()
+
+    # Same pin restored
+    assert restored["recurring_cost_id"] == cost_id
+    assert restored["occurrence_date"] == "2030-04-01"
+    # Balance reflects the restored transaction (100.00 - 25.00 = 75.00)
+    assert await _wallet_balance(client, token, wallet_id) == "75.00"
+
+
+async def test_undo_happy_path_restores_recurring_income_pin(
+    client: AsyncClient,
+) -> None:
+    """Undo restores the original recurring_income_id and occurrence_date
+    when the pinned Occurrence has not been taken by another Transaction."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Undo Happy Income", "checking", "0.00")
+    income_id = await _create_recurring_income(client, token, "Happy Pin Income", "2030-04-01")
+
+    # Link to the income: pays the oldest Unpaid Occurrence (2030-04-01)
+    income = await client.post(
+        "/transactions",
+        json={
+            "type": "income",
+            "amount": "50.00",
+            "date": "2030-03-20",
+            "wallet_id": wallet_id,
+            "recurring_income_id": income_id,
+        },
+        headers=_auth(token),
+    )
+    assert income.status_code == 201
+    original = income.json()
+    assert original["occurrence_date"] == "2030-04-01"
+    assert original["recurring_income_id"] == income_id
+
+    # Delete it
+    await client.delete(f"/transactions/{original['id']}", headers=_auth(token))
+
+    # Undo with the original pin
+    undo = await client.post(
+        "/transactions/undo",
+        json={
+            "id": original["id"],
+            "type": "income",
+            "amount": original["amount"],
+            "date": original["date"],
+            "wallet_id": original["wallet_id"],
+            "source_wallet_id": None,
+            "destination_wallet_id": None,
+            "category_id": original["category_id"],
+            "recurring_cost_id": None,
+            "recurring_income_id": income_id,
+            "occurrence_date": "2030-04-01",
+            "description": original["description"],
+            "latitude": None,
+            "longitude": None,
+            "place_name": None,
+            "place_id": None,
+        },
+        headers=_auth(token),
+    )
+    assert undo.status_code == 201
+    restored = undo.json()
+
+    # Same pin restored
+    assert restored["recurring_income_id"] == income_id
+    assert restored["occurrence_date"] == "2030-04-01"
+    # Balance reflects the restored transaction
+    assert await _wallet_balance(client, token, wallet_id) == "50.00"
+
+
+async def test_undo_recurring_income_pin_fails_when_occurrence_taken(
+    client: AsyncClient,
+) -> None:
+    """Undo fails with a specific message when the pinned Recurring Income
+    Occurrence was already paid by another Transaction."""
+    token = await _login(client)
+    wallet_id = await _create_wallet(client, token, "Undo Pin Income", "checking", "0.00")
+    income_id = await _create_recurring_income(client, token, "Pin Income", "2030-04-01")
+
+    # Link to the income: pays the oldest Unpaid Occurrence (2030-04-01)
+    income = await client.post(
+        "/transactions",
+        json={
+            "type": "income",
+            "amount": "70.00",
+            "date": "2030-03-10",
+            "wallet_id": wallet_id,
+            "recurring_income_id": income_id,
+        },
+        headers=_auth(token),
+    )
+    assert income.status_code == 201
+    original = income.json()
+    assert original["occurrence_date"] == "2030-04-01"
+
+    # Delete it
+    await client.delete(f"/transactions/{original['id']}", headers=_auth(token))
+
+    # Another Income pays the same Occurrence in the mean time
+    other = await client.post(
+        "/transactions",
+        json={
+            "type": "income",
+            "amount": "20.00",
+            "date": "2030-03-15",
+            "wallet_id": wallet_id,
+            "recurring_income_id": income_id,
+        },
+        headers=_auth(token),
+    )
+    assert other.status_code == 201
+    other_id = other.json()["id"]
+
+    # The undo should fail: the pinned Occurrence is already paid
+    undo = await client.post(
+        "/transactions/undo",
+        json={
+            "id": original["id"],
+            "type": "income",
+            "amount": original["amount"],
+            "date": original["date"],
+            "wallet_id": original["wallet_id"],
+            "source_wallet_id": None,
+            "destination_wallet_id": None,
+            "category_id": original["category_id"],
+            "recurring_cost_id": None,
+            "recurring_income_id": income_id,
+            "occurrence_date": "2030-04-01",
+            "description": original["description"],
+            "latitude": None,
+            "longitude": None,
+            "place_name": None,
+            "place_id": None,
+        },
+        headers=_auth(token),
+    )
+    assert undo.status_code == 422
+    assert (
+        undo.json()["detail"]
+        == "This Occurrence was already paid by another Transaction"
+    )
+
+    # Verify nothing was created: the listing does not contain the undo id
+    all_txs = await _list_all(client, token)
+    assert not any(t["id"] == original["id"] for t in all_txs)
+    # The other transaction that took the pin still exists
+    assert any(t["id"] == other_id for t in all_txs)
 
 
 async def test_undo_foreign_transaction_is_forbidden(

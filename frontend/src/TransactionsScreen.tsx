@@ -133,6 +133,7 @@ export function TransactionsScreen({
   const [recurringIncomeToSelect, setRecurringIncomeToSelect] = useState<number | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [undoError, setUndoError] = useState<string | null>(null)
   // The undo stack (ADR-0031): in-memory buffer of deleted Transactions
   // waiting for a 10-second undo window. Newest first; max 3.
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
@@ -622,11 +623,15 @@ export function TransactionsScreen({
     try {
       await undoTransaction(token, entry.transaction)
       setUndoStack((current) => removeEntry(current, entry.transaction.id))
+      setUndoError(null)
       reload()
-    } catch {
+    } catch (error) {
       // Undo failed (e.g. pin already taken or network error); remove
       // from the stack so the toast disappears.
       setUndoStack((current) => removeEntry(current, entry.transaction.id))
+      setUndoError(
+        error instanceof ApiError ? error.message : 'Could not undo transaction',
+      )
       reload()
     }
   }
@@ -730,6 +735,9 @@ export function TransactionsScreen({
           {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
           {exportError !== null && (
             <p className="mt-2 text-sm text-red-600">{exportError}</p>
+          )}
+          {undoError !== null && (
+            <p className="mt-2 text-sm text-red-600">{undoError}</p>
           )}
           {savedWarning !== null && (
             <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

@@ -321,6 +321,7 @@ export async function undoTransaction(
       place_id: transaction.place_id,
     },
     errorMessage: 'Could not undo transaction',
+    readDetail: true,
   })
   return (await response.json()) as Transaction
 }
