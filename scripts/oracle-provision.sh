@@ -190,8 +190,8 @@ finish() {
 # Replace the example below. Set the two totals to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=8
-TOTAL_MINUTES=38
+TOTAL_STAGES=9
+TOTAL_MINUTES=41
 
 banner "Oracle Cloud Always Free — deploy Budjetame"
 
@@ -338,6 +338,17 @@ VM_IP=$(run_oci $OCI_PY instance-public-ip "$INSTANCE")
 write_env VM_IP "$VM_IP"
 say "Instance is RUNNING at $VM_IP"
 
+# ── Create & attach block volume for PostgreSQL data ────────────────────────
+stage "Block volume (PostgreSQL data)" 3
+say "Creating 50 GB block volume in $AD for persistent PostgreSQL data…"
+VOLUME=$(run_oci $OCI_PY block-volume-create "$AD" 50 "budjetame-data")
+say "Volume created: $VOLUME"
+say "Attaching volume to instance (paravirtualized)…"
+ATTACHMENT=$(run_oci $OCI_PY block-volume-attach "$INSTANCE" "$VOLUME")
+say "Attachment created: $ATTACHMENT — waiting for ATTACHED state…"
+run_oci $OCI_PY block-volume-wait "$ATTACHMENT"
+say "Volume attached and ready."
+
 # ── Stage 5: first boot + Docker ────────────────────────────────────────────
 stage "First boot + Docker install" 8
 say "The instance needs 1–3 minutes to boot for the first time. Waiting…"
@@ -352,7 +363,43 @@ if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -i "$KEY_PATH"
   warn "VM not reachable at $VM_IP — check it is Running and the IP is right, then re-run the wizard."
   exit 1
 fi
-say "Connected. Installing Docker (takes a minute)…"
+say "Connected. Formatting & mounting block volume for PostgreSQL…"
+ssh -i "$KEY_PATH" "ubuntu@$VM_IP" "
+  set -euo pipefail
+  DEVICE=\$(lsblk -dno NAME,TYPE | awk '\$2=="disk" && \$1!="sda" {print "/dev/"\$1; exit}')
+  if [[ -z "\$DEVICE" ]]; then
+    DEVICE=\$(ls /dev/vd* 2>/dev/null | grep -v vda | head -1 || true)
+  fi
+  if [[ -z "\$DEVICE" ]]; then
+    echo "ERROR: Could not find block volume device" >&2
+    exit 1
+  fi
+  echo "Found block device: \$DEVICE"
+  if ! blkid "\$DEVICE" 2>/dev/null; then
+    echo "Formatting \$DEVICE as ext4…"
+    mkfs.ext4 -F "\$DEVICE"
+  else
+    echo "\$DEVICE already formatted"
+  fi
+  mkdir -p /mnt/data
+  mount "\$DEVICE" /mnt/data
+  mkdir -p /mnt/data/postgres
+  chown -R 999:999 /mnt/data/postgres
+  UUID=\$(blkid -s UUID -o value "\$DEVICE")
+  if ! grep -q "\$UUID" /etc/fstab; then
+    echo "UUID=\$UUID /mnt/data ext4 defaults,nofail 0 2" >> /etc/fstab
+    echo "Added to /etc/fstab (UUID=\$UUID)"
+  else
+    echo "Already in /etc/fstab"
+  fi
+"
+if [[ $? -ne 0 ]]; then
+  warn "Block volume setup failed — check SSH output above."
+  exit 1
+fi
+say "Block volume mounted at /mnt/data, postgres directory ready."
+
+say "Installing Docker (takes a minute)…"
 ssh -i "$KEY_PATH" "ubuntu@$VM_IP" "curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker ubuntu"
 say "Docker installed."
 

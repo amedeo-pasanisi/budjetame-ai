@@ -30,6 +30,12 @@ Usage:
     scripts/oci_api.py instance-public-ip <instance>  # public IP
     scripts/oci_api.py instance-list                   # displayName, shape, state, OCID
     scripts/oci_api.py instance-terminate <instance>  # delete instance + its boot volume
+    scripts/oci_api.py block-volume-create <ad> <size-gb> <name>  # create block volume
+    scripts/oci_api.py block-volume-attach <instance> <volume>  # attach (paravirtualized)
+    scripts/oci_api.py block-volume-list                   # list volumes in compartment
+    scripts/oci_api.py block-volume-detach <attachment>  # detach volume
+    scripts/oci_api.py block-volume-delete <volume>      # delete volume
+    scripts/oci_api.py block-volume-wait <attachment>  # poll until ATTACHED
     scripts/oci_api.py --dry-run <command> ...        # print the signed request, don't send
 """
 
@@ -345,6 +351,89 @@ def instance_terminate(cfg: dict, private_key, instance: str, dry_run: bool = Fa
         print(f"terminating {instance}")
 
 
+def block_volume_create(cfg: dict, private_key, ad: str, size_gb: int,
+                        display_name: str, dry_run: bool = False) -> str:
+    """Create a block volume in the given availability domain."""
+    body = {
+        "availabilityDomain": ad,
+        "compartmentId": cfg["tenancy"],
+        "sizeInGBs": size_gb,
+        "displayName": display_name,
+    }
+    data = call(cfg, private_key, "POST", "/20160918/volumes",
+                body=body, dry_run=dry_run)
+    if dry_run:
+        return ""
+    print(data["id"])
+
+
+def block_volume_attach(cfg: dict, private_key, instance: str,
+                        volume: str, dry_run: bool = False) -> str:
+    """Attach a block volume to an instance (paravirtualized)."""
+    body = {
+        "instanceId": instance,
+        "volumeId": volume,
+        "type": "paravirtualized",
+    }
+    data = call(cfg, private_key, "POST", "/20160918/volumeAttachments",
+                body=body, dry_run=dry_run)
+    if dry_run:
+        return ""
+    print(data["id"])
+
+
+def block_volume_list(cfg: dict, private_key, dry_run: bool = False) -> None:
+    """List block volumes in the compartment, one line each:
+    displayName, sizeInGBs, lifecycleState, OCID (tab-separated)."""
+    data = call(cfg, private_key, "GET", "/20160918/volumes",
+                params={"compartmentId": cfg["tenancy"]}, dry_run=dry_run)
+    if dry_run:
+        return
+    for vol in sorted(data, key=lambda v: v.get("displayName", "")):
+        print("\t".join([
+            vol.get("displayName", "?"),
+            str(vol.get("sizeInGBs", "?")),
+            vol.get("lifecycleState", "?"),
+            vol["id"],
+        ]))
+
+
+def block_volume_detach(cfg: dict, private_key, attachment: str,
+                        dry_run: bool = False) -> None:
+    """Detach a block volume from its instance."""
+    call(cfg, private_key, "DELETE",
+         f"/20160918/volumeAttachments/{attachment}", dry_run=dry_run)
+    if not dry_run:
+        print(f"detaching {attachment}")
+
+
+def block_volume_delete(cfg: dict, private_key, volume: str,
+                        dry_run: bool = False) -> None:
+    """Delete a block volume (must be detached first)."""
+    call(cfg, private_key, "DELETE",
+         f"/20160918/volumes/{volume}", dry_run=dry_run)
+    if not dry_run:
+        print(f"deleting {volume}")
+
+
+def block_volume_wait(cfg: dict, private_key, attachment: str,
+                         dry_run: bool = False) -> None:
+    """Poll until a volume attachment reaches ATTACHED state."""
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        data = call(cfg, private_key, "GET",
+                    f"/20160918/volumeAttachments/{attachment}",
+                    dry_run=dry_run)
+        if dry_run:
+            return
+        state = data.get("lifecycleState", "?")
+        print(f"  attachment state: {state}", file=sys.stderr)
+        if state == "ATTACHED":
+            return
+        time.sleep(10)
+    sys.exit("error: volume attachment did not reach ATTACHED within 5 minutes")
+
+
 def https_ingress_rule() -> dict:
     return {"protocol": "6", "source": "0.0.0.0/0",
             "tcpOptions": {"destinationPortRange": {"min": 443, "max": 443}}}
@@ -455,6 +544,20 @@ def main() -> None:
         instance_list(cfg, private_key, args.dry_run)
     elif args.command == "instance-terminate":
         instance_terminate(cfg, private_key, args.args[0], args.dry_run)
+    elif args.command == "block-volume-create":
+        block_volume_create(cfg, private_key, args.args[0], int(args.args[1]),
+                            args.args[2], args.dry_run)
+    elif args.command == "block-volume-attach":
+        block_volume_attach(cfg, private_key, args.args[0], args.args[1],
+                            args.dry_run)
+    elif args.command == "block-volume-list":
+        block_volume_list(cfg, private_key, args.dry_run)
+    elif args.command == "block-volume-detach":
+        block_volume_detach(cfg, private_key, args.args[0], args.dry_run)
+    elif args.command == "block-volume-delete":
+        block_volume_delete(cfg, private_key, args.args[0], args.dry_run)
+    elif args.command == "block-volume-wait":
+        block_volume_wait(cfg, private_key, args.args[0], args.dry_run)
     else:
         sys.exit(f"error: unknown command '{args.command}'")
 

@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       POSTGRES_DB: budjetame
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - /mnt/data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U budjetame -d budjetame"]
       interval: 5s
@@ -41,5 +41,4 @@ services:
     depends_on:
       - backend
 
-volumes:
-  db_data:
+# No named volume — data lives on the attached block volume at /mnt/data/postgres
