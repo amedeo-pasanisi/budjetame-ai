@@ -5,6 +5,17 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [v1.9.1] — 2026-11-09
+
+### Fixed
+
+- Production database durability: added a persistent 50 GB block volume for
+  PostgreSQL data (ADR-0024). The database now survives instance termination
+  (Oracle Always Free reclaim or accidental) because data lives on a detached
+  block volume, not the ephemeral boot volume. The provisioning wizard
+  creates, attaches, formats, and mounts the volume automatically.
+- Documented the production data-loss incident and the fix (ADR-0024).
+
 ## [v1.9.0] — 2026-09-25
 
 ### Added
@@ -355,3 +366,4 @@ behind the live deployment at budjetame.de.
 [v1.1.1]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.1.1
 [v1.8.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.8.0
 [v1.9.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.9.0
+[v1.9.1]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.9.1
