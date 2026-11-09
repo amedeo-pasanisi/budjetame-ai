@@ -18,7 +18,6 @@ order to understand the project:
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records, numbered `0001-` upwards. Read in order. |
 | [`README.md`](README.md) (this file) | Project overview, stack, local dev, deployment, conventions |
 | [`CHANGELOG.md`](CHANGELOG.md) | User-facing change history from the first release onward |
-| [`product_backlog.md`](product_backlog.md) | Product roadmap and feature backlog |
 | [`docs/deploy-oracle.md`](docs/deploy-oracle.md) | Oracle Cloud Always Free deployment record |
 | [`docs/agents/`](docs/agents/) | Agent workflow policies (issue tracker, triage labels, domain docs conventions) |
 | [`AGENTS.md`](AGENTS.md) | Agent skills index — links into `docs/agents/` |
