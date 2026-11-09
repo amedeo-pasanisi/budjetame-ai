@@ -26,12 +26,12 @@ from app.models import (
     Category,
     RecurringCost,
     RecurringIncome,
-    RecurringSkip,
     Transaction,
     TransactionType,
 )
-from app.recurrence import occurrences_in_window, period_of, rome_today
+from app.recurrence import rome_today
 
+from app.services.occurrences import timeline_for
 from app.services.wallets import wallet_balances
 
 
@@ -240,37 +240,15 @@ def _due_amount(
     last_day: date,
 ) -> Decimal:
     """One definition's contribution to the Monthly Spendable: its amount
-    per Occurrence due inside the window (an unset start date defaults to
-    the start date, ADR-0024). A Skipped Occurrence never counts
-    (ADR-0016): the user does not have to pay it, so the Budget must not
-    pretend the money leaves (or arrives).
-
-    The stored skip dates map through the current unit's period shape
-    (`period_of`), so a skip travels with its Occurrence across definition
-    edits — the Budget re-derives on every read, exactly like every other
-    input (ADR-0001)."""
-    if isinstance(definition, RecurringCost):
-        stored = session.scalars(
-            select(RecurringSkip.occurrence_date).where(
-                RecurringSkip.recurring_cost_id == definition.id
-            )
-        ).all()
-    else:
-        stored = session.scalars(
-            select(RecurringSkip.occurrence_date).where(
-                RecurringSkip.recurring_income_id == definition.id
-            )
-        ).all()
-    skipped = {period_of(value, definition.interval_unit) for value in stored}
-    due_dates = occurrences_in_window(
-        definition.start_date,
-        definition.interval_value,
-        definition.interval_unit,
-        first_day,
-        last_day,
-        skipped,
-    )
-    return definition.amount * Decimal(len(due_dates))
+    per Occurrence due inside the window. The Occurrence Timeline owns
+    which Occurrences exist and count: a Skipped one never does (ADR-0016)
+    — the user does not have to pay it, so the Budget must not pretend the
+    money leaves (or arrives) — and a frozen definition's sequence ends at
+    its freeze date (ADR-0028), so the months before it keep their
+    Occurrences while nothing counts from that day on. The Budget
+    re-derives on every read, exactly like every other input (ADR-0001)."""
+    timeline = timeline_for(session, definition)
+    return definition.amount * Decimal(len(timeline.due_in(first_day, last_day)))
 
 
 def _discretionary_spent(

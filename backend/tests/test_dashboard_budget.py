@@ -864,3 +864,148 @@ async def test_editing_or_deleting_a_transaction_recomputes_the_month(
         after_delete["remaining_monthly_spendable"]
         == before["remaining_monthly_spendable"]
     )
+
+
+# --- frozen definitions stop at their freeze date (ADR-0028) --------------
+
+async def test_a_frozen_cost_no_longer_counts_its_occurrences_from_the_freeze_date(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Freezing stops Occurrence generation at the freeze date (ADR-0028):
+    an Occurrence due on or after the day of the freeze no longer counts
+    toward Monthly Spendable. The cost's only Occurrence this month is the
+    month's last day — today or later, so always on or after the freeze
+    date — and the freeze restores the month exactly."""
+    email = "budget-freeze-cost@budjetame.dev"
+    account_id = insert_foreign_account(database_url, email)
+    try:
+        token = await _login(client, email=email, password="whatever")
+        cost = await _create_recurring_cost(
+            client,
+            token,
+            name="Freeze Cost Rent",
+            amount="500.00",
+            start_date=_last_day_of_current_month(),
+        )
+        assert (await _budget(client, token))["monthly_spendable"] == "-500.00"
+
+        response = await client.post(
+            f"/recurring-costs/{cost}/freeze", headers=_auth(token)
+        )
+        assert response.status_code == 200
+
+        after_freeze = await _budget(client, token)
+        assert after_freeze["monthly_spendable"] == "0.00"
+        assert after_freeze["recurring_costs_total"] == "0.00"
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_a_frozen_income_no_longer_counts_its_occurrences_from_the_freeze_date(
+    client: AsyncClient, database_url: str
+) -> None:
+    """The income mirror (ADR-0028 applies to both sides): a salary frozen
+    before its Occurrence on the month's last day no longer fills the
+    month."""
+    email = "budget-freeze-income@budjetame.dev"
+    account_id = insert_foreign_account(database_url, email)
+    try:
+        token = await _login(client, email=email, password="whatever")
+        income = await _create_recurring_income(
+            client,
+            token,
+            name="Freeze Income Salary",
+            amount="3000.00",
+            start_date=_last_day_of_current_month(),
+        )
+        assert (await _budget(client, token))["monthly_spendable"] == "3000.00"
+
+        response = await client.post(
+            f"/recurring-incomes/{income}/freeze", headers=_auth(token)
+        )
+        assert response.status_code == 200
+
+        after_freeze = await _budget(client, token)
+        assert after_freeze["monthly_spendable"] == "0.00"
+        assert after_freeze["recurring_incomes_total"] == "0.00"
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_months_before_the_freeze_date_keep_their_occurrences(
+    client: AsyncClient, database_url: str
+) -> None:
+    """Months before the freeze date are unaffected (ADR-0028): their
+    Occurrences still count toward Monthly Spendable as they did at the
+    time — past Budget numbers never change retroactively. The cost's
+    Occurrence on the 15th of last month lies before today's freeze."""
+    email = "budget-freeze-past@budjetame.dev"
+    account_id = insert_foreign_account(database_url, email)
+    try:
+        token = await _login(client, email=email, password="whatever")
+        cost = await _create_recurring_cost(
+            client, token, name="Freeze Past Rent", amount="500.00"
+        )
+        response = await client.get(
+            "/dashboard/budget",
+            params={"month": _previous_month()},
+            headers=_auth(token),
+        )
+        assert response.status_code == 200
+        assert response.json()["monthly_spendable"] == "-500.00"
+
+        response = await client.post(
+            f"/recurring-costs/{cost}/freeze", headers=_auth(token)
+        )
+        assert response.status_code == 200
+
+        response = await client.get(
+            "/dashboard/budget",
+            params={"month": _previous_month()},
+            headers=_auth(token),
+        )
+        assert response.status_code == 200
+        assert response.json()["monthly_spendable"] == "-500.00"
+        assert response.json()["recurring_costs_total"] == "500.00"
+    finally:
+        delete_account(database_url, account_id)
+
+
+async def test_a_freeze_mid_month_keeps_the_occurrences_before_it(
+    client: AsyncClient, database_url: str
+) -> None:
+    """The freeze cuts the sequence per Occurrence, not per month
+    (ADR-0028: "months before the freeze date are unaffected — their
+    Occurrences still count as they did at the time"): a weekly cost
+    started on the 1st keeps every Occurrence dated before today's freeze
+    and loses the ones dated today or later. The expected counts come from
+    the spec's rule on the calendar (the 1st, 8th, 15th, ... of the month),
+    not from the module."""
+    email = "budget-freeze-weekly@budjetame.dev"
+    account_id = insert_foreign_account(database_url, email)
+    try:
+        token = await _login(client, email=email, password="whatever")
+        cost = await _create_recurring_cost(
+            client,
+            token,
+            name="Freeze Weekly Gym",
+            amount="10.00",
+            interval_value=1,
+            interval_unit="weeks",
+            start_date=_first_day_of_current_month(),
+        )
+        due_days = range(1, _days_in_current_month() + 1, 7)
+        before = await _budget(client, token)
+        assert before["recurring_costs_total"] == f"{10 * len(due_days)}.00"
+
+        response = await client.post(
+            f"/recurring-costs/{cost}/freeze", headers=_auth(token)
+        )
+        assert response.status_code == 200
+
+        today = date.fromisoformat(_today())
+        kept = [day for day in due_days if day < today.day]
+        after = await _budget(client, token)
+        assert after["recurring_costs_total"] == f"{10 * len(kept)}.00"
+    finally:
+        delete_account(database_url, account_id)

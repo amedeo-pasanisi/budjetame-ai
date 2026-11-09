@@ -17,6 +17,8 @@ from app.schemas import (
     RecurringOccurrenceOut,
     RecurringOccurrenceUpdate,
 )
+from app.recurrence import rome_today
+from app.services import occurrences
 from app.services import recurring_costs as recurring_service
 from app.services import scoping
 
@@ -36,31 +38,19 @@ def _owned_cost_or_403(
 
 
 def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
-    """The API view of a Recurring Cost, with the derived state: the next
-    due date (ADR-0024: an Occurrence's due date is its own date — the pure
-    recurrence module owns the math), the next Unpaid Occurrence date
-    (issue #57, ADR-0027): the
-    one a new linked Expense or Transfer-to-a-Contact would pay, what the
-    transaction form's picker shows — and the Backlog (issue #58): Unpaid
-    Occurrences due today or
-    earlier in Europe/Rome. Skip controls live per Occurrence on the
-    Occurrences read (ADR-0026), not on the definition. When the definition
-    is frozen (ADR-0028), the derived fields return None or 0."""
-    if cost.frozen:
-        return RecurringCostOut(
-            id=cost.id,
-            name=cost.name,
-            amount=cost.amount,
-            interval_value=cost.interval_value,
-            interval_unit=IntervalUnit(cost.interval_unit),
-            start_date=cost.start_date.isoformat(),
-            next_due_date=None,
-            next_unpaid_occurrence_date=None,
-            frozen=True,
-            backlog_count=0,
-            created_at=cost.created_at,
-        )
-    backlog = recurring_service.backlog_count_for(session, cost)
+    """The API view of a Recurring Cost, with the derived state read off
+    one Occurrence Timeline: the next due date (ADR-0024: an Occurrence's
+    due date is its own date), the next Unpaid Occurrence date (issue #57,
+    ADR-0027): the one a new linked Expense or Transfer-to-a-Contact would
+    pay, what the transaction form's picker shows — and the Backlog (issue
+    #58): Unpaid Occurrences due today or earlier in Europe/Rome. Skip
+    controls live per Occurrence on the Occurrences read (ADR-0026), not on
+    the definition. A frozen definition's Timeline generates nothing
+    (ADR-0028), so its derived fields are None or 0."""
+    timeline = occurrences.timeline_for(session, cost)
+    today = rome_today()
+    next_due = timeline.next_due(today)
+    next_unpaid = timeline.oldest_unpaid()
     return RecurringCostOut(
         id=cost.id,
         name=cost.name,
@@ -68,12 +58,12 @@ def _cost_out(session: Session, cost: RecurringCost) -> RecurringCostOut:
         interval_value=cost.interval_value,
         interval_unit=IntervalUnit(cost.interval_unit),
         start_date=cost.start_date.isoformat(),
-        next_due_date=recurring_service.next_due_date_for(session, cost).isoformat(),
-        next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
-            session, cost
-        ).isoformat(),
-        frozen=False,
-        backlog_count=backlog,
+        next_due_date=next_due.isoformat() if next_due is not None else None,
+        next_unpaid_occurrence_date=(
+            next_unpaid.isoformat() if next_unpaid is not None else None
+        ),
+        frozen=cost.frozen,
+        backlog_count=timeline.backlog_count(today),
         created_at=cost.created_at,
     )
 
@@ -140,7 +130,9 @@ def _occurrences_out(
     write answer with exactly this list."""
     return [
         RecurringOccurrenceOut(date=value.isoformat(), skipped=skipped)
-        for value, skipped in recurring_service.occurrence_states(session, cost)
+        for value, skipped in occurrences.timeline_for(session, cost).states(
+            rome_today()
+        )
     ]
 
 
@@ -181,13 +173,8 @@ def set_recurring_cost_occurrence_skipped(
     fetch."""
     cost = _owned_cost_or_403(session, account, cost_id)
     try:
-        recurring_service.set_occurrence_skipped(
-            session,
-            cost,
-            occurrence_date,
-            skipped=payload.skipped,
-        )
-    except recurring_service.RecurringCostRuleError as error:
+        occurrences.set_skipped(session, cost, occurrence_date, skipped=payload.skipped)
+    except occurrences.OccurrenceRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return _occurrences_out(session, cost)
 

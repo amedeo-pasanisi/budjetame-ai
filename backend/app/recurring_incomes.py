@@ -21,6 +21,8 @@ from app.schemas import (
     RecurringOccurrenceOut,
     RecurringOccurrenceUpdate,
 )
+from app.recurrence import rome_today
+from app.services import occurrences
 from app.services import recurring_incomes as recurring_service
 from app.services import scoping
 
@@ -50,21 +52,10 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
     earlier in Europe/Rome. Skip controls live per Occurrence on the
     Occurrences read (ADR-0026), not on the definition. When the definition
     is frozen (ADR-0028), the derived fields return None or 0."""
-    if income.frozen:
-        return RecurringIncomeOut(
-            id=income.id,
-            name=income.name,
-            amount=income.amount,
-            interval_value=income.interval_value,
-            interval_unit=IntervalUnit(income.interval_unit),
-            start_date=income.start_date.isoformat(),
-            next_due_date=None,
-            next_unpaid_occurrence_date=None,
-            frozen=True,
-            backlog_count=0,
-            created_at=income.created_at,
-        )
-    backlog = recurring_service.backlog_count_for(session, income)
+    timeline = occurrences.timeline_for(session, income)
+    today = rome_today()
+    next_due = timeline.next_due(today)
+    next_unpaid = timeline.oldest_unpaid()
     return RecurringIncomeOut(
         id=income.id,
         name=income.name,
@@ -72,12 +63,12 @@ def _income_out(session: Session, income: RecurringIncome) -> RecurringIncomeOut
         interval_value=income.interval_value,
         interval_unit=IntervalUnit(income.interval_unit),
         start_date=income.start_date.isoformat(),
-        next_due_date=recurring_service.next_due_date_for(session, income).isoformat(),
-        next_unpaid_occurrence_date=recurring_service.oldest_unpaid_occurrence(
-            session, income
-        ).isoformat(),
-        frozen=False,
-        backlog_count=backlog,
+        next_due_date=next_due.isoformat() if next_due is not None else None,
+        next_unpaid_occurrence_date=(
+            next_unpaid.isoformat() if next_unpaid is not None else None
+        ),
+        frozen=income.frozen,
+        backlog_count=timeline.backlog_count(today),
         created_at=income.created_at,
     )
 
@@ -144,7 +135,9 @@ def _occurrences_out(
     the read and the skip write answer with exactly this list."""
     return [
         RecurringOccurrenceOut(date=value.isoformat(), skipped=skipped)
-        for value, skipped in recurring_service.occurrence_states(session, income)
+        for value, skipped in occurrences.timeline_for(session, income).states(
+            rome_today()
+        )
     ]
 
 
@@ -181,13 +174,10 @@ def set_recurring_income_occurrence_skipped(
     refreshed read."""
     income = _owned_income_or_403(session, account, income_id)
     try:
-        recurring_service.set_occurrence_skipped(
-            session,
-            income,
-            occurrence_date,
-            skipped=payload.skipped,
+        occurrences.set_skipped(
+            session, income, occurrence_date, skipped=payload.skipped
         )
-    except recurring_service.RecurringIncomeRuleError as error:
+    except occurrences.OccurrenceRuleError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return _occurrences_out(session, income)
 

@@ -699,6 +699,57 @@ async def test_freezing_a_definition_drops_its_skips(
     assert (await _cost_state(client, token, cost_id))["backlog_count"] == 1
 
 
+async def test_a_frozen_definition_has_no_occurrences_to_list_or_skip(
+    client: AsyncClient,
+) -> None:
+    """A frozen definition generates nothing (ADR-0028): its Occurrences
+    section is empty and a skip write is rejected — nothing is due,
+    payable, or skippable from the freeze date on (CONTEXT.md, Occurrence
+    Timeline). Unfreezing restores both."""
+    token = await _login(client)
+    cost_id = await _create_cost(
+        client, token, name="S28 Frozen Rows Coffee", start_date=_days(0)
+    )
+    income_id = await _create_income(
+        client, token, name="S28 Frozen Rows Salary", start_date=_days(0)
+    )
+    assert len(await _cost_occurrences(client, token, cost_id)) >= 1
+    assert len(await _income_occurrences(client, token, income_id)) >= 1
+
+    for endpoint in (
+        f"/recurring-costs/{cost_id}/freeze",
+        f"/recurring-incomes/{income_id}/freeze",
+    ):
+        assert (await client.post(endpoint, headers=_auth(token))).status_code == 200
+
+    assert await _cost_occurrences(client, token, cost_id) == []
+    assert await _income_occurrences(client, token, income_id) == []
+    for endpoint in (
+        f"/recurring-costs/{cost_id}/occurrences/{_days(0)}",
+        f"/recurring-incomes/{income_id}/occurrences/{_days(0)}",
+    ):
+        response = await client.put(
+            endpoint, json={"skipped": True}, headers=_auth(token)
+        )
+        assert response.status_code == 422, response.text
+
+    for endpoint in (
+        f"/recurring-costs/{cost_id}/unfreeze",
+        f"/recurring-incomes/{income_id}/unfreeze",
+    ):
+        assert (await client.post(endpoint, headers=_auth(token))).status_code == 200
+    # No skip row leaked through the frozen window: the start-date row is
+    # back, and still Unpaid.
+    assert _row(await _cost_occurrences(client, token, cost_id), _days(0)) == {
+        "date": _days(0),
+        "skipped": False,
+    }
+    assert _row(await _income_occurrences(client, token, income_id), _days(0)) == {
+        "date": _days(0),
+        "skipped": False,
+    }
+
+
 # --- the card button and its endpoint are gone (ADR-0026) ------------------
 
 async def test_the_skip_toggle_endpoint_and_next_skip_action_are_gone(

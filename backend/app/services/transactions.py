@@ -34,13 +34,61 @@ from app.models import (
     Wallet,
     WalletType,
 )
-from app.services import recurring_costs as recurring_service
-from app.services import recurring_incomes as income_recurring_service
+from app.services.occurrences import timeline_for
 from app.services.scoping import owned_or_raise
 
 
 class TransactionRuleError(Exception):
     """A CONTEXT.md rule rejects the write; maps to 422 with the message."""
+
+
+def _pin_for(
+    session: Session,
+    definition: RecurringCost | RecurringIncome,
+    *,
+    exclude_transaction_id: int | None = None,
+) -> DateObj:
+    """The Occurrence a new link pays — the definition's oldest Unpaid one
+    on its Occurrence Timeline (issues #57 and #61) — stored on the row at
+    this moment and never recomputed by later edits. The Transaction's own
+    pin is excluded when relinking, so it can re-pin the very Occurrence it
+    already covers. A frozen definition's Timeline has nothing to pay
+    (ADR-0028): the link is rejected."""
+    pin = timeline_for(
+        session, definition, exclude_transaction_id=exclude_transaction_id
+    ).oldest_unpaid()
+    if pin is None:
+        raise TransactionRuleError(_frozen_link_message(definition))
+    return pin
+
+
+def _frozen_link_message(definition: RecurringCost | RecurringIncome) -> str:
+    """The one rule error for a link on a frozen definition (ADR-0028): a
+    frozen Recurring Cost or Recurring Income is read-only and generates
+    no Occurrence a link could pay."""
+    noun = "cost" if isinstance(definition, RecurringCost) else "income"
+    return f"A frozen recurring {noun} cannot accept new links"
+
+
+def _check_pin_free(
+    session: Session,
+    definition: RecurringCost | RecurringIncome,
+    occurrence_date: str | None,
+    transaction_id: int,
+) -> None:
+    """An undo's pin must land on a free Occurrence (ADR-0031): the
+    definition accepts links (not frozen, ADR-0028) and no other
+    Transaction pins that date — the restored row's own id excluded, in
+    case it somehow lingers."""
+    if definition.frozen:
+        raise TransactionRuleError(_frozen_link_message(definition))
+    if occurrence_date is None:
+        return
+    timeline = timeline_for(session, definition, exclude_transaction_id=transaction_id)
+    if timeline.is_paid(DateObj.fromisoformat(occurrence_date)):
+        raise TransactionRuleError(
+            "This Occurrence was already paid by another Transaction"
+        )
 
 
 def _ensure_wallet_writable(wallet: Wallet) -> None:
@@ -204,18 +252,14 @@ def _check_create_rules(
                 session, RecurringCost, account_id, recurring_cost_id
             )
             if cost.frozen:
-                raise TransactionRuleError(
-                    "A frozen recurring cost cannot accept new links"
-                )
+                raise TransactionRuleError(_frozen_link_message(cost))
         if recurring_income_id is not None:
             _check_transfer_income_link_legs(source, destination)
             income = owned_or_raise(
                 session, RecurringIncome, account_id, recurring_income_id
             )
             if income.frozen:
-                raise TransactionRuleError(
-                    "A frozen recurring income cannot accept new links"
-                )
+                raise TransactionRuleError(_frozen_link_message(income))
         return source, destination
     if wallet_id is None:
         raise TransactionRuleError("wallet_id is required for Expense and Income")
@@ -249,9 +293,7 @@ def _check_create_rules(
             session, RecurringCost, account_id, recurring_cost_id
         )
         if cost.frozen:
-            raise TransactionRuleError(
-                "A frozen recurring cost cannot accept new links"
-            )
+            raise TransactionRuleError(_frozen_link_message(cost))
     if recurring_income_id is not None:
         if type != TransactionType.INCOME.value:
             raise TransactionRuleError(
@@ -263,9 +305,7 @@ def _check_create_rules(
             session, RecurringIncome, account_id, recurring_income_id
         )
         if income.frozen:
-            raise TransactionRuleError(
-                "A frozen recurring income cannot accept new links"
-            )
+            raise TransactionRuleError(_frozen_link_message(income))
     return (wallet,)
 
 
@@ -343,13 +383,11 @@ def create_transaction(
     if recurring_cost_id is not None:
         cost = session.get(RecurringCost, recurring_cost_id)
         assert cost is not None  # _check_create_rules just validated ownership
-        occurrence_date = recurring_service.oldest_unpaid_occurrence(session, cost)
+        occurrence_date = _pin_for(session, cost)
     elif recurring_income_id is not None:
         income = session.get(RecurringIncome, recurring_income_id)
         assert income is not None  # _check_create_rules just validated ownership
-        occurrence_date = income_recurring_service.oldest_unpaid_occurrence(
-            session, income
-        )
+        occurrence_date = _pin_for(session, income)
     # Lock the touched Wallets in ascending id order and enforce the freeze
     # rule under the lock, so the write serializes with a concurrent freeze
     # (whose Balance check must not see a stale sum).
@@ -449,18 +487,12 @@ def update_transaction(
                 # re-pin the very Occurrence it already covers. The
                 # assignment is pinned at this moment: a later date edit
                 # never reassigns it (issue #57).
-                owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
-                cost = session.get(RecurringCost, recurring_cost_id)
-                assert cost is not None  # owned_or_raise just fetched it
-                if cost.frozen:
-                    raise TransactionRuleError(
-                        "A frozen recurring cost cannot accept new links"
-                    )
+                cost = owned_or_raise(
+                    session, RecurringCost, account_id, recurring_cost_id
+                )
                 transaction.recurring_cost_id = recurring_cost_id
-                transaction.occurrence_date = (
-                    recurring_service.oldest_unpaid_occurrence(
-                        session, cost, exclude_transaction_id=transaction.id
-                    )
+                transaction.occurrence_date = _pin_for(
+                    session, cost, exclude_transaction_id=transaction.id
                 )
         elif transaction.type != TransactionType.EXPENSE.value:
             raise TransactionRuleError(
@@ -475,15 +507,9 @@ def update_transaction(
             # now — the Transaction's own pin excluded, so it can re-pin the
             # very Occurrence it already covers. The assignment is pinned at
             # this moment: a later date edit never reassigns it (issue #57).
-            owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
-            cost = session.get(RecurringCost, recurring_cost_id)
-            assert cost is not None  # owned_or_raise just fetched it
-            if cost.frozen:
-                raise TransactionRuleError(
-                    "A frozen recurring cost cannot accept new links"
-                )
+            cost = owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
             transaction.recurring_cost_id = recurring_cost_id
-            transaction.occurrence_date = recurring_service.oldest_unpaid_occurrence(
+            transaction.occurrence_date = _pin_for(
                 session, cost, exclude_transaction_id=transaction.id
             )
     if "recurring_income_id" in changes:
@@ -510,18 +536,12 @@ def update_transaction(
                 # re-pin the very Occurrence it already covers. The
                 # assignment is pinned at this moment: a later date edit
                 # never reassigns it (issue #61).
-                owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
-                income = session.get(RecurringIncome, recurring_income_id)
-                assert income is not None  # owned_or_raise just fetched it
-                if income.frozen:
-                    raise TransactionRuleError(
-                        "A frozen recurring income cannot accept new links"
-                    )
+                income = owned_or_raise(
+                    session, RecurringIncome, account_id, recurring_income_id
+                )
                 transaction.recurring_income_id = recurring_income_id
-                transaction.occurrence_date = (
-                    income_recurring_service.oldest_unpaid_occurrence(
-                        session, income, exclude_transaction_id=transaction.id
-                    )
+                transaction.occurrence_date = _pin_for(
+                    session, income, exclude_transaction_id=transaction.id
                 )
         elif transaction.type != TransactionType.INCOME.value:
             raise TransactionRuleError(
@@ -536,18 +556,12 @@ def update_transaction(
             # now — the Transaction's own pin excluded, so it can re-pin the
             # very Occurrence it already covers. The assignment is pinned at
             # this moment: a later date edit never reassigns it (issue #61).
-            owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
-            income = session.get(RecurringIncome, recurring_income_id)
-            assert income is not None  # owned_or_raise just fetched it
-            if income.frozen:
-                raise TransactionRuleError(
-                    "A frozen recurring income cannot accept new links"
-                )
+            income = owned_or_raise(
+                session, RecurringIncome, account_id, recurring_income_id
+            )
             transaction.recurring_income_id = recurring_income_id
-            transaction.occurrence_date = (
-                income_recurring_service.oldest_unpaid_occurrence(
-                    session, income, exclude_transaction_id=transaction.id
-                )
+            transaction.occurrence_date = _pin_for(
+                session, income, exclude_transaction_id=transaction.id
             )
     if "amount" in changes:
         transaction.amount = changes["amount"]
@@ -643,46 +657,23 @@ def undo_transaction(
     if category_id is not None:
         owned_or_raise(session, Category, account_id, category_id)
 
-    # Validate recurring pin — check the pinned Occurrence is still free
+    # The original pin comes back exactly (ADR-0031): the pinned Occurrence
+    # must still be free on the definition's Timeline, or the undo fails
+    # with an explicit message rather than re-linking elsewhere.
     if recurring_cost_id is not None:
-        cost = owned_or_raise(session, RecurringCost, account_id, recurring_cost_id)
-        if cost.frozen:
-            raise TransactionRuleError(
-                "A frozen recurring cost cannot accept new links"
-            )
-        if occurrence_date is not None:
-            od = DateObj.fromisoformat(occurrence_date)
-            existing = session.scalar(
-                select(Transaction).where(
-                    Transaction.recurring_cost_id == recurring_cost_id,
-                    Transaction.occurrence_date == od,
-                    Transaction.id != transaction_id,
-                )
-            )
-            if existing is not None:
-                raise TransactionRuleError(
-                    "This Occurrence was already paid by another Transaction"
-                )
-
+        _check_pin_free(
+            session,
+            owned_or_raise(session, RecurringCost, account_id, recurring_cost_id),
+            occurrence_date,
+            transaction_id,
+        )
     if recurring_income_id is not None:
-        income = owned_or_raise(session, RecurringIncome, account_id, recurring_income_id)
-        if income.frozen:
-            raise TransactionRuleError(
-                "A frozen recurring income cannot accept new links"
-            )
-        if occurrence_date is not None:
-            od = DateObj.fromisoformat(occurrence_date)
-            existing = session.scalar(
-                select(Transaction).where(
-                    Transaction.recurring_income_id == recurring_income_id,
-                    Transaction.occurrence_date == od,
-                    Transaction.id != transaction_id,
-                )
-            )
-            if existing is not None:
-                raise TransactionRuleError(
-                    "This Occurrence was already paid by another Transaction"
-                )
+        _check_pin_free(
+            session,
+            owned_or_raise(session, RecurringIncome, account_id, recurring_income_id),
+            occurrence_date,
+            transaction_id,
+        )
 
     # Lock wallets in ascending id order
     _locked_wallets(session, *wallet_ids)

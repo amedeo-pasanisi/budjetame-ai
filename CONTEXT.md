@@ -52,6 +52,10 @@ _Avoid_: deleted recurring, archived income
 One derived due instance of a Recurring Cost or Recurring Income, computed from the definition's start date plus k×interval (k = 0 is the start date itself). Its due date is its own date. Every definition has a start date: one left empty at creation is set to the creation day, so a fresh definition's first Occurrence is its creation day; afterwards the date can only be changed, never unset (ADR-0024). Each Occurrence is either Paid — exactly one linked Transaction covers it: an Expense or a Transfer to a Contact Wallet for a Cost (ADR-0027), an Income or a Transfer from a Contact Wallet for a Recurring Income (ADR-0027) — Unpaid, or Skipped: the user marked it as not applying, so it never enters the Backlog, never counts toward Monthly Spendable, and a link can never cover it. Un-skipping restores it to Unpaid.
 _Avoid_: instance, cycle, due event
 
+**Occurrence Timeline**:
+One Recurring Cost's or Recurring Income's Occurrences as a single derived value: the definition (start date, interval), the pins of the Occurrences its linked Transactions pay, the skips the user excused, and its freeze date when frozen, loaded once and answering every question the app asks of them — which Occurrences are due in a month, the Backlog, the next due date, the Occurrence a new link pays, the Occurrences section's rows. A frozen definition's Timeline ends the day before its freeze date (ADR-0028): nothing is due, payable, or skippable from that day on, while the Occurrences before it still count in their months.
+_Avoid_: occurrence list, schedule, calendar
+
 **Backlog**:
 A Recurring Cost's or Recurring Income's Unpaid, un-Skipped Occurrences whose due date is today or earlier — the red "N unpaid" badge on the Recurring screen. A definition with a non-empty Backlog shows that badge.
 _Avoid_: arrears, overdue list, overdue

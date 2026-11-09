@@ -5,6 +5,29 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [Unreleased]
+
+### Fixed
+
+- **A frozen Recurring definition no longer counts toward the Budget from
+  its freeze date** (ADR-0028). Freezing a Recurring Cost or Recurring
+  Income whose Occurrence was still due later in the month kept draining
+  (or filling) Monthly Spendable; the Budget now stops at the freeze date,
+  while the months before it keep their Occurrences exactly as they were.
+
+### Changed
+
+- Every derived read about Occurrences — the Budget's due dates, the
+  Backlog badge, the next due date, the Occurrence a new link pays, the
+  Occurrences section and its skip/un-skip, the undo pin check — now comes
+  from one **Occurrence Timeline** per definition (CONTEXT.md), loaded in
+  two queries instead of five per Recurring definition on the list. The
+  Timeline serves Recurring Costs and Recurring Incomes alike — the shared
+  extraction ADR-0011 foresaw (addendum recorded there).
+- The Occurrences section of a frozen definition lists nothing, and a skip
+  on it is rejected: the freeze removed its Unpaid and Skipped Occurrences
+  and generates no new ones (ADR-0028).
+
 ## [v1.9.1] — 2026-11-09
 
 ### Fixed
