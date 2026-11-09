@@ -12,7 +12,7 @@ the Occurrences section's rows — is derived from those four facts and the
 pure walkers in app.recurrence. This module loads the four facts into one
 `Timeline` value, so every reader derives from the same inputs under the
 same rules; the two definition kinds differ only in which foreign key
-their pins and skips hang off, and `timeline_for` hides that.
+their pins and skips hang off — the `Kind` table in app.services.recurring.
 
 Rules the Timeline owns:
 
@@ -34,9 +34,9 @@ from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import select
-from sqlalchemy.orm import InstrumentedAttribute, Session
+from sqlalchemy.orm import Session
 
-from app.models import RecurringCost, RecurringIncome, RecurringSkip, Transaction
+from app.models import RecurringSkip, Transaction
 from app.recurrence import (
     Period,
     backlog_count,
@@ -46,8 +46,7 @@ from app.recurrence import (
     period_of,
     period_span_end,
 )
-
-Definition = RecurringCost | RecurringIncome
+from app.services.recurring import Definition, kind_of
 
 
 class OccurrenceRuleError(Exception):
@@ -254,30 +253,6 @@ class Timeline:
         return [live] + [row for row in rows if row != live]
 
 
-_LinkColumn = InstrumentedAttribute[int | None]
-
-
-def _kind_columns(definition: Definition) -> tuple[_LinkColumn, _LinkColumn, str]:
-    """How one kind of definition hangs off the shared tables — the one
-    place Recurring Costs and Recurring Incomes differ here (ADR-0011):
-    the link column on Transactions that carries its pins, the definition
-    column on RecurringSkip that carries its skips, and the keyword that
-    sets it on a new skip row. Returned as a tuple to unpack, not an
-    object to read: a mapped column read off an instance attribute would
-    go through the descriptor and come back as a plain value."""
-    if isinstance(definition, RecurringCost):
-        return (
-            Transaction.recurring_cost_id,
-            RecurringSkip.recurring_cost_id,
-            "recurring_cost_id",
-        )
-    return (
-        Transaction.recurring_income_id,
-        RecurringSkip.recurring_income_id,
-        "recurring_income_id",
-    )
-
-
 def timeline_for(
     session: Session,
     definition: Definition,
@@ -288,9 +263,9 @@ def timeline_for(
     `exclude_transaction_id` drops one link's own pin: the Transaction being
     relinked judges itself as not yet paid, so it can re-pin the very
     Occurrence it already covers."""
-    pin_column, skip_column, _ = _kind_columns(definition)
+    kind = kind_of(definition)
     pins = select(Transaction.occurrence_date).where(
-        pin_column == definition.id, Transaction.occurrence_date.is_not(None)
+        kind.pin_column == definition.id, Transaction.occurrence_date.is_not(None)
     )
     if exclude_transaction_id is not None:
         pins = pins.where(Transaction.id != exclude_transaction_id)
@@ -299,7 +274,9 @@ def timeline_for(
     )
     skip_dates = frozenset(
         session.scalars(
-            select(RecurringSkip.occurrence_date).where(skip_column == definition.id)
+            select(RecurringSkip.occurrence_date).where(
+                kind.skip_column == definition.id
+            )
         ).all()
     )
     return Timeline(
@@ -342,7 +319,7 @@ def set_skipped(
             "Unfreeze it first."
         )
     unit = definition.interval_unit
-    _, skip_column, skip_key = _kind_columns(definition)
+    kind = kind_of(definition)
     if not skipped:
         # Restore: delete every stored row whose effective period covers the
         # target — period equality is what makes the anchor travel with the
@@ -350,7 +327,7 @@ def set_skipped(
         # delete is the idempotent no-op.
         target_period = period_of(occurrence, unit)
         rows = session.scalars(
-            select(RecurringSkip).where(skip_column == definition.id)
+            select(RecurringSkip).where(kind.skip_column == definition.id)
         ).all()
         for row in rows:
             if period_of(row.occurrence_date, unit) == target_period:
@@ -370,5 +347,7 @@ def set_skipped(
         # Already excused — the idempotent no-op (the existing anchor may
         # be a different date on the same period after an edit).
         return
-    session.add(RecurringSkip(**{skip_key: definition.id}, occurrence_date=occurrence))
+    session.add(
+        RecurringSkip(**{kind.skip_key: definition.id}, occurrence_date=occurrence)
+    )
     session.commit()

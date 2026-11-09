@@ -17,6 +17,14 @@ here and on GitHub Releases.
 
 ### Changed
 
+- **Recurring Costs and Recurring Incomes now share one implementation per
+  tier** (ADR-0033, #120). The two resources, their URLs, bodies, error
+  messages, screen sides and translations are unchanged; behind them the
+  lifecycle (create, edit, freeze, unfreeze), the HTTP handlers, the wire
+  shapes, and the web form, screen and modal exist once, with the kind as
+  a value. The API docs name the shared wire shapes `RecurringDefinition…`
+  instead of one family per kind, and the path parameter `definition_id`;
+  the URLs themselves are the same.
 - Every derived read about Occurrences — the Budget's due dates, the
   Backlog badge, the next due date, the Occurrence a new link pays, the
   Occurrences section and its skip/un-skip, the undo pin check — now comes

@@ -1,6 +1,6 @@
-/** Display helpers for Recurring Costs (issue #56), shared with the
- * Recurring Incomes side (issue #60, ADR-0011): the interval text and the
- * next-due ordering read the same on both sides. */
+/** Display helpers for Recurring definitions (issues #56, #60): the interval
+ * text and the next-due ordering read the same on the Costs and the Incomes
+ * sides (ADR-0011, ADR-0033). */
 
 import type { IntervalUnit } from './api'
 
@@ -20,9 +20,8 @@ export function intervalText(value: number, unit: IntervalUnit): string {
 
 /** Definitions ordered by next due date ascending, ties by name — the one
  * order the Recurring screen renders (the backend list arrives sorted too;
- * this keeps locally upserted rows in place). Shared by the Costs and the
- * Incomes sides (issue #60): the shape it needs is the two fields the
- * ordering reads. */
+ * this keeps locally upserted rows in place). The shape it needs is the two
+ * fields the ordering reads. */
 export function sortByNextDue<T extends { next_due_date: string | null; name: string }>(
   items: T[],
 ): T[] {

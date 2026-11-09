@@ -1,162 +1,22 @@
-/** Recurring Incomes resource (issue #60): definitions of incomes that
- * repeat at a fixed interval, mirroring Recurring Costs (ADR-0011).
- * Occurrences, `next_due_date`, and the Backlog are derived on the backend,
- * never stored (ADR-0010). The Occurrences read and the per-Occurrence
- * skip write (ADR-0026) mirror the Costs side too, sharing its row type.
- */
+/** The Recurring Incomes side of the Recurring definition calls (issue #60):
+ * the shared calls bound to `/recurring-incomes`, exported under the names
+ * the rest of the app imports (ADR-0011, ADR-0033). */
 
-import type { RecurringOccurrence } from './recurringCosts'
-import { request } from './transport'
+import {
+  recurringDefinitionApi,
+  type RecurringDefinition,
+  type RecurringDefinitionInput,
+} from './recurringDefinitions'
 
-export type IntervalUnit = 'days' | 'weeks' | 'months' | 'years'
+export type RecurringIncome = RecurringDefinition
+export type RecurringIncomeInput = RecurringDefinitionInput
 
-export type RecurringIncome = {
-  id: number
-  name: string
-  amount: string
-  interval_value: number
-  interval_unit: IntervalUnit
-  /** The stored start date ("YYYY-MM-DD") — every definition always
-   * carries one: left empty at creation it is set to the creation day
-   * (ADR-0024), and an Occurrence's due date is its own date. */
-  start_date: string
-  /** The next Occurrence's own date, derived on the backend.
-   * When frozen this is null (ADR-0028). */
-  next_due_date: string | null
-  /** The next Occurrence a new linked Income would receive — the oldest
-   * Unpaid one's own date (issue #61): what the transaction form's picker
-   * shows. When frozen this is null (ADR-0028). */
-  next_unpaid_occurrence_date: string | null
-  /** The Backlog (issue #62): Unpaid Occurrences whose due date is today or
-   * earlier in Europe/Rome — the "N unpaid" badge, derived on the backend
-   * from the definition and the stored link pins, never stored. */
-  backlog_count: number
-  /** Whether the definition is frozen (ADR-0028). */
-  frozen: boolean
-  created_at: string
-}
+const api = recurringDefinitionApi('recurring-incomes', 'recurring income')
 
-/** The fields the create/edit form edits. An empty start date is only ever
- * a creation-time convenience: the backend sets it to the creation day, and
- * afterwards the definition always carries one — the form treats the date
- * as required when editing (ADR-0024). The Wallet and Category of a linked
- * Income are chosen at Transaction creation time — the definition itself
- * never carries them. */
-export type RecurringIncomeInput = {
-  name: string
-  amount: string
-  intervalValue: number
-  intervalUnit: IntervalUnit
-  startDate: string | null
-}
-
-function toPayload(input: RecurringIncomeInput) {
-  return {
-    name: input.name,
-    amount: input.amount,
-    interval_value: input.intervalValue,
-    interval_unit: input.intervalUnit,
-    start_date: input.startDate,
-  }
-}
-
-export async function fetchRecurringIncomes(
-  token: string,
-  includeFrozen?: boolean,
-): Promise<RecurringIncome[]> {
-  const url = includeFrozen
-    ? '/recurring-incomes?include_frozen=true'
-    : '/recurring-incomes'
-  const response = await request(url, {
-    token,
-    errorMessage: 'Could not load recurring incomes',
-  })
-  return (await response.json()) as RecurringIncome[]
-}
-
-export async function createRecurringIncome(
-  token: string,
-  input: RecurringIncomeInput,
-): Promise<RecurringIncome> {
-  const response = await request('/recurring-incomes', {
-    method: 'POST',
-    token,
-    json: toPayload(input),
-    errorMessage: 'Could not create recurring income',
-  })
-  return (await response.json()) as RecurringIncome
-}
-
-export async function updateRecurringIncome(
-  token: string,
-  incomeId: number,
-  input: RecurringIncomeInput,
-): Promise<RecurringIncome> {
-  // The whole editable definition is sent (like the Category form): the
-  // backend applies every present field, nulls clear the optional ones.
-  const response = await request(`/recurring-incomes/${incomeId}`, {
-    method: 'PATCH',
-    token,
-    json: toPayload(input),
-    errorMessage: 'Could not update recurring income',
-  })
-  return (await response.json()) as RecurringIncome
-}
-
-export async function freezeRecurringIncome(
-  token: string,
-  incomeId: number,
-): Promise<RecurringIncome> {
-  const response = await request(`/recurring-incomes/${incomeId}/freeze`, {
-    method: 'POST',
-    token,
-    errorMessage: 'Could not freeze recurring income',
-  })
-  return (await response.json()) as RecurringIncome
-}
-
-export async function unfreezeRecurringIncome(
-  token: string,
-  incomeId: number,
-): Promise<RecurringIncome> {
-  const response = await request(`/recurring-incomes/${incomeId}/unfreeze`, {
-    method: 'POST',
-    token,
-    errorMessage: 'Could not unfreeze recurring income',
-  })
-  return (await response.json()) as RecurringIncome
-}
-
-export async function fetchRecurringIncomeOccurrences(
-  token: string,
-  incomeId: number,
-): Promise<RecurringOccurrence[]> {
-  // The Occurrences section's read (ADR-0026), mirroring the Costs side:
-  // every non-Paid Occurrence with its skipped state, newest first.
-  const response = await request(`/recurring-incomes/${incomeId}/occurrences`, {
-    token,
-    errorMessage: 'Could not load the occurrences',
-  })
-  return (await response.json()) as RecurringOccurrence[]
-}
-
-export async function setRecurringIncomeOccurrenceSkipped(
-  token: string,
-  incomeId: number,
-  occurrenceDate: string,
-  skipped: boolean,
-): Promise<RecurringOccurrence[]> {
-  // The per-Occurrence skip write (ADR-0026), mirroring the Costs side:
-  // state the row's skipped state idempotently; the response is the
-  // refreshed read.
-  const response = await request(
-    `/recurring-incomes/${incomeId}/occurrences/${occurrenceDate}`,
-    {
-      method: 'PUT',
-      token,
-      json: { skipped },
-      errorMessage: 'Could not update the occurrence',
-    },
-  )
-  return (await response.json()) as RecurringOccurrence[]
-}
+export const fetchRecurringIncomes = api.fetchAll
+export const createRecurringIncome = api.create
+export const updateRecurringIncome = api.update
+export const freezeRecurringIncome = api.freeze
+export const unfreezeRecurringIncome = api.unfreeze
+export const fetchRecurringIncomeOccurrences = api.fetchOccurrences
+export const setRecurringIncomeOccurrenceSkipped = api.setOccurrenceSkipped

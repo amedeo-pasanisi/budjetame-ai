@@ -10,8 +10,8 @@ from app.google_auth import GoogleIdTokenVerifier, GoogleVerifier
 from app.backup import router as backup_router
 from app.imports import router as imports_router
 from app.mailer import LoggingMailer, Mailer, SmtpMailer
-from app.recurring_costs import router as recurring_costs_router
-from app.recurring_incomes import router as recurring_incomes_router
+from app.recurring import costs_router as recurring_costs_router
+from app.recurring import incomes_router as recurring_incomes_router
 from app.seed import seed_account
 from app.transactions import router as transactions_router
 from app.wallets import router as wallets_router

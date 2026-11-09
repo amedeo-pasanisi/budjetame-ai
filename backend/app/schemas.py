@@ -664,12 +664,13 @@ class RecurringOccurrenceOut(BaseModel):
     skipped: bool
 
 
-class RecurringCostCreate(BaseModel):
-    """Create a Recurring Cost (issue #56). `interval_value` + `interval_unit`
-    are the repetition (every N days, weeks, months, or years); `start_date`
-    is an optional Europe/Rome calendar day: left empty at creation it is
-    set to the creation day, so every definition always carries one
-    (ADR-0024).
+class RecurringDefinitionCreate(BaseModel):
+    """Create a Recurring Cost or a Recurring Income (issues #56, #60): the
+    two resources share one wire shape (ADR-0011, ADR-0033). `interval_value`
+    + `interval_unit` are the repetition (every N days, weeks, months, or
+    years); `start_date` is an optional Europe/Rome calendar day: left empty
+    at creation it is set to the creation day, so every definition always
+    carries one (ADR-0024).
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -691,13 +692,13 @@ class RecurringCostCreate(BaseModel):
         return value.quantize(Decimal("0.01"))
 
 
-class RecurringCostUpdate(BaseModel):
-    """Edit a Recurring Cost (issue #56). Every field is editable — name,
-    amount, interval, start date — and follows the TransactionUpdate
-    contract: a field present in the payload is applied; a field absent is
-    untouched. `start_date` is the one exception to the null-clears rule: an
-    explicit null is rejected, because a definition always carries a start
-    date (ADR-0024) — it can be changed, never unset.
+class RecurringDefinitionUpdate(BaseModel):
+    """Edit a Recurring Cost or a Recurring Income (issues #56, #60). Every
+    field is editable — name, amount, interval, start date — and follows the
+    TransactionUpdate contract: a field present in the payload is applied; a
+    field absent is untouched. `start_date` is the one exception to the
+    null-clears rule: an explicit null is rejected, because a definition
+    always carries a start date (ADR-0024) — it can be changed, never unset.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -719,123 +720,27 @@ class RecurringCostUpdate(BaseModel):
         return value.quantize(Decimal("0.01")) if value is not None else None
 
     @model_validator(mode="after")
-    def _at_least_one_change(self) -> "RecurringCostUpdate":
+    def _at_least_one_change(self) -> "RecurringDefinitionUpdate":
         if not self.model_fields_set:
             raise ValueError("at least one field is required")
         return self
 
 
-class RecurringCostOut(BaseModel):
-    """A Recurring Cost as seen through the API, with its derived state:
-    `next_due_date` is the next Occurrence's own date (ADR-0024: its due
-    date) on or after today in Europe/Rome (issue #56);
-    `next_unpaid_occurrence_date` is the next Occurrence a new linked Expense
-    would pay — the oldest Unpaid one's own date (issue #57), what the
-    transaction form's picker shows. `backlog_count` is the Backlog (issue
-    #58): Unpaid Occurrences whose due date is today or earlier in
-    Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
-    pins and skips, never stored. Skip controls live per Occurrence (ADR-0026)
-    on the Occurrences read, not on the definition. `start_date` is the
-    stored start date — every definition carries one (ADR-0024).
-    `frozen` marks whether the definition was frozen (ADR-0028).
-    When frozen, `next_due_date` and `next_unpaid_occurrence_date` are None."""
-
-    id: int
-    name: str
-    amount: Decimal
-    interval_value: int
-    interval_unit: IntervalUnit
-    start_date: str
-    next_due_date: str | None
-    next_unpaid_occurrence_date: str | None
-    frozen: bool
-    backlog_count: int
-    created_at: datetime
-
-    @field_validator("amount")
-    @classmethod
-    def _amount_in_euros(cls, value: Decimal) -> Decimal:
-        return value.quantize(Decimal("0.01"))
-
-
-class RecurringIncomeCreate(BaseModel):
-    """Create a Recurring Income (issue #60), mirroring RecurringCostCreate
-    (ADR-0011). `interval_value` + `interval_unit` are the repetition (every
-    N days, weeks, months, or years); `start_date` is an optional Europe/Rome
-    calendar day: left empty at creation it is set to the creation day, so
-    every definition always carries one (ADR-0024).
-    """
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    name: str = Field(min_length=1, max_length=80)
-    amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
-    interval_value: int = Field(ge=1)
-    interval_unit: IntervalUnit
-    start_date: str | None = None
-
-    @field_validator("start_date")
-    @classmethod
-    def _start_date_is_a_rome_day(cls, value: str | None) -> str | None:
-        return _valid_rome_day(value) if value is not None else None
-
-    @field_validator("amount")
-    @classmethod
-    def _amount_in_euros(cls, value: Decimal) -> Decimal:
-        return value.quantize(Decimal("0.01"))
-
-
-class RecurringIncomeUpdate(BaseModel):
-    """Edit a Recurring Income (issue #60), mirroring RecurringCostUpdate
-    (ADR-0011). Every field is editable — name, amount, interval, start
-    date — and follows the TransactionUpdate contract: a field present in
-    the payload is applied; a field absent is untouched. `start_date` is the
-    one exception to the null-clears rule: an explicit null is rejected,
-    because a definition always carries a start date (ADR-0024) — it can be
-    changed, never unset.
-    """
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
-    interval_value: int | None = Field(default=None, ge=1)
-    interval_unit: IntervalUnit | None = None
-    start_date: str | None = None
-
-    @field_validator("start_date")
-    @classmethod
-    def _start_date_is_a_rome_day(cls, value: str | None) -> str | None:
-        return _valid_rome_day(value) if value is not None else None
-
-    @field_validator("amount")
-    @classmethod
-    def _amount_in_euros(cls, value: Decimal | None) -> Decimal | None:
-        return value.quantize(Decimal("0.01")) if value is not None else None
-
-    @model_validator(mode="after")
-    def _at_least_one_change(self) -> "RecurringIncomeUpdate":
-        if not self.model_fields_set:
-            raise ValueError("at least one field is required")
-        return self
-
-
-class RecurringIncomeOut(BaseModel):
-    """A Recurring Income as seen through the API (issue #60), mirroring
-    RecurringCostOut (ADR-0011). `next_due_date` is the next Occurrence's own
-    date (ADR-0024: its due date) on or after today in Europe/Rome, derived
-    on the fly from the stored definition — never
-    stored. `next_unpaid_occurrence_date` is the next Occurrence a new linked
-    Income or Transfer from a Contact Wallet would pay — the oldest Unpaid
-    one's own date (issue #61, ADR-0027), what the transaction form's
-    picker shows. `backlog_count` is the Backlog (issue
-    #62): Unpaid Occurrences whose due date is today or earlier in
-    Europe/Rome — the "N unpaid" badge, derived on the fly from the stored
-    pins and skips, never stored. Skip controls live per Occurrence (ADR-0026)
-    on the Occurrences read, not on the definition. `start_date` is the
-    stored start date — every definition carries one (ADR-0024).
-    `frozen` marks whether the definition was frozen (ADR-0028).
-    When frozen, `next_due_date` and `next_unpaid_occurrence_date` are None."""
+class RecurringDefinitionOut(BaseModel):
+    """A Recurring Cost or a Recurring Income as seen through the API, with
+    its derived state: `next_due_date` is the next Occurrence's own date
+    (ADR-0024: its due date) on or after today in Europe/Rome;
+    `next_unpaid_occurrence_date` is the next Occurrence a new linked
+    Transaction would pay — the oldest Unpaid one's own date (issues #57,
+    #61; ADR-0027), what the transaction form's picker shows.
+    `backlog_count` is the Backlog (issues #58, #62): Unpaid Occurrences
+    whose due date is today or earlier in Europe/Rome — the "N unpaid"
+    badge, derived on the fly from the stored pins and skips, never stored.
+    Skip controls live per Occurrence (ADR-0026) on the Occurrences read,
+    not on the definition. `start_date` is the stored start date — every
+    definition carries one (ADR-0024). `frozen` marks whether the
+    definition was frozen (ADR-0028); when frozen, `next_due_date` and
+    `next_unpaid_occurrence_date` are None and `backlog_count` is 0."""
 
     id: int
     name: str

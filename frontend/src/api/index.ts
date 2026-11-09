@@ -89,9 +89,15 @@ export {
 
 export {
   type IntervalUnit,
+  type RecurringDefinition,
+  type RecurringDefinitionApi,
+  type RecurringDefinitionInput,
+  type RecurringOccurrence,
+} from './recurringDefinitions'
+
+export {
   type RecurringCost,
   type RecurringCostInput,
-  type RecurringOccurrence,
   createRecurringCost,
   freezeRecurringCost,
   unfreezeRecurringCost,

@@ -32,6 +32,10 @@ _Avoid_: earning, incoming, deposit
 A Transaction that moves money from a Source Wallet to a Destination Wallet. Net Worth never changes, it never carries a Category, and the source and destination must be different Wallets — when the pair is exactly one own (non-Contact) Wallet and one Contact Wallet, it may also carry the matching-direction recurring link: from a Contact Wallet one links a Recurring Income, to a Contact Wallet one links a Recurring Cost (ADR-0027).
 _Avoid_: internal transfer, move
 
+**Recurring definition**:
+A Recurring Cost or a Recurring Income, when the kind does not matter: the name, amount, interval and start date one of them carries, with the same lifecycle — created, edited, frozen, unfrozen — and the same derived Occurrences on both sides. The two kinds stay two resources and two screen sides (ADR-0011); the code behind them is one implementation that takes the kind as a value (ADR-0033).
+_Avoid_: recurring item, recurring entry, recurring template
+
 **Recurring Cost**:
 A definition of a cost expected to repeat at a fixed interval (every N days, weeks, months, or years), with a name and a fixed amount. It produces derived Occurrences; each payment is still recorded by hand as a linked Expense — or, when the payee is tracked as a Contact Wallet, as a linked Transfer to that Wallet (ADR-0027) — whose Wallet and Category are chosen at Transaction creation time; the definition itself never carries them. The app never creates Transactions on its own. Freezing a Recurring Cost keeps its links intact (Definition: Frozen Recurring Cost).
 _Avoid_: monthly cost, fixed cost, subscription, recurring transaction

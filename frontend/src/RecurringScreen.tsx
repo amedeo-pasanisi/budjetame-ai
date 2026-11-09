@@ -2,15 +2,15 @@ import { useState } from 'react'
 import { useIntl } from 'react-intl'
 
 import type { LedgerFilterRequest } from './App'
-import { RecurringCostsScreen } from './RecurringCostsScreen'
-import { RecurringIncomesScreen } from './RecurringIncomesScreen'
+import { RecurringDefinitionsScreen } from './RecurringDefinitionsScreen'
 import { getRecurringSide, setRecurringSide, type RecurringSide } from './recurringSide'
 
 /** The Recurring tab (issue #60): a Costs | Incomes toggle above the two
  * sides. Default Costs; the last side is remembered for the app session —
  * the module-level value survives the screen unmounting on a tab switch and
- * resets on app load (recurringSide). The Costs side renders exactly as
- * before; the Incomes side mirrors it (ADR-0011). The ledger jump (issue
+ * resets on app load (recurringSide). One screen renders either side —
+ * the side is a value (ADR-0011, ADR-0033); the `key` remounts it on a
+ * switch so one side's list never bleeds into the other. The ledger jump (issue
  * #90) rides through: the cards' main tap opens the Transactions tab
  * pre-filtered to the definition (ADR-0026). */
 export function RecurringScreen({
@@ -58,11 +58,11 @@ export function RecurringScreen({
         </button>
       </div>
       <div className="mt-4">
-        {side === 'costs' ? (
-          <RecurringCostsScreen requestLedgerFilter={requestLedgerFilter} />
-        ) : (
-          <RecurringIncomesScreen requestLedgerFilter={requestLedgerFilter} />
-        )}
+        <RecurringDefinitionsScreen
+          key={side}
+          side={side}
+          requestLedgerFilter={requestLedgerFilter}
+        />
       </div>
     </>
   )

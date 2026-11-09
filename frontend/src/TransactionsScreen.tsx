@@ -26,8 +26,7 @@ import type { LedgerFilterRequest } from './App'
 import { CategoryModal } from './CategoryModal'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
-import { RecurringCostModal } from './RecurringCostModal'
-import { RecurringIncomeModal } from './RecurringIncomeModal'
+import { RecurringDefinitionModal } from './RecurringDefinitionModal'
 import { TransactionModal } from './TransactionModal'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
 import { UndoToastStack } from './UndoToastStack'
@@ -1063,14 +1062,16 @@ export function TransactionsScreen({
       )}
 
       {recurringCostModalOpen && (
-        <RecurringCostModal
+        <RecurringDefinitionModal
+          side="costs"
           onSaved={handleRecurringCostCreated}
           onClose={() => setRecurringCostModalOpen(false)}
         />
       )}
 
       {recurringIncomeModalOpen && (
-        <RecurringIncomeModal
+        <RecurringDefinitionModal
+          side="incomes"
           onSaved={handleRecurringIncomeCreated}
           onClose={() => setRecurringIncomeModalOpen(false)}
         />

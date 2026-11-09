@@ -35,6 +35,7 @@ from app.models import (
     WalletType,
 )
 from app.services.occurrences import timeline_for
+from app.services.recurring import Definition, kind_of
 from app.services.scoping import owned_or_raise
 
 
@@ -44,7 +45,7 @@ class TransactionRuleError(Exception):
 
 def _pin_for(
     session: Session,
-    definition: RecurringCost | RecurringIncome,
+    definition: Definition,
     *,
     exclude_transaction_id: int | None = None,
 ) -> DateObj:
@@ -62,17 +63,16 @@ def _pin_for(
     return pin
 
 
-def _frozen_link_message(definition: RecurringCost | RecurringIncome) -> str:
+def _frozen_link_message(definition: Definition) -> str:
     """The one rule error for a link on a frozen definition (ADR-0028): a
     frozen Recurring Cost or Recurring Income is read-only and generates
     no Occurrence a link could pay."""
-    noun = "cost" if isinstance(definition, RecurringCost) else "income"
-    return f"A frozen recurring {noun} cannot accept new links"
+    return f"A frozen recurring {kind_of(definition).noun} cannot accept new links"
 
 
 def _check_pin_free(
     session: Session,
-    definition: RecurringCost | RecurringIncome,
+    definition: Definition,
     occurrence_date: str | None,
     transaction_id: int,
 ) -> None:
