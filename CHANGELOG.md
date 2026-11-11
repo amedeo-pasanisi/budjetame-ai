@@ -5,7 +5,7 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
-## [Unreleased]
+## [v1.9.2] — 2026-11-11
 
 ### Fixed
 
@@ -35,6 +35,9 @@ here and on GitHub Releases.
 - The Occurrences section of a frozen definition lists nothing, and a skip
   on it is rejected: the freeze removed its Unpaid and Skipped Occurrences
   and generates no new ones (ADR-0028).
+- Release candidates now deploy to dev: the stage VM was retired, and a
+  `v*` tag deploys the exact release artifact to `dev.budjetame.de` for
+  verification before the manual prod promote (ADR-0023 addendum).
 
 ## [v1.9.1] — 2026-11-09
 
