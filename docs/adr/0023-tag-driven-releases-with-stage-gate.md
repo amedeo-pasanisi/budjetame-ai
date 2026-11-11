@@ -54,3 +54,5 @@ the mechanical half of it (was this tag built at all?) impossible to skip.
   restored into stage before promoting a release that touches the schema.
 - Prod is now only as fresh as the last deliberate release; a typo on `main`
   can no longer go live by itself.
+
+**Addendum (2026-11-11).** The stage VM was retired; dev is the only Always-Free micro VM left. The gate did not go with it: a `v*` tag still builds the one multi-arch `vX.Y.Z` manifest, and `cd-release.yml` now deploys it to the dev VM, where the candidate is verified before the manual CD (prod) run — the same shape stage had (an AMD micro), the same artifact rule, one VM fewer. The next push to `dev` puts the floating `:dev` build back. The `stage` GitHub environment is unused.

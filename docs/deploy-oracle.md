@@ -2,12 +2,14 @@
 
 ## Environments & pipeline
 
-Three Always-Free environments, driven by GitHub Actions:
+Two Always-Free VMs, three triggers, driven by GitHub Actions (the stage
+VM was retired on 2026-11-11 — ADR-0023 addendum; release candidates now
+land on dev):
 
 | Trigger | Environment | VM | URL |
 |---|---|---|---|
 | push to `dev` branch | **dev** | E2.1.Micro 1 GB (AMD) | https://dev.budjetame.de |
-| `v*` tag (release candidate) | **stage** | E2.1.Micro 1 GB (AMD) | https://stage.budjetame.de |
+| `v*` tag (release candidate) | **dev** (the exact `vX.Y.Z` artifact) | E2.1.Micro 1 GB (AMD) | https://dev.budjetame.de |
 | manual **CD (prod)** run at a tag | **prod** | A1.Flex 4 OCPU/24 GB (ARM) | https://budjetame.de |
 
 Pushing to `main` deploys nothing (CI only); releases are cut from `main`
@@ -26,8 +28,9 @@ commits as tags.
   on GitHub's free ARM64 runner — no QEMU emulation, which makes JS
   toolchain builds grind for hours), pushed as platform-suffixed tags and
   assembled by `buildx imagetools create` into one `:vX.Y.Z` manifest, then
-  deploys that manifest to the **stage** VM. Stage is the hard gate: prod
-  can only ever run an artifact stage has run.
+  deploys that manifest to the **dev** VM — the candidate replaces the
+  floating `:dev` build until the next push to `dev`. That deploy is the
+  hard gate: prod can only ever run an artifact a VM has run.
 - **CD — prod** (`.github/workflows/cd-prod.yml`): **manual only** — a
   human runs it from the Actions UI and picks the tag. A gate step refuses
   tags whose images don't exist (i.e. tags that never went through
@@ -35,7 +38,8 @@ commits as tags.
   (ARM pulls the arm64 image from the manifest automatically). The project
   name matches the original prod stack, so the `db_data` volume — all
   data — carries over on every deploy.
-- Secrets live in GitHub **environments** (`dev`/`stage`/`prod`): VM host,
+- Secrets live in GitHub **environments** (`dev`/`prod`; `stage` is unused
+  since its VM was retired): VM host,
   deploy SSH key, Postgres password, JWT secret, seed login. `BUDJETAME_JWT_EXPIRE_MINUTES`
   is optional — absent from the environment's secrets, the compose default
   (129600 minutes = 90 days, for the Android client) applies. The deploy SSH
@@ -54,13 +58,14 @@ commits as tags.
 2. **Cut the tag** — update `CHANGELOG.md` (that section becomes the
    release notes), commit, then `git tag -a vX.Y.Z` on the green `main`
    commit and push it. `cd-release.yml` builds both platforms and deploys
-   `vX.Y.Z` to stage automatically.
-3. **Verify on stage** — log in at `stage.budjetame.de` and exercise the
-   release. If it fails: fix on `main`, then force-move the tag
+   `vX.Y.Z` to the dev VM automatically.
+3. **Verify the candidate on dev** — log in at `dev.budjetame.de` (it now
+   runs the exact `vX.Y.Z` artifact) and exercise the release. If it
+   fails: fix on `main`, then force-move the tag
    (`git tag -f vX.Y.Z <fixed-sha> && git push --force origin vX.Y.Z`) —
    nothing has reached prod, so re-tagging is safe.
 4. **Promote** — in the Actions UI, run **CD (prod)** and enter the tag.
-   The gate refuses tags stage never built.
+   The gate refuses tags the release pipeline never built.
 5. **Rollback** — run **CD (prod)** again with the previous tag; compose
    pulls the older images and `db_data` carries over.
 

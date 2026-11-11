@@ -2,8 +2,8 @@ name: CD (prod)
 
 # The only way prod is deployed: a human clicks "Run workflow" and picks the
 # release tag. The gate step refuses tags whose images don't exist — i.e.
-# tags that never went through cd-release.yml (the tag → stage pipeline) —
-# so prod can only run an artifact stage has already run.
+# tags that never went through cd-release.yml (the tag → dev pipeline) —
+# so prod can only run an artifact the dev VM has already run.
 #
 # Rollback: run this workflow again with the previous tag — compose just
 # pulls the older images and the db_data volume carries over.
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to deploy (vX.Y.Z — must have been verified on stage)'
+        description: 'Release tag to deploy (vX.Y.Z — must have been verified on dev)'
         required: true
 
 env:
@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   gate:
-    name: Verify tag went through stage
+    name: Verify tag went through the release pipeline
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,7 +54,7 @@ jobs:
             ${{ env.IMAGE_BASE }}/backend:${{ env.ENV }}
           docker buildx imagetools inspect \
             ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}
-          echo "ok: ${{ env.ENV }} was built by cd-release.yml — stage ran this artifact"
+          echo "ok: ${{ env.ENV }} was built by cd-release.yml — dev ran this artifact"
 
   deploy-prod:
     name: Deploy to prod

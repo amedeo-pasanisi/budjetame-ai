@@ -1,14 +1,15 @@
-name: CD (release → stage)
+name: CD (release → dev)
 
 # A v* tag is a release candidate. Cutting one builds the exact artifact
 # prod will run — same version tag, both platforms — and deploys it to
-# stage. Deploying to prod is a separate, human-triggered workflow
-# (cd-prod.yml), so stage is the hard gate: prod never sees an artifact
-# stage hasn't run.
+# the dev VM (the stage VM was retired on 2026-11-11; ADR-0023 addendum).
+# Deploying to prod is a separate, human-triggered workflow (cd-prod.yml),
+# so this deploy is the hard gate: prod never sees an artifact no VM has
+# run. The next push to the dev branch puts the floating :dev build back.
 #
-# If stage fails, fix on main and force-move the tag to the fixed commit
-# (git tag -f vX.Y.Z <sha> && git push --force origin vX.Y.Z) — nothing has
-# reached prod yet, so re-tagging is safe.
+# If the candidate fails on dev, fix on main and force-move the tag to the
+# fixed commit (git tag -f vX.Y.Z <sha> && git push --force origin vX.Y.Z)
+# — nothing has reached prod yet, so re-tagging is safe.
 
 on:
   push:
@@ -17,10 +18,10 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/amedeo-pasanisi/budjetame-ai
-  # The version tag IS the image tag: stage and prod both pull the same
-  # ghcr.io/.../backend:vX.Y.Z manifest — the exact artifact stage verified.
+  # The version tag IS the image tag: dev and prod both pull the same
+  # ghcr.io/.../backend:vX.Y.Z manifest — the exact artifact dev verified.
   ENV: ${{ github.ref_name }}
-  DOMAIN: stage.budjetame.de
+  DOMAIN: dev.budjetame.de
 
 concurrency:
   group: cd-release-${{ github.ref_name }}
@@ -123,11 +124,11 @@ jobs:
             ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}-amd64 \
             ${{ env.IMAGE_BASE }}/frontend:${{ env.ENV }}-arm64
 
-  deploy-stage:
-    name: Deploy to stage
+  deploy-dev:
+    name: Deploy release candidate to dev
     needs: manifest
     runs-on: ubuntu-latest
-    environment: stage
+    environment: dev
     steps:
       - uses: actions/checkout@v4
       - name: Set up SSH
