@@ -4,8 +4,10 @@
 # and promoted to prod by hand via cd-prod.yml. The workflow writes .env
 # from GitHub environment secrets, then runs:
 #   docker compose -f compose.deploy.yaml -p budjetame-ai pull && up -d
-# The project name matches the original prod stack so upgrades swap in place
-# and the db_data volume (all your data) carries over.
+# The project name is fixed so upgrades swap the containers in place. The
+# database directory is DB_DATA_PATH: unset, the named volume db_data (dev);
+# on prod the workflow sets it to the attached block volume's directory,
+# /mnt/data/postgres, so the data survives the instance (ADR-0024).
 services:
   db:
     image: postgres:16-alpine
@@ -15,7 +17,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       POSTGRES_DB: budjetame
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - ${DB_DATA_PATH:-db_data}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U budjetame -d budjetame"]
       interval: 5s

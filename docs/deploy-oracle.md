@@ -35,9 +35,10 @@ commits as tags.
   human runs it from the Actions UI and picks the tag. A gate step refuses
   tags whose images don't exist (i.e. tags that never went through
   cd-release.yml), then deploys the same `:vX.Y.Z` manifest to the prod VM
-  (ARM pulls the arm64 image from the manifest automatically). The project
-  name matches the original prod stack, so the `db_data` volume — all
-  data — carries over on every deploy.
+  (ARM pulls the arm64 image from the manifest automatically). The
+  database directory is the attached block volume
+  (`DB_DATA_PATH=/mnt/data/postgres`, ADR-0024), so all data carries
+  over on every deploy; dev keeps a Docker named volume.
 - Secrets live in GitHub **environments** (`dev`/`prod`; `stage` is unused
   since its VM was retired): VM host,
   deploy SSH key, Postgres password, JWT secret, seed login. `BUDJETAME_JWT_EXPIRE_MINUTES`
@@ -67,7 +68,7 @@ commits as tags.
 4. **Promote** — in the Actions UI, run **CD (prod)** and enter the tag.
    The gate refuses tags the release pipeline never built.
 5. **Rollback** — run **CD (prod)** again with the previous tag; compose
-   pulls the older images and `db_data` carries over.
+   pulls the older images and the block volume's data carries over.
 
 
 A single ARM VM running the whole app in Docker — free forever (4 OCPU / 24 GB

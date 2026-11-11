@@ -114,3 +114,5 @@ migrate later.
 
 No production deployment should happen until the database durability story is
 explicit and tested.
+
+**Addendum (2026-11-11).** The block volume was provisioned and prod was rebuilt by hand with `compose.prod.yaml` on 2026-11-09, but the CD prod deploy (`compose.deploy.yaml`) still gave the database a named volume on the boot volume: a successful promote would have started prod on an empty database with the real data orphaned on `/mnt/data/postgres` — the v1.9.2 promote failed before that point only because the hand-made stack still held port 80. The deploy compose now takes the database directory from `DB_DATA_PATH` (unset: the `db_data` named volume, dev; prod's workflow sets `/mnt/data/postgres`), and prod runs the CD stack from the v1.9.2 cutover on. One stack, one data directory, on the block volume.

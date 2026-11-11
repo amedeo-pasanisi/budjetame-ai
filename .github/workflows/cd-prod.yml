@@ -6,7 +6,7 @@ name: CD (prod)
 # so prod can only run an artifact the dev VM has already run.
 #
 # Rollback: run this workflow again with the previous tag — compose just
-# pulls the older images and the db_data volume carries over.
+# pulls the older images and the block volume's data carries over.
 
 on:
   workflow_dispatch:
@@ -73,9 +73,12 @@ jobs:
           ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
       - name: Write .env from environment secrets
         run: |
+          # DB_DATA_PATH: prod's database lives on the attached block
+          # volume, not on the boot volume (ADR-0024).
           cat > .env <<'EOF'
           ENV=${{ env.ENV }}
           DOMAIN=${{ env.DOMAIN }}
+          DB_DATA_PATH=/mnt/data/postgres
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           BUDJETAME_JWT_SECRET=${{ secrets.BUDJETAME_JWT_SECRET }}
           BUDJETAME_SEED_ACCOUNT_EMAIL=${{ secrets.BUDJETAME_SEED_ACCOUNT_EMAIL }}
