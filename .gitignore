@@ -26,3 +26,4 @@ budget_import.csv
 .pi-subagents
 # Local scratch (notes, throwaway prototypes, test postgres data)
 .scratch/
+.claude/settings.local.json

@@ -10,7 +10,7 @@ land on dev):
 |---|---|---|---|
 | push to `dev` branch | **dev** | E2.1.Micro 1 GB (AMD) | https://dev.budjetame.de |
 | `v*` tag (release candidate) | **dev** (the exact `vX.Y.Z` artifact) | E2.1.Micro 1 GB (AMD) | https://dev.budjetame.de |
-| manual **CD (prod)** run at a tag | **prod** | A1.Flex 4 OCPU/24 GB (ARM) | https://budjetame.de |
+| manual **CD (prod)** run at a tag | **prod** | E2.1.Micro 1 GB (AMD) — since 2026-11-09; was A1.Flex ARM | https://budjetame.de |
 
 Pushing to `main` deploys nothing (CI only); releases are cut from `main`
 commits as tags.
@@ -35,7 +35,8 @@ commits as tags.
   human runs it from the Actions UI and picks the tag. A gate step refuses
   tags whose images don't exist (i.e. tags that never went through
   cd-release.yml), then deploys the same `:vX.Y.Z` manifest to the prod VM
-  (ARM pulls the arm64 image from the manifest automatically). The
+  (each VM's docker pulls its own platform from the manifest; both VMs
+  are AMD today, the arm64 half keeps an ARM prod possible). The
   database directory is the attached block volume
   (`DB_DATA_PATH=/mnt/data/postgres`, ADR-0024), so all data carries
   over on every deploy; dev keeps a Docker named volume.
@@ -71,9 +72,12 @@ commits as tags.
    pulls the older images and the block volume's data carries over.
 
 
-A single ARM VM running the whole app in Docker — free forever (4 OCPU / 24 GB
-RAM on the Ampere A1 shape), always on, no cold starts. The only thing Oracle
-asks for is a credit card to verify your identity; nothing is ever charged.
+A single VM running the whole app in Docker — free forever, always on, no
+cold starts. The wizard below targets the Ampere A1 shape (4 OCPU / 24 GB
+RAM, ARM); since the 2026-11-09 rebuild prod runs on an E2.1.Micro (1 GB,
+AMD) like dev — the second of the two Always-Free micro instances, which is
+why the stage VM went. The only thing Oracle asks for is a credit card to
+verify your identity; nothing is ever charged.
 
 ```
 browser ──▶ nginx (port 80) ──▶ /api/* ──▶ backend (uvicorn:8000) ──▶ postgres (internal only)
