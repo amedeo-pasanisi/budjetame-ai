@@ -15,6 +15,33 @@ type ModalShellProps = {
 const openModals: number[] = []
 let nextModalId = 0
 
+// The page-behind scroll lock, reference-counted across the stack: the
+// first shell to lock remembers what the body had, the last to unlock
+// restores it. Per-shell save/restore broke under stacking: a parent
+// re-render (the cache clock bumping after an inline Wallet/Category
+// creation, ADR-0022) re-ran both shells' effects in tree order — the
+// outer's cleanup restored '', the inner's restored 'hidden', then the
+// outer's setup re-captured 'hidden' as "previous" and left the page locked
+// after every modal had closed. A count is also indifferent to unmount
+// order.
+let lockedShells = 0
+let overflowBeforeLock = ''
+
+function lockPageScroll(): void {
+  if (lockedShells === 0) {
+    overflowBeforeLock = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+  }
+  lockedShells += 1
+}
+
+function unlockPageScroll(): void {
+  lockedShells -= 1
+  if (lockedShells === 0) {
+    document.body.style.overflow = overflowBeforeLock
+  }
+}
+
 /** The shared modal shell (issue #41; ADR-0008), used by every modal. The
  * dialog centers vertically on every screen size, fully inside the viewport
  * with rounded corners on all sides and a small side margin on phones; tall
@@ -38,19 +65,22 @@ export function ModalShell({ label, onClose, children }: ModalShellProps) {
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    // Lock the page behind the modal so the list cannot scroll out from
-    // under the draft.
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       const index = openModals.indexOf(id)
       if (index !== -1) {
         openModals.splice(index, 1)
       }
-      document.body.style.overflow = previousOverflow
     }
   }, [onClose])
+  // Lock the page behind the modal so the list cannot scroll out from under
+  // the draft — once per mount, deliberately apart from the effect above:
+  // that one re-runs whenever the parent passes a new onClose, and the lock
+  // must not.
+  useEffect(() => {
+    lockPageScroll()
+    return unlockPageScroll
+  }, [])
 
   return (
     <div

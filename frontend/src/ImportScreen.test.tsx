@@ -85,6 +85,7 @@ import {
   validateImportRow,
 } from './api'
 import { SENTINEL_VALUE } from './EntitySelect'
+import { bumpDataVersion } from './api/dataVersion'
 
 const previewImportMock = vi.mocked(previewImport)
 const confirmImportMock = vi.mocked(confirmImport)
@@ -1927,5 +1928,50 @@ describe('ImportScreen inline-creation Revalidation (issue #78)', () => {
     expect(screen.getByText('1 duplicate')).toBeInTheDocument()
     expect(screen.getByText('6 problems')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Import 1 row' })).toBeInTheDocument()
+  })
+})
+
+describe('ImportScreen stacked modals release the page scroll lock', () => {
+  /** The transport bumps the cache clock (ADR-0022) synchronously after a
+   * successful write, several microtasks before the Wallet form's onSaved
+   * runs — so the screen re-renders with both modals still stacked. The
+   * mock mirrors that ordering. */
+  const createWalletLikeTransport = (wallet: Wallet) =>
+    createWalletMock.mockImplementation(async () => {
+      bumpDataVersion()
+      return wallet
+    })
+
+  it('creating a Wallet from the row editor and then closing the editor leaves body scrollable', async () => {
+    createWalletLikeTransport(revolutWallet)
+    revalidateImportRowsMock.mockResolvedValue([])
+    await openPreview()
+    await screen.findByRole('button', { name: 'Import 2 rows' })
+    expect(document.body.style.overflow).toBe('')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit row 4' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit row 4' })
+    expect(document.body.style.overflow).toBe('hidden')
+    fireEvent.change(within(dialog).getByLabelText('Wallet'), {
+      target: { value: SENTINEL_VALUE },
+    })
+    const walletDialog = await screen.findByRole('dialog', { name: 'New wallet' })
+    fireEvent.change(within(walletDialog).getByLabelText('Name'), {
+      target: { value: 'Revolut' },
+    })
+    fireEvent.click(within(walletDialog).getByRole('button', { name: 'Create wallet' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New wallet' })).not.toBeInTheDocument(),
+    )
+    await waitFor(() => expect(within(dialog).getByLabelText('Wallet')).toHaveValue('Revolut'))
+    // Still one modal open: the page stays locked.
+    expect(document.body.style.overflow).toBe('hidden')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Edit row 4' })).not.toBeInTheDocument(),
+    )
+    // The user's symptom: with every modal closed the page must scroll again.
+    expect(document.body.style.overflow).toBe('')
   })
 })
