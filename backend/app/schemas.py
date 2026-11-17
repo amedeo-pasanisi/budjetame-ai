@@ -114,6 +114,22 @@ class WalletOut(BaseModel):
         return value.quantize(Decimal("0.01"))
 
 
+class WalletUndoRequest(BaseModel):
+    """The full Wallet row the client kept after a delete, sent back to
+    re-insert the very same Wallet (ADR-0034, the Transaction undo pattern
+    of ADR-0031): same id, same name and type, same creation time, still
+    frozen. The derived balance travels along and is ignored — a deleted
+    Wallet had no Transactions, so it is EUR 0 by construction. The Account
+    is always the caller's, never the payload's."""
+
+    id: int
+    name: str = Field(min_length=1, max_length=80)
+    type: WalletType
+    balance: Decimal | None = None
+    frozen: bool = True
+    created_at: datetime
+
+
 _HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
 
 
@@ -751,6 +767,7 @@ class RecurringDefinitionOut(BaseModel):
     next_due_date: str | None
     next_unpaid_occurrence_date: str | None
     frozen: bool
+    freeze_date: str | None
     backlog_count: int
     created_at: datetime
 
@@ -758,6 +775,39 @@ class RecurringDefinitionOut(BaseModel):
     @classmethod
     def _amount_in_euros(cls, value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.01"))
+
+
+class RecurringDefinitionUndoRequest(BaseModel):
+    """The full definition row the client kept after a delete, sent back to
+    re-insert the very same definition (ADR-0034, the Transaction undo
+    pattern of ADR-0031): same id, same fields, same creation time, still
+    frozen with its freeze date. The derived fields (next due date, next
+    Unpaid Occurrence, Backlog) travel along and are ignored — a frozen
+    definition's Timeline generates nothing. The Account is always the
+    caller's, never the payload's."""
+
+    id: int
+    name: str = Field(min_length=1, max_length=80)
+    amount: Decimal = Field(gt=0, le=_MAX_AMOUNT)
+    interval_value: int = Field(ge=1)
+    interval_unit: IntervalUnit
+    start_date: str
+    freeze_date: str | None = None
+    frozen: bool = True
+    next_due_date: str | None = None
+    next_unpaid_occurrence_date: str | None = None
+    backlog_count: int = 0
+    created_at: datetime
+
+    @field_validator("start_date")
+    @classmethod
+    def _start_date_is_a_rome_day(cls, value: str) -> str:
+        return _valid_rome_day(value)
+
+    @field_validator("freeze_date")
+    @classmethod
+    def _freeze_date_is_a_rome_day(cls, value: str | None) -> str | None:
+        return None if value is None else _valid_rome_day(value)
 
 
 class TransactionDeleteOut(BaseModel):

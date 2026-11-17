@@ -13,6 +13,8 @@
 import {
   createRecurringCost,
   createRecurringIncome,
+  deleteRecurringCost,
+  deleteRecurringIncome,
   fetchRecurringCostOccurrences,
   fetchRecurringCosts,
   fetchRecurringIncomeOccurrences,
@@ -21,6 +23,8 @@ import {
   freezeRecurringIncome,
   setRecurringCostOccurrenceSkipped,
   setRecurringIncomeOccurrenceSkipped,
+  undoRecurringCostDelete,
+  undoRecurringIncomeDelete,
   unfreezeRecurringCost,
   unfreezeRecurringIncome,
   updateRecurringCost,
@@ -38,6 +42,9 @@ export type SideAdapter = {
   messages: { screen: string; form: string; modal: string }
   /** The Ledger jump kind a row's main tap sends (issue #90, ADR-0026). */
   jumpKind: 'recurring-cost' | 'recurring-income'
+  /** The kind a deleted definition enters the app-wide Undo stack as
+   * (ADR-0034): the toast's headline and the undo call come from it. */
+  undoKind: 'recurring-cost' | 'recurring-income'
   /** The prefix of the form's element ids ("recurring-cost-name"). */
   idPrefix: string
 }
@@ -53,6 +60,8 @@ export const SIDES: Record<RecurringSide, SideAdapter> = {
       update: (token, id, input) => updateRecurringCost(token, id, input),
       freeze: (token, id) => freezeRecurringCost(token, id),
       unfreeze: (token, id) => unfreezeRecurringCost(token, id),
+      delete: (token, id) => deleteRecurringCost(token, id),
+      undoDelete: (token, definition) => undoRecurringCostDelete(token, definition),
       fetchOccurrences: (token, id) => fetchRecurringCostOccurrences(token, id),
       setOccurrenceSkipped: (token, id, date, skipped) =>
         setRecurringCostOccurrenceSkipped(token, id, date, skipped),
@@ -63,6 +72,7 @@ export const SIDES: Record<RecurringSide, SideAdapter> = {
       modal: 'recurringCostModal',
     },
     jumpKind: 'recurring-cost',
+    undoKind: 'recurring-cost',
     idPrefix: 'recurring-cost',
   },
   incomes: {
@@ -72,6 +82,8 @@ export const SIDES: Record<RecurringSide, SideAdapter> = {
       update: (token, id, input) => updateRecurringIncome(token, id, input),
       freeze: (token, id) => freezeRecurringIncome(token, id),
       unfreeze: (token, id) => unfreezeRecurringIncome(token, id),
+      delete: (token, id) => deleteRecurringIncome(token, id),
+      undoDelete: (token, definition) => undoRecurringIncomeDelete(token, definition),
       fetchOccurrences: (token, id) => fetchRecurringIncomeOccurrences(token, id),
       setOccurrenceSkipped: (token, id, date, skipped) =>
         setRecurringIncomeOccurrenceSkipped(token, id, date, skipped),
@@ -82,6 +94,7 @@ export const SIDES: Record<RecurringSide, SideAdapter> = {
       modal: 'recurringIncomeModal',
     },
     jumpKind: 'recurring-income',
+    undoKind: 'recurring-income',
     idPrefix: 'recurring-income',
   },
 }

@@ -308,9 +308,9 @@ async def test_freeze_at_zero_balance_succeeds_and_hides_the_wallet(
     token = await _login(client)
     wallet_id = await _create_wallet_via_api(client, token, "To Freeze", "cash")
 
-    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    response = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
 
-    assert response.status_code == 204
+    assert response.status_code == 200
     listed = (await client.get("/wallets", headers=_auth(token))).json()
     assert all(w["id"] != wallet_id for w in listed)
 
@@ -321,7 +321,7 @@ async def test_freeze_is_rejected_while_balance_is_nonzero(client: AsyncClient) 
         client, token, "Not Zero", "checking", "100.00"
     )
 
-    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    response = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
 
     assert response.status_code == 422
     listed = (await client.get("/wallets", headers=_auth(token))).json()
@@ -349,16 +349,16 @@ async def test_freeze_is_allowed_when_transactions_net_to_zero(
     )
     assert expense.status_code == 201
 
-    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+    response = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
 
-    assert response.status_code == 204
+    assert response.status_code == 200
 
 
 async def test_frozen_wallet_cannot_be_renamed(client: AsyncClient) -> None:
     token = await _login(client)
     wallet_id = await _create_wallet_via_api(client, token, "Frozen Name", "cash")
-    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
-    assert frozen.status_code == 204
+    frozen = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
+    assert frozen.status_code == 200
 
     response = await client.patch(
         f"/wallets/{wallet_id}", json={"name": "Renamed"}, headers=_auth(token)
@@ -373,7 +373,7 @@ async def test_freeze_foreign_wallet_returns_403(
     token = await _login(client)
     account_id, wallet_id = _insert_foreign_wallet(database_url)
     try:
-        response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+        response = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
         assert response.status_code == 403
     finally:
         delete_account(database_url, account_id)
@@ -382,7 +382,7 @@ async def test_freeze_foreign_wallet_returns_403(
 async def test_freeze_missing_wallet_returns_403(client: AsyncClient) -> None:
     token = await _login(client)
 
-    response = await client.delete("/wallets/999999", headers=_auth(token))
+    response = await client.post("/wallets/999999/freeze", headers=_auth(token))
 
     assert response.status_code == 403
 
@@ -402,8 +402,8 @@ async def test_freezing_does_not_change_other_wallet_balances(
         for w in (await client.get("/wallets", headers=_auth(token))).json()
     }
 
-    frozen = await client.delete(f"/wallets/{target_id}", headers=_auth(token))
-    assert frozen.status_code == 204
+    frozen = await client.post(f"/wallets/{target_id}/freeze", headers=_auth(token))
+    assert frozen.status_code == 200
 
     after = {
         w["id"]: w["balance"]
@@ -420,8 +420,8 @@ async def test_list_wallets_can_include_frozen_wallets(client: AsyncClient) -> N
     token = await _login(client)
     wallet_id = await _create_wallet_via_api(client, token, "Historic", "cash")
     active_id = await _create_wallet_via_api(client, token, "Still Active", "cash")
-    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
-    assert frozen.status_code == 204
+    frozen = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
+    assert frozen.status_code == 200
 
     default = (await client.get("/wallets", headers=_auth(token))).json()
     assert all(w["id"] != wallet_id for w in default)
@@ -444,8 +444,8 @@ async def test_unfreeze_restores_a_frozen_wallet(client: AsyncClient) -> None:
     if it had never been frozen (issue #48)."""
     token = await _login(client)
     wallet_id = await _create_wallet_via_api(client, token, "To Unfreeze", "cash")
-    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
-    assert frozen.status_code == 204
+    frozen = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
+    assert frozen.status_code == 200
 
     response = await client.post(f"/wallets/{wallet_id}/unfreeze", headers=_auth(token))
 
@@ -464,8 +464,8 @@ async def test_unfrozen_wallet_accepts_transactions_again(
     unfreezing the Wallet accepts Transactions again (issue #48)."""
     token = await _login(client)
     wallet_id = await _create_wallet_via_api(client, token, "Revived", "cash")
-    frozen = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
-    assert frozen.status_code == 204
+    frozen = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
+    assert frozen.status_code == 200
 
     while_frozen = await client.post(
         "/transactions",
@@ -520,3 +520,263 @@ async def test_unfreeze_missing_wallet_returns_403(client: AsyncClient) -> None:
     response = await client.post("/wallets/999999/unfreeze", headers=_auth(token))
 
     assert response.status_code == 403
+
+
+# --- Delete (ADR-0034) ---
+
+
+async def _freeze(client: AsyncClient, token: str, wallet_id: int) -> None:
+    response = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
+    assert response.status_code == 200
+    assert response.json()["frozen"] is True
+
+
+async def _listed_ids(client: AsyncClient, token: str) -> set[int]:
+    included = await client.get("/wallets?include_frozen=true", headers=_auth(token))
+    return {w["id"] for w in included.json()}
+
+
+async def test_delete_a_frozen_wallet_with_no_history_returns_the_row_and_removes_it(
+    client: AsyncClient,
+) -> None:
+    """A frozen Wallet no Transaction has ever touched can be deleted for good
+    (ADR-0034): the response is the full row — the client's replay payload —
+    and the Wallet is gone from the list, even with include_frozen."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Typo Walet", "cash")
+    await _freeze(client, token, wallet_id)
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == wallet_id
+    assert body["name"] == "Typo Walet"
+    assert body["type"] == "cash"
+    assert body["frozen"] is True
+    assert body["balance"] == "0.00"
+    assert wallet_id not in await _listed_ids(client, token)
+
+
+async def test_delete_an_active_wallet_is_refused_with_freeze_first(
+    client: AsyncClient,
+) -> None:
+    """Freeze remains the only action on an active Wallet (ADR-0034): the API
+    enforces the same two-step path the UI shows."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Still Active Del", "cash")
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 422
+    assert "freeze" in response.json()["detail"].lower()
+    assert wallet_id in await _listed_ids(client, token)
+
+
+async def _balances(client: AsyncClient, token: str) -> dict[int, str]:
+    listed = await client.get("/wallets?include_frozen=true", headers=_auth(token))
+    return {w["id"]: w["balance"] for w in listed.json()}
+
+
+async def _post_transaction(client: AsyncClient, token: str, **payload: object) -> int:
+    response = await client.post("/transactions", json=payload, headers=_auth(token))
+    assert response.status_code == 201, response.json()
+    return response.json()["id"]
+
+
+async def test_delete_is_refused_when_the_only_transaction_is_the_opening_balance(
+    client: AsyncClient,
+) -> None:
+    """An Opening Balance is history: a balance-bearing record never
+    disappears with a Wallet (ADR-0034). The Wallet nets to EUR 0 through an
+    Expense so it can be frozen, then carries two Transactions."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Opened", "cash", "20.00")
+    await _post_transaction(
+        client, token, type="expense", amount="20.00", date="2026-08-01", wallet_id=wallet_id
+    )
+    await _freeze(client, token, wallet_id)
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "This wallet has 2 transactions"
+    assert wallet_id in await _listed_ids(client, token)
+
+
+async def test_delete_is_refused_when_the_wallet_carries_an_expense(
+    client: AsyncClient,
+) -> None:
+    """A Wallet with an Expense on it has history; an Income nets it to EUR 0
+    so it can be frozen, and the refusal counts both."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Spent From", "cash")
+    await _post_transaction(
+        client, token, type="income", amount="5.00", date="2026-08-01", wallet_id=wallet_id
+    )
+    await _post_transaction(
+        client, token, type="expense", amount="5.00", date="2026-08-02", wallet_id=wallet_id
+    )
+    await _freeze(client, token, wallet_id)
+
+    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "This wallet has 2 transactions"
+    assert wallet_id in await _listed_ids(client, token)
+
+
+async def test_delete_is_refused_when_the_wallet_is_a_transfer_leg(
+    client: AsyncClient,
+) -> None:
+    """A Wallet that appears as either leg of a Transfer has history, so the
+    other Wallet's Balance can never change because of a delete."""
+    token = await _login(client)
+    source_id = await _create_wallet_via_api(client, token, "Leg Source", "checking")
+    destination_id = await _create_wallet_via_api(client, token, "Leg Dest", "cash")
+    other_id = await _create_wallet_via_api(client, token, "Leg Funded", "checking", "40.00")
+    # Each leg Wallet goes out and comes back, so both net to EUR 0 and freeze.
+    await _post_transaction(
+        client, token, type="transfer", amount="15.00", date="2026-08-01",
+        source_wallet_id=other_id, destination_wallet_id=source_id,
+    )
+    await _post_transaction(
+        client, token, type="transfer", amount="15.00", date="2026-08-02",
+        source_wallet_id=source_id, destination_wallet_id=destination_id,
+    )
+    await _post_transaction(
+        client, token, type="transfer", amount="15.00", date="2026-08-03",
+        source_wallet_id=destination_id, destination_wallet_id=other_id,
+    )
+    await _freeze(client, token, source_id)
+    await _freeze(client, token, destination_id)
+    before = await _balances(client, token)
+
+    as_source = await client.delete(f"/wallets/{source_id}", headers=_auth(token))
+    as_destination = await client.delete(f"/wallets/{destination_id}", headers=_auth(token))
+
+    assert as_source.status_code == 422
+    assert as_source.json()["detail"] == "This wallet has 2 transactions"
+    assert as_destination.status_code == 422
+    assert as_destination.json()["detail"] == "This wallet has 2 transactions"
+    assert await _balances(client, token) == before
+    assert before[other_id] == "40.00"
+
+
+async def test_a_frozen_contact_wallet_follows_the_same_rule(client: AsyncClient) -> None:
+    """A Contact added by mistake can go; one that ever carried a Transfer
+    stays frozen (ADR-0034): no special case."""
+    token = await _login(client)
+    mistake_id = await _create_wallet_via_api(client, token, "Mistaken Contact", "contact")
+    lender_id = await _create_wallet_via_api(client, token, "Real Contact", "contact")
+    bank_id = await _create_wallet_via_api(client, token, "Contact Bank", "checking", "10.00")
+    await _post_transaction(
+        client, token, type="transfer", amount="10.00", date="2026-08-01",
+        source_wallet_id=bank_id, destination_wallet_id=lender_id,
+    )
+    await _post_transaction(
+        client, token, type="transfer", amount="10.00", date="2026-08-02",
+        source_wallet_id=lender_id, destination_wallet_id=bank_id,
+    )
+    await _freeze(client, token, mistake_id)
+    await _freeze(client, token, lender_id)
+
+    deleted = await client.delete(f"/wallets/{mistake_id}", headers=_auth(token))
+    refused = await client.delete(f"/wallets/{lender_id}", headers=_auth(token))
+
+    assert deleted.status_code == 200
+    assert deleted.json()["type"] == "contact"
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "This wallet has 2 transactions"
+
+
+async def test_delete_foreign_or_missing_wallet_returns_403(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    account_id, wallet_id = _insert_foreign_wallet(database_url)
+    try:
+        foreign = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
+        assert foreign.status_code == 403
+    finally:
+        delete_account(database_url, account_id)
+    missing = await client.delete("/wallets/999999", headers=_auth(token))
+    assert missing.status_code == 403
+
+
+# --- Undo a delete (ADR-0034, mirroring ADR-0031) ---
+
+
+async def test_undo_re_inserts_the_same_wallet_still_frozen_and_the_next_create_does_not_collide(
+    client: AsyncClient,
+) -> None:
+    """Undo is a true reversal: the very same Wallet comes back - same id,
+    still frozen, in the Frozen list - and the sequence is re-synced so a
+    later create never collides with the restored id."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Undo Me", "credit_card")
+    await _freeze(client, token, wallet_id)
+    deleted = (await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))).json()
+
+    undo = await client.post("/wallets/undo", json=deleted, headers=_auth(token))
+
+    assert undo.status_code == 201
+    restored = undo.json()
+    assert restored["id"] == wallet_id
+    assert restored["name"] == "Undo Me"
+    assert restored["type"] == "credit_card"
+    assert restored["frozen"] is True
+    assert restored["created_at"] == deleted["created_at"]
+    default = (await client.get("/wallets", headers=_auth(token))).json()
+    assert all(w["id"] != wallet_id for w in default)
+    assert wallet_id in await _listed_ids(client, token)
+
+    next_id = await _create_wallet_via_api(client, token, "After Undo", "cash")
+    assert next_id != wallet_id
+    assert next_id > wallet_id
+
+
+async def test_undo_after_the_name_was_reused_is_refused_as_a_name_conflict(
+    client: AsyncClient,
+) -> None:
+    """Fixing a typo is delete-then-recreate; an Undo after that fails with
+    the name-conflict shape, never a silent rename (ADR-0034)."""
+    token = await _login(client)
+    wallet_id = await _create_wallet_via_api(client, token, "Reused Name", "cash")
+    await _freeze(client, token, wallet_id)
+    deleted = (await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))).json()
+    replacement = await _create_wallet_via_api(client, token, "reused name", "checking")
+
+    undo = await client.post("/wallets/undo", json=deleted, headers=_auth(token))
+
+    assert undo.status_code == 409
+    assert "name" in undo.json()["detail"].lower()
+    ids = await _listed_ids(client, token)
+    assert wallet_id not in ids
+    assert replacement in ids
+
+
+async def test_undo_of_a_foreign_wallet_id_returns_403(
+    client: AsyncClient, database_url: str
+) -> None:
+    """A replay whose id is another Account's Wallet is refused as foreign:
+    the Account on a re-inserted row is always the caller's, and an existing
+    foreign id must stay indistinguishable from absent data (ADR-0003)."""
+    token = await _login(client)
+    account_id, wallet_id = _insert_foreign_wallet(database_url)
+    try:
+        undo = await client.post(
+            "/wallets/undo",
+            json={
+                "id": wallet_id,
+                "name": "Stranger Wallet",
+                "type": "cash",
+                "balance": "0.00",
+                "frozen": True,
+                "created_at": "2026-08-01T10:00:00Z",
+            },
+            headers=_auth(token),
+        )
+        assert undo.status_code == 403
+    finally:
+        delete_account(database_url, account_id)

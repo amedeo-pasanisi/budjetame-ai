@@ -28,3 +28,7 @@ Deleting a Recurring Cost or Recurring Income severed the FK link to its Transac
 - **Freeze as one-way archival (no unfreeze)** — rejected during grilling: the ability to resume a old definition (e.g. a returning client contract) was important.
 - **Keep "delete severs links" alongside freeze** — rejected: two irreversible one-way actions confuse which to pick; the single "Freeze" maps to the Wallet model the user already knows.
 - **Freeze making the definition disappear from derived computations entirely (past too)** — rejected: past Budget numbers would retroactively change, which is surprising.
+
+---
+
+*Amended (ADR-0034):* a frozen definition with no linked Transaction can be deleted for good, with a ten-second Undo. "Delete is replaced entirely" still holds for the delete that severed links: a delete never touches a definition that has any.

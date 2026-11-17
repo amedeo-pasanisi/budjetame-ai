@@ -18,5 +18,7 @@ export const createRecurringIncome = api.create
 export const updateRecurringIncome = api.update
 export const freezeRecurringIncome = api.freeze
 export const unfreezeRecurringIncome = api.unfreeze
+export const deleteRecurringIncome = api.delete
+export const undoRecurringIncomeDelete = api.undoDelete
 export const fetchRecurringIncomeOccurrences = api.fetchOccurrences
 export const setRecurringIncomeOccurrenceSkipped = api.setOccurrenceSkipped

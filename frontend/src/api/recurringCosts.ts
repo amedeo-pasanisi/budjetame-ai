@@ -18,5 +18,7 @@ export const createRecurringCost = api.create
 export const updateRecurringCost = api.update
 export const freezeRecurringCost = api.freeze
 export const unfreezeRecurringCost = api.unfreeze
+export const deleteRecurringCost = api.delete
+export const undoRecurringCostDelete = api.undoDelete
 export const fetchRecurringCostOccurrences = api.fetchOccurrences
 export const setRecurringCostOccurrenceSkipped = api.setOccurrenceSkipped

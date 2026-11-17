@@ -179,8 +179,8 @@ async def test_net_worth_is_unaffected_by_frozen_wallets(client: AsyncClient) ->
     # The doomed Wallet nets to €0, so Net Worth is unchanged by its creation.
     assert (await _summary(client, token))["net_worth"] == before["net_worth"]
 
-    response = await client.delete(f"/wallets/{doomed}", headers=_auth(token))
-    assert response.status_code == 204
+    response = await client.post(f"/wallets/{doomed}/freeze", headers=_auth(token))
+    assert response.status_code == 200
 
     assert (await _summary(client, token))["net_worth"] == before["net_worth"]
 

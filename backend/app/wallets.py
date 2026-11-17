@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_account
 from app.deps import get_session
 from app.models import Account, Wallet, WalletType
-from app.schemas import WalletCreate, WalletOut, WalletUpdate
+from app.schemas import WalletCreate, WalletOut, WalletUndoRequest, WalletUpdate
 from app.services import scoping, wallets as wallet_service
 
 router = APIRouter(prefix="/wallets", tags=["wallets"])
@@ -85,6 +85,38 @@ def create_wallet(
     return _wallet_out(wallet, balances.get(wallet.id, Decimal("0.00")))
 
 
+@router.post("/undo", response_model=WalletOut, status_code=201)
+def undo_delete_wallet(
+    payload: WalletUndoRequest,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> WalletOut:
+    """Re-insert a deleted Wallet with its original id, still frozen
+    (ADR-0034): the client sends back the row the delete returned. A name
+    taken in the meantime is the name-conflict 409; an id held by another
+    Account is 403 (ADR-0003)."""
+    try:
+        wallet = wallet_service.undo_delete_wallet(
+            session,
+            account.id,
+            wallet_id=payload.id,
+            name=payload.name,
+            type=payload.type,
+            created_at=payload.created_at,
+        )
+    except scoping.NotOwned:
+        raise HTTPException(status_code=403, detail="Wallet not found") from None
+    except wallet_service.WalletIdInUse:
+        raise HTTPException(status_code=422, detail="This wallet already exists")
+    except (wallet_service.WalletNameTaken, IntegrityError) as cause:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Undo failed: a Wallet with this name now exists",
+        ) from cause
+    return _wallet_out(wallet, Decimal("0.00"))
+
+
 @router.patch("/{wallet_id}", response_model=WalletOut)
 def rename_wallet(
     wallet_id: int,
@@ -103,18 +135,40 @@ def rename_wallet(
     return _wallet_out(wallet, balances.get(wallet.id, Decimal("0.00")))
 
 
-@router.delete("/{wallet_id}", status_code=204)
+@router.post("/{wallet_id}/freeze", response_model=WalletOut)
 def freeze_wallet(
     wallet_id: int,
     account: Account = Depends(get_current_account),
     session: Session = Depends(get_session),
-) -> None:
-    """Freeze (delete) a Wallet at Balance exactly €0 (ADR-0002)."""
+) -> WalletOut:
+    """Freeze a Wallet at Balance exactly €0 (ADR-0002). An explicit action
+    like the Recurring one: HTTP DELETE on a Wallet is the real delete
+    (ADR-0034)."""
     wallet = _owned_wallet_or_403(session, account, wallet_id)
     try:
-        wallet_service.freeze_wallet(session, wallet)
+        wallet = wallet_service.freeze_wallet(session, wallet)
     except wallet_service.WalletNotFreezable as error:
         raise HTTPException(status_code=422, detail=str(error))
+    return _wallet_out(wallet, Decimal("0.00"))
+
+
+@router.delete("/{wallet_id}", response_model=WalletOut)
+def delete_wallet(
+    wallet_id: int,
+    account: Account = Depends(get_current_account),
+    session: Session = Depends(get_session),
+) -> WalletOut:
+    """Delete a Frozen Wallet with no history for good (ADR-0034). The
+    response is the full row — the client keeps it as the Undo replay
+    payload. An active Wallet, or one any Transaction references, is
+    refused with a rule error (422) that says why."""
+    wallet = _owned_wallet_or_403(session, account, wallet_id)
+    out = _wallet_out(wallet, Decimal("0.00"))
+    try:
+        wallet_service.delete_wallet(session, wallet)
+    except wallet_service.WalletNotDeletable as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    return out
 
 
 @router.post("/{wallet_id}/unfreeze", response_model=WalletOut)

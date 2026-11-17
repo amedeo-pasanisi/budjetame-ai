@@ -78,6 +78,7 @@ const definition: RecurringDefinition = {
   next_due_date: '2030-03-15',
   next_unpaid_occurrence_date: '2030-03-15',
   backlog_count: 0,
+  freeze_date: null,
   frozen: false,
   created_at: createdAt,
 }
@@ -92,6 +93,7 @@ const frozenDefinition: RecurringDefinition = {
   next_due_date: null,
   next_unpaid_occurrence_date: null,
   backlog_count: 0,
+  freeze_date: '2026-11-01',
   frozen: true,
   created_at: createdAt,
 }

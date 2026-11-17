@@ -223,8 +223,8 @@ async def test_backup_export_wallets_sheet(client: AsyncClient) -> None:
         type="transfer", amount="100.00", date="2026-08-02",
         source_wallet_id=wallet_b, destination_wallet_id=wallet_a,
     )
-    response = await client.delete(f"/wallets/{wallet_b}", headers=_auth(token))
-    assert response.status_code == 204
+    response = await client.post(f"/wallets/{wallet_b}/freeze", headers=_auth(token))
+    assert response.status_code == 200
 
     content = await _export_backup(client, token)
     sheets = _cells(content)

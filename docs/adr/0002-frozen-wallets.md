@@ -5,3 +5,5 @@ Deleting a Wallet (allowed only at balance €0) hides it from the UI but keeps 
 ---
 
 *Amended (issue #48):* unfreezing was added as an explicit user action, restoring a Frozen Wallet to active. The rationale above still holds — freezing remains the only archive path; the write-lock stands until the user chooses to unfreeze.
+
+*Amended (ADR-0034):* a Frozen Wallet no Transaction has ever touched can be deleted for good, with a ten-second Undo. A Frozen Wallet with history still has unfreeze as its only exit.

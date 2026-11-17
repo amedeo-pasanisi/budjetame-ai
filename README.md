@@ -116,7 +116,7 @@ artifact no VM has run (ADR-0023 and its addendum).
 
 - All data is scoped to the Account that owns it; foreign data gets a 403.
 - Balances are derived from Transaction history, never stored.
-- Deleted Wallets are frozen (read-only archives), never hard-deleted.
+- Wallets are frozen (read-only archives), never hard-deleted while they have history; a Frozen Wallet no Transaction ever touched can be deleted for good, with Undo (ADR-0034). The same holds for Recurring definitions.
 - Tabs keep-alive once visited and revalidate in the background: any
   successful write bumps a client-side cache clock that every mounted tab
   watches, so switching tabs never waits on a fetch and never shows stale

@@ -1,15 +1,17 @@
-/** The undo toast stack (ADR-0031): up to three toasts at the bottom of the
- * screen, each with its own 10-second countdown. Tapping Undo re-creates
- * the Transaction via client replay. Expiry or dismissal removes a toast.
+/** The undo toast stack (ADR-0031; one stack for every deletable kind since
+ * ADR-0034): up to three toasts at the bottom of the screen, each naming
+ * what was deleted — "Wallet deleted · Revolut", "Transaction deleted ·
+ * Coffee" — with its own 10-second countdown. Tapping Undo re-creates the
+ * entity via client replay. Expiry or dismissal removes a toast.
  *
  * The component takes the current stack of entries, a callback for Undo,
- * and a callback for dismiss. It manages countdown timers internally:
- * each entry gets a decreasing counter that reaches 0 at UNDO_WINDOW_MS
- * after its createdAt. */
+ * and a callback for dismiss, plus the last undo failure to show above the
+ * toasts. It manages countdown timers internally: each entry gets a
+ * decreasing counter that reaches 0 at UNDO_WINDOW_MS after its createdAt. */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useIntl } from 'react-intl'
-import { UNDO_WINDOW_MS, type UndoEntry } from './undoStack'
+import { UNDO_WINDOW_MS, entryKey, type UndoEntry, type UndoKind } from './undoStack'
 
 export type { UndoEntry } from './undoStack'
 
@@ -18,35 +20,53 @@ type UndoToastStackProps = {
   stack: UndoEntry[]
   /** Called on Undo tap with the entry to restore. */
   onUndo: (entry: UndoEntry) => void
-  /** Called on dismiss or expiry with the entry's transaction id. */
-  onDismiss: (transactionId: number) => void
+  /** Called on dismiss or expiry with the entry's key (see `entryKey`). */
+  onDismiss: (key: string) => void
+  /** The last undo failure, shown above the toasts until dismissed. */
+  error?: string | null
+  onDismissError?: () => void
+}
+
+/** The headline each kind's toast opens with. */
+const HEADLINE_IDS: Record<UndoKind, string> = {
+  transaction: 'undoToast.transactionDeleted',
+  wallet: 'undoToast.walletDeleted',
+  'recurring-cost': 'undoToast.recurringCostDeleted',
+  'recurring-income': 'undoToast.recurringIncomeDeleted',
 }
 
 /** How often the countdown ticks (ms). Per the 10-second window, every
  * second is enough — 1-second granularity matches the UX. */
 const TICK_MS = 1000
 
-export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps) {
+export function UndoToastStack({
+  stack,
+  onUndo,
+  onDismiss,
+  error = null,
+  onDismissError,
+}: UndoToastStackProps) {
   const { formatMessage } = useIntl()
-  // Track countdowns: remaining seconds for each entry id.
+  // Track countdowns: remaining seconds for each entry key.
   // Re-computed every TICK_MS from the entries' createdAt.
-  const [countdowns, setCountdowns] = useState<Record<number, number>>({})
+  const [countdowns, setCountdowns] = useState<Record<string, number>>({})
 
   // Track which entries we've already called onDismiss for, to avoid
   // calling it multiple times for the same expired entry.
-  const dismissedRef = useRef<Set<number>>(new Set())
+  const dismissedRef = useRef<Set<string>>(new Set())
 
   // Refresh countdowns every TICK_MS and expire entries.
   const tick = useCallback(() => {
     const now = Date.now()
-    const next: Record<number, number> = {}
+    const next: Record<string, number> = {}
     for (const entry of stack) {
+      const key = entryKey(entry)
       const elapsed = now - entry.createdAt
       const remaining = Math.max(0, Math.ceil((UNDO_WINDOW_MS - elapsed) / 1000))
-      next[entry.transaction.id] = remaining
-      if (remaining <= 0 && !dismissedRef.current.has(entry.transaction.id)) {
-        dismissedRef.current.add(entry.transaction.id)
-        onDismiss(entry.transaction.id)
+      next[key] = remaining
+      if (remaining <= 0 && !dismissedRef.current.has(key)) {
+        dismissedRef.current.add(key)
+        onDismiss(key)
       }
     }
     setCountdowns(next)
@@ -58,12 +78,13 @@ export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps
     return () => clearInterval(timer)
   }, [tick])
 
-  // Reset dismissed set when stack changes (a new mount clears it).
+  // Reset dismissed set when the stack empties or fills again.
+  const stackEmpty = stack.length === 0
   useEffect(() => {
     dismissedRef.current = new Set()
-  }, [stack.length === 0 ? 'empty' : 'non-empty'])
+  }, [stackEmpty])
 
-  if (stack.length === 0) return null
+  if (stack.length === 0 && error === null) return null
 
   return (
     <div
@@ -71,17 +92,18 @@ export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps
       className="fixed bottom-0 left-1/2 z-50 flex w-full max-w-md -translate-x-1/2 flex-col-reverse gap-2 p-4"
     >
       {stack.map((entry) => {
-        const remaining = countdowns[entry.transaction.id] ?? 10
+        const key = entryKey(entry)
+        const remaining = countdowns[key] ?? 10
         return (
           <div
-            key={entry.transaction.id}
+            key={key}
             className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg"
             role="status"
           >
             <span className="min-w-0 text-sm text-slate-700">
-              <span className="font-medium">{formatMessage({ id: 'undoToast.transactionDeleted' })}</span>
-              {entry.transaction.description !== null && entry.transaction.description.trim() !== '' && (
-                <span>{formatMessage({ id: 'undoToast.descriptionSeparator' }, { description: entry.transaction.description })}</span>
+              <span className="font-medium">{formatMessage({ id: HEADLINE_IDS[entry.kind] })}</span>
+              {entry.label !== null && (
+                <span>{formatMessage({ id: 'undoToast.descriptionSeparator' }, { description: entry.label })}</span>
               )}
             </span>
             <div className="flex shrink-0 items-center gap-3">
@@ -98,7 +120,7 @@ export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps
               <button
                 type="button"
                 aria-label={formatMessage({ id: 'undoToast.dismiss' })}
-                onClick={() => onDismiss(entry.transaction.id)}
+                onClick={() => onDismiss(key)}
                 className="text-xs text-slate-400 hover:text-slate-600"
               >
                 ✕
@@ -107,6 +129,22 @@ export function UndoToastStack({ stack, onUndo, onDismiss }: UndoToastStackProps
           </div>
         )
       })}
+      {error !== null && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-lg"
+        >
+          <span className="min-w-0">{error}</span>
+          <button
+            type="button"
+            aria-label={formatMessage({ id: 'undoToast.errorDismiss' })}
+            onClick={onDismissError}
+            className="shrink-0 text-xs text-red-400 hover:text-red-700"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }

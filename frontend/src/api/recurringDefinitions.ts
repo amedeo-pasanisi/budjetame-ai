@@ -33,6 +33,9 @@ export type RecurringDefinition = {
   backlog_count: number
   /** Whether the definition is frozen (ADR-0028). */
   frozen: boolean
+  /** The day it was frozen ("YYYY-MM-DD"), null while active: the Budget's
+   * exclusion boundary, and what an undone delete restores (ADR-0034). */
+  freeze_date: string | null
   created_at: string
 }
 
@@ -59,8 +62,8 @@ export type RecurringDefinitionInput = {
 }
 
 /** The calls one side of the Recurring tab makes: the list, the lifecycle
- * (create, update, freeze, unfreeze) and the Occurrences section's read
- * and skip write (ADR-0026). */
+ * (create, update, freeze, unfreeze, and delete with its undo, ADR-0034)
+ * and the Occurrences section's read and skip write (ADR-0026). */
 export type RecurringDefinitionApi = {
   fetchAll(token: string, includeFrozen?: boolean): Promise<RecurringDefinition[]>
   create(token: string, input: RecurringDefinitionInput): Promise<RecurringDefinition>
@@ -71,6 +74,8 @@ export type RecurringDefinitionApi = {
   ): Promise<RecurringDefinition>
   freeze(token: string, id: number): Promise<RecurringDefinition>
   unfreeze(token: string, id: number): Promise<RecurringDefinition>
+  delete(token: string, id: number): Promise<RecurringDefinition>
+  undoDelete(token: string, definition: RecurringDefinition): Promise<RecurringDefinition>
   fetchOccurrences(token: string, id: number): Promise<RecurringOccurrence[]>
   setOccurrenceSkipped(
     token: string,
@@ -144,6 +149,35 @@ export function recurringDefinitionApi(
         method: 'POST',
         token,
         errorMessage: `Could not unfreeze ${noun}`,
+      })
+      return (await response.json()) as RecurringDefinition
+    },
+
+    async delete(token, id) {
+      // Delete a frozen definition with no linked Transaction for good
+      // (ADR-0034). The backend refuses an active one, or one with any
+      // link, with a rule error whose message says why — surfaced as the
+      // ApiError's message, the single source of the explanation the
+      // modal shows. The response is the deleted row: the Undo payload.
+      const response = await request(`${base}/${id}`, {
+        method: 'DELETE',
+        token,
+        errorMessage: `Could not delete ${noun}`,
+        readDetail: true,
+      })
+      return (await response.json()) as RecurringDefinition
+    },
+
+    async undoDelete(token, definition) {
+      // Re-insert the row the delete returned with its original id, still
+      // frozen with its freeze date (ADR-0034); 409 when the name was
+      // taken in the meantime.
+      const response = await request(`${base}/undo`, {
+        method: 'POST',
+        token,
+        json: definition,
+        errorMessage: `Could not undo the ${noun} delete`,
+        readDetail: true,
       })
       return (await response.json()) as RecurringDefinition
     },

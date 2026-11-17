@@ -524,3 +524,240 @@ async def test_foreign_recurring_cost_returns_403(
         assert cost_id not in [cost["id"] for cost in listing.json()]
     finally:
         delete_account(database_url, account_id)
+
+
+# --- Delete and undo (ADR-0034) ---
+
+
+async def _frozen_definition(client: AsyncClient, token: str, name: str) -> dict:
+    """A definition created and frozen through the API, as the freeze
+    returned it."""
+    created = await client.post(
+        "/recurring-costs", json=_cost(name=name), headers=_auth(token)
+    )
+    assert created.status_code == 201, created.json()
+    frozen = await client.post(
+        f"/recurring-costs/{created.json()['id']}/freeze", headers=_auth(token)
+    )
+    assert frozen.status_code == 200
+    return frozen.json()
+
+
+async def _ids_with_frozen(client: AsyncClient, token: str) -> set[int]:
+    listed = await client.get(
+        "/recurring-costs?include_frozen=true", headers=_auth(token)
+    )
+    return {row["id"] for row in listed.json()}
+
+
+async def _link_a_transaction(
+    client: AsyncClient, token: str, definition_id: int
+) -> tuple[int, int]:
+    """A Transaction linked to the definition — history the delete must
+    refuse to sever — and the Wallet it sits on, as (transaction id, wallet
+    id)."""
+    wallet = await client.post(
+        "/wallets",
+        json={"name": f"Link Wallet cost {definition_id}", "type": "checking", "opening_balance": "0.00"},
+        headers=_auth(token),
+    )
+    assert wallet.status_code == 201
+    response = await client.post(
+        "/transactions",
+        json={
+            "type": "expense",
+            "amount": "10.00",
+            "date": "2026-08-01",
+            "wallet_id": wallet.json()["id"],
+            "recurring_cost_id": definition_id,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 201, response.json()
+    return response.json()["id"], wallet.json()["id"]
+
+
+async def _transaction(
+    client: AsyncClient, token: str, transaction_id: int, wallet_id: int
+) -> dict:
+    """The Transaction as the ledger lists it, read through its Wallet's
+    filter so other suites' rows never push it off the first page."""
+    page = await client.get(
+        f"/transactions?wallet_id={wallet_id}", headers=_auth(token)
+    )
+    assert page.status_code == 200
+    return next(item for item in page.json()["items"] if item["id"] == transaction_id)
+
+
+async def test_delete_a_frozen_definition_with_no_history_returns_the_row_and_removes_it(
+    client: AsyncClient,
+) -> None:
+    """A frozen definition no Transaction is linked to can be deleted for good
+    (ADR-0034): the response is the full row - frozen flag and freeze date
+    included, the client's replay payload - and the definition is gone from
+    the list, even with include_frozen."""
+    token = await _login(client)
+    frozen = await _frozen_definition(client, token, "Abandoned Trial")
+
+    response = await client.delete(
+        f"/recurring-costs/{frozen['id']}", headers=_auth(token)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == frozen["id"]
+    assert body["name"] == "Abandoned Trial"
+    assert body["frozen"] is True
+    assert body["freeze_date"] == datetime.now(ROME).date().isoformat()
+    assert frozen["freeze_date"] == body["freeze_date"]
+    assert frozen["id"] not in await _ids_with_frozen(client, token)
+
+
+async def test_delete_an_active_definition_is_refused_with_freeze_first(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-costs", json=_cost(name="Active Not Deletable"), headers=_auth(token)
+    )
+    definition_id = created.json()["id"]
+
+    response = await client.delete(
+        f"/recurring-costs/{definition_id}", headers=_auth(token)
+    )
+
+    assert response.status_code == 422
+    assert "freeze" in response.json()["detail"].lower()
+    assert definition_id in await _ids_with_frozen(client, token)
+
+
+async def test_delete_is_refused_when_a_transaction_is_linked_and_the_link_survives(
+    client: AsyncClient,
+) -> None:
+    """A delete never severs a link (ADR-0034): the refusal names the count
+    and the hint to unlink first, and the Transaction keeps its link."""
+    token = await _login(client)
+    created = await client.post(
+        "/recurring-costs", json=_cost(name="Paid Once"), headers=_auth(token)
+    )
+    definition_id = created.json()["id"]
+    transaction_id, wallet_id = await _link_a_transaction(client, token, definition_id)
+    frozen = await client.post(f"/recurring-costs/{definition_id}/freeze", headers=_auth(token))
+    assert frozen.status_code == 200
+
+    response = await client.delete(
+        f"/recurring-costs/{definition_id}", headers=_auth(token)
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "1 transaction is linked to this recurring cost — unlink it first"
+    )
+    assert definition_id in await _ids_with_frozen(client, token)
+    assert (await _transaction(client, token, transaction_id, wallet_id))["recurring_cost_id"] == definition_id
+
+
+async def test_delete_and_undo_of_a_foreign_or_missing_definition_return_403(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    account_id = insert_foreign_account(database_url, "delete-scope@budjetame.dev")
+    try:
+        engine = create_db_engine(database_url)
+        with Session(engine) as session:
+            definition = RecurringCost(
+                account_id=account_id,
+                name="Their Definition",
+                amount="10.00",
+                interval_value=1,
+                interval_unit="months",
+                start_date=date(2030, 1, 1),
+                frozen=True,
+                freeze_date=date(2030, 2, 1),
+            )
+            session.add(definition)
+            session.commit()
+            foreign_id = definition.id
+        engine.dispose()
+
+        deleted = await client.delete(f"/recurring-costs/{foreign_id}", headers=_auth(token))
+        assert deleted.status_code == 403
+        undo = await client.post(
+            "/recurring-costs/undo",
+            json={
+                "id": foreign_id,
+                "name": "Their Definition",
+                "amount": "10.00",
+                "interval_value": 1,
+                "interval_unit": "months",
+                "start_date": "2030-01-01",
+                "frozen": True,
+                "freeze_date": "2030-02-01",
+                "created_at": "2026-08-01T10:00:00Z",
+            },
+            headers=_auth(token),
+        )
+        assert undo.status_code == 403
+    finally:
+        delete_account(database_url, account_id)
+    missing = await client.delete("/recurring-costs/999999", headers=_auth(token))
+    assert missing.status_code == 403
+
+
+async def test_undo_re_inserts_the_same_definition_still_frozen_and_the_next_create_does_not_collide(
+    client: AsyncClient,
+) -> None:
+    """Undo is a true reversal: the very same definition comes back - same id,
+    still frozen, same freeze date, in the Frozen section - and the sequence
+    is re-synced so a later create never collides with the restored id."""
+    token = await _login(client)
+    frozen = await _frozen_definition(client, token, "Undo Trial")
+    deleted = (
+        await client.delete(f"/recurring-costs/{frozen['id']}", headers=_auth(token))
+    ).json()
+
+    undo = await client.post("/recurring-costs/undo", json=deleted, headers=_auth(token))
+
+    assert undo.status_code == 201
+    restored = undo.json()
+    assert restored["id"] == frozen["id"]
+    assert restored["name"] == "Undo Trial"
+    assert restored["amount"] == deleted["amount"]
+    assert restored["interval_value"] == deleted["interval_value"]
+    assert restored["interval_unit"] == deleted["interval_unit"]
+    assert restored["start_date"] == deleted["start_date"]
+    assert restored["frozen"] is True
+    assert restored["freeze_date"] == deleted["freeze_date"]
+    assert restored["created_at"] == deleted["created_at"]
+    assert restored["next_due_date"] is None
+    default = await client.get("/recurring-costs", headers=_auth(token))
+    assert frozen["id"] not in [row["id"] for row in default.json()]
+    assert frozen["id"] in await _ids_with_frozen(client, token)
+
+    created = await client.post(
+        "/recurring-costs", json=_cost(name="After Undo"), headers=_auth(token)
+    )
+    assert created.status_code == 201
+    assert created.json()["id"] > frozen["id"]
+
+
+async def test_undo_after_the_name_was_reused_is_refused_as_a_name_conflict(
+    client: AsyncClient,
+) -> None:
+    token = await _login(client)
+    frozen = await _frozen_definition(client, token, "Reused Trial")
+    deleted = (
+        await client.delete(f"/recurring-costs/{frozen['id']}", headers=_auth(token))
+    ).json()
+    replacement = await client.post(
+        "/recurring-costs", json=_cost(name="reused trial"), headers=_auth(token)
+    )
+    assert replacement.status_code == 201
+
+    undo = await client.post("/recurring-costs/undo", json=deleted, headers=_auth(token))
+
+    assert undo.status_code == 409
+    assert "name" in undo.json()["detail"].lower()
+    ids = await _ids_with_frozen(client, token)
+    assert frozen["id"] not in ids
+    assert replacement.json()["id"] in ids

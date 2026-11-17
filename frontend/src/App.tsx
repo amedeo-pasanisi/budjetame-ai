@@ -13,6 +13,8 @@ import { Screen } from './Screen'
 import { SettingsModal } from './SettingsModal'
 import { useTabSwipe } from './tabSwipe'
 import { TransactionsScreen } from './TransactionsScreen'
+import { useUndo } from './undoContext'
+import { UndoProvider } from './UndoProvider'
 import { WalletsScreen } from './WalletsScreen'
 
 type AuthState =
@@ -224,21 +226,39 @@ function CheckingScreen() {
   )
 }
 
-export function AppShell({
-  email,
-  onSignOut,
-  onDeleteAccount,
-  locale,
-  onChangeLanguage,
-}: {
+type AppShellProps = {
   email: string
   onSignOut: () => void
   onDeleteAccount: () => Promise<void>
   locale: string
   onChangeLanguage: (language: 'en' | 'it') => void
-}) {
+}
+
+/** The signed-in app: the undo stack provider (ADR-0031, app-wide since
+ * ADR-0034 — one stack of deleted Transactions, Wallets and Recurring
+ * definitions, its toasts visible on every tab) around the shell body
+ * that renders the tabs. */
+export function AppShell(props: AppShellProps) {
+  return (
+    <UndoProvider>
+      <AppShellBody {...props} />
+    </UndoProvider>
+  )
+}
+
+function AppShellBody({
+  email,
+  onSignOut,
+  onDeleteAccount,
+  locale,
+  onChangeLanguage,
+}: AppShellProps) {
   const { formatMessage } = useIntl()
   const [tab, setTab] = useState<Tab>('dashboard')
+  // A successful Restore (ADR-0030) replaced the whole state: every pending
+  // undo is stale and must go, or an Undo could re-insert a row into a
+  // state that no longer exists (ADR-0034).
+  const { clear: clearUndoStack } = useUndo()
   // Tab keep-alive (ADR-0022): a tab mounts on its first visit and stays
   // mounted afterwards, hidden with the `hidden` attribute — switching back
   // renders instantly from the data already loaded. Writes anywhere bump
@@ -341,7 +361,7 @@ export function AppShell({
           onDeleteAccount={onDeleteAccount}
           onDeleted={onSignOut}
           onClose={() => setSettingsOpen(false)}
-          onRestored={() => setSettingsOpen(false)}
+          onRestored={clearUndoStack}
         />
       )}
 

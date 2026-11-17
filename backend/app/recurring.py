@@ -19,6 +19,7 @@ from app.recurrence import rome_today
 from app.schemas import (
     RecurringDefinitionCreate,
     RecurringDefinitionOut,
+    RecurringDefinitionUndoRequest,
     RecurringDefinitionUpdate,
     RecurringOccurrenceOut,
     RecurringOccurrenceUpdate,
@@ -53,6 +54,11 @@ def _definition_out(session: Session, definition: Definition) -> RecurringDefini
             next_unpaid.isoformat() if next_unpaid is not None else None
         ),
         frozen=definition.frozen,
+        freeze_date=(
+            definition.freeze_date.isoformat()
+            if definition.freeze_date is not None
+            else None
+        ),
         backlog_count=timeline.backlog_count(today),
         created_at=definition.created_at,
     )
@@ -143,6 +149,65 @@ def make_router(kind: Kind) -> APIRouter:
         except (recurring.RecurringNameTaken, IntegrityError) as cause:
             name_conflict(session, cause)
         return _definition_out(session, definition)
+
+    @router.post("/undo", response_model=RecurringDefinitionOut, status_code=201)
+    def undo_delete_definition(
+        payload: RecurringDefinitionUndoRequest,
+        account: Account = Depends(get_current_account),
+        session: Session = Depends(get_session),
+    ) -> RecurringDefinitionOut:
+        """Re-insert a deleted definition with its original id, still frozen
+        with its freeze date (ADR-0034): the client sends back the row the
+        delete returned. A name taken in the meantime is the name-conflict
+        409; an id held by another Account is 403 (ADR-0003)."""
+        try:
+            definition = recurring.undo_delete(
+                session,
+                kind,
+                account.id,
+                definition_id=payload.id,
+                name=payload.name,
+                amount=payload.amount,
+                interval_value=payload.interval_value,
+                interval_unit=payload.interval_unit,
+                start_date=payload.start_date,
+                freeze_date=payload.freeze_date,
+                created_at=payload.created_at,
+            )
+        except scoping.NotOwned:
+            raise HTTPException(
+                status_code=403, detail=f"{kind.label} not found"
+            ) from None
+        except recurring.RecurringIdInUse:
+            raise HTTPException(
+                status_code=422, detail=f"This {kind.label} already exists"
+            )
+        except (recurring.RecurringNameTaken, IntegrityError) as cause:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Undo failed: a {kind.label} with this name now exists",
+            ) from cause
+        return _definition_out(session, definition)
+
+    @router.delete("/{definition_id}", response_model=RecurringDefinitionOut)
+    def delete_definition(
+        definition_id: int,
+        account: Account = Depends(get_current_account),
+        session: Session = Depends(get_session),
+    ) -> RecurringDefinitionOut:
+        """Delete a frozen definition with no linked Transaction for good
+        (ADR-0034). The response is the full row — the client keeps it as
+        the Undo replay payload. An active definition, or one any
+        Transaction is linked to, is refused with a rule error (422) that
+        says why; a delete never severs a link."""
+        definition = owned_or_403(session, account, definition_id)
+        out = _definition_out(session, definition)
+        try:
+            recurring.delete(session, definition)
+        except recurring.RecurringRuleError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return out
 
     @router.get(
         "/{definition_id}/occurrences", response_model=list[RecurringOccurrenceOut]

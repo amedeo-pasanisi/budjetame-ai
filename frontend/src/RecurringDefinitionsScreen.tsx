@@ -7,6 +7,7 @@ import { useDataVersion } from './api/dataVersion'
 import { RecurringDefinitionModal } from './RecurringDefinitionModal'
 import { intervalText, sortByNextDue } from './recurringDisplay'
 import { SIDES, type RecurringSide } from './recurringSide'
+import { useUndo } from './undoContext'
 
 /** The modal's draft: create (no definition) or edit (a definition). Null
  * means the modal is closed — one modal serves both, like the Wallets and
@@ -47,7 +48,7 @@ export function RecurringDefinitionsScreen({
   requestLedgerFilter?: (request: LedgerFilterRequest) => void
 }) {
   const { formatMessage } = useIntl()
-  const { api, messages, jumpKind } = SIDES[side]
+  const { api, messages, jumpKind, undoKind } = SIDES[side]
   /** One of the side's screen strings. */
   const text = (key: string, values?: Record<string, string | number | null>) =>
     formatMessage({ id: `${messages.screen}.${key}` }, values)
@@ -60,6 +61,10 @@ export function RecurringDefinitionsScreen({
   // the background, so the tab is never stale when switched back to.
   const dataVersion = useDataVersion()
   const loadErrorText = text('loadError')
+  // The app-wide undo stack (ADR-0034): a deleted frozen definition goes
+  // in under this side's kind, and the one an Undo brings back comes out,
+  // to reappear in the Frozen Recurring section — same id, still frozen.
+  const { pushDeleted, restored } = useUndo()
 
   // Active and frozen definitions, split from the fetched set
   // (include_frozen=true on the fetch for the collapsed Frozen Recurring
@@ -107,6 +112,38 @@ export function RecurringDefinitionsScreen({
     })
     closeModal()
   }
+
+  /** Delete (ADR-0034): the row leaves the list — the Frozen Recurring
+   * section collapses away when it was the last — and the deleted row
+   * enters the undo stack; its toast is the confirmation. */
+  const handleDeleted = (deleted: RecurringDefinition) => {
+    setDefinitions((current) =>
+      current === null ? current : current.filter((existing) => existing.id !== deleted.id),
+    )
+    closeModal()
+    pushDeleted(
+      undoKind === 'recurring-cost'
+        ? { kind: 'recurring-cost', entity: deleted }
+        : { kind: 'recurring-income', entity: deleted },
+    )
+  }
+
+  // An Undo restored a definition of this side's kind (ADR-0034): upsert
+  // it, still frozen, so it reappears in the Frozen Recurring section.
+  useEffect(() => {
+    if (restored === null) return
+    if (restored.kind !== 'recurring-cost' && restored.kind !== 'recurring-income') return
+    if (restored.kind !== undoKind) return
+    const definition = restored.entity
+    setDefinitions((current) => {
+      if (current === null) return [definition]
+      return sortByNextDue(
+        current.some((existing) => existing.id === definition.id)
+          ? current.map((existing) => (existing.id === definition.id ? definition : existing))
+          : [...current, definition],
+      )
+    })
+  }, [restored, undoKind])
 
   /** One row's card: the main tap surface (the ledger jump) and the
    * trailing ✎ button. Frozen rows read the frozen next-due text and carry
@@ -205,6 +242,7 @@ export function RecurringDefinitionsScreen({
           onSaved={upsert}
           onFreeze={upsert}
           onUnfreeze={upsert}
+          onDeleted={handleDeleted}
           onClose={closeModal}
         />
       )}

@@ -16,6 +16,8 @@ type WalletModalProps = {
   onSaved: (wallet: Wallet) => void
   onFrozen?: (walletId: number) => void
   onUnfrozen?: (wallet: Wallet) => void
+  /** A frozen Wallet was deleted for good (ADR-0034). */
+  onDeleted?: (wallet: Wallet) => void
   onClose: () => void
 }
 
@@ -25,7 +27,8 @@ type WalletModalProps = {
  * or one-tap unfreeze confirmation only while editing. The shell adds the
  * dismissal paths — backdrop click, Cancel, and Escape all abandon the
  * draft without saving. Frozen wallets show an indigo Unfreeze button
- * instead of the red Freeze button (ADR-0028). */
+ * instead of the red Freeze button (ADR-0028), and below it the red Delete
+ * for a Wallet with no history (ADR-0034). */
 export function WalletModal({
   wallet,
   allowedTypes,
@@ -33,6 +36,7 @@ export function WalletModal({
   onSaved,
   onFrozen,
   onUnfrozen,
+  onDeleted,
   onClose,
 }: WalletModalProps) {
   const editing = wallet !== undefined
@@ -46,6 +50,7 @@ export function WalletModal({
         onSaved={onSaved}
         onFrozen={onFrozen}
         onUnfrozen={onUnfrozen}
+        onDeleted={onDeleted}
         onCancel={onClose}
       />
     </ModalShell>

@@ -6,6 +6,7 @@ import {
   TOKEN_KEY,
   apiErrorMessage,
   createWallet,
+  deleteWallet,
   formatEuros,
   freezeWallet,
   unfreezeWallet,
@@ -42,6 +43,9 @@ type WalletFormProps = {
   onSaved: (wallet: Wallet) => void
   onFrozen?: (walletId: number) => void
   onUnfrozen?: (wallet: Wallet) => void
+  /** A frozen Wallet was deleted for good (ADR-0034): the deleted row is
+   * the Undo replay payload. */
+  onDeleted?: (wallet: Wallet) => void
   onCancel: () => void
 }
 
@@ -86,7 +90,11 @@ function validate(name: string, openingBalance: string): FieldErrors {
  * `allowedTypes` is set, the Type selector is restricted to those types
  * (ADR-0013), so an inline wallet created from a form field can never be
  * of a type the field would reject. Cancel — like the shell's backdrop and
- * Escape — abandons the draft without saving. */
+ * Escape — abandons the draft without saving. A frozen Wallet's form is
+ * read-only and offers Unfreeze, and below it a red Delete (ADR-0034):
+ * one tap deletes — the shell's Undo toast is the confirmation — and a
+ * refusal (the Wallet has history) shows inline with the backend's
+ * message, the single source of the explanation. */
 export function WalletForm({
   wallet,
   allowedTypes,
@@ -94,6 +102,7 @@ export function WalletForm({
   onSaved,
   onFrozen,
   onUnfrozen,
+  onDeleted,
   onCancel,
 }: WalletFormProps) {
   const { formatMessage } = useIntl()
@@ -115,7 +124,8 @@ export function WalletForm({
   const [submitting, setSubmitting] = useState(false)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
   const [freezing, setFreezing] = useState(false)
-  const [freezeError, setFreezeError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const canFreeze = editing && Number.parseFloat(wallet.balance) === 0
 
@@ -182,18 +192,18 @@ export function WalletForm({
     }
     if (!confirmingFreeze) {
       setConfirmingFreeze(true)
-      setFreezeError(null)
+      setActionError(null)
       return
     }
     setFreezing(true)
-    setFreezeError(null)
+    setActionError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
       await freezeWallet(token, wallet.id)
       onFrozen?.(wallet.id)
     } catch (err) {
       setConfirmingFreeze(false)
-      setFreezeError(
+      setActionError(
         err instanceof ApiError && err.status === 422
           ? formatMessage({ id: 'walletForm.freeze.balanceRequired' })
           : formatMessage({ id: 'walletForm.freeze.error' }),
@@ -207,14 +217,37 @@ export function WalletForm({
       return
     }
     setFreezing(true)
-    setFreezeError(null)
+    setActionError(null)
     try {
       const token = localStorage.getItem(TOKEN_KEY) ?? ''
       await unfreezeWallet(token, wallet.id)
       onUnfrozen?.(wallet)
     } catch {
-      setFreezeError(formatMessage({ id: 'walletForm.unfreeze.error' }))
+      setActionError(formatMessage({ id: 'walletForm.unfreeze.error' }))
       setFreezing(false)
+    }
+  }
+
+  // Delete (ADR-0034): one tap, no confirmation step — the Undo toast is
+  // the confirmation. The backend's rule error (an active Wallet, or one
+  // with any Transaction) is shown as it came: it names the count.
+  const handleDelete = async () => {
+    if (wallet === undefined || !wallet.frozen) {
+      return
+    }
+    setDeleting(true)
+    setActionError(null)
+    try {
+      const token = localStorage.getItem(TOKEN_KEY) ?? ''
+      const deleted = await deleteWallet(token, wallet.id)
+      onDeleted?.(deleted)
+    } catch (err) {
+      setActionError(
+        err instanceof ApiError && err.status === 422
+          ? err.message
+          : formatMessage({ id: 'walletForm.delete.error' }),
+      )
+      setDeleting(false)
     }
   }
 
@@ -343,26 +376,49 @@ export function WalletForm({
       )}
 
       {editing && readOnly && (
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={handleUnfreeze}
-            disabled={freezing || submitting}
-            className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
-          >
-            {freezing
-              ? formatMessage({ id: 'walletForm.unfreezing' })
-              : formatMessage({ id: 'walletForm.unfreeze' })}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={submitting}
-            className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
-          >
-            {formatMessage({ id: 'txForm.cancel' })}
-          </button>
-        </div>
+        <>
+          {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleUnfreeze}
+              disabled={freezing || deleting || submitting}
+              className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
+            >
+              {freezing
+                ? formatMessage({ id: 'walletForm.unfreezing' })
+                : formatMessage({ id: 'walletForm.unfreeze' })}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={submitting}
+              className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
+            >
+              {formatMessage({ id: 'txForm.cancel' })}
+            </button>
+          </div>
+          {/* Delete (ADR-0034), below Unfreeze: always tappable — the
+              backend says why when it refuses, instead of a greyed-out
+              button leaving the user guessing. */}
+          {onDeleted !== undefined && (
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-xs text-slate-500">
+              {formatMessage({ id: 'walletForm.delete.hint' })}
+            </p>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || freezing || submitting}
+              className="mt-3 w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 disabled:opacity-60"
+            >
+              {deleting
+                ? formatMessage({ id: 'walletForm.delete.deleting' })
+                : formatMessage({ id: 'walletForm.delete.button' })}
+            </button>
+          </div>
+          )}
+        </>
       )}
 
       {editing && !readOnly && (
@@ -371,7 +427,7 @@ export function WalletForm({
           <p className="mt-1 text-xs text-slate-500">
             {formatMessage({ id: 'walletForm.freeze.hint' })}
           </p>
-          {freezeError !== null && <p className="mt-2 text-sm text-red-600">{freezeError}</p>}
+          {actionError !== null && <p className="mt-2 text-sm text-red-600">{actionError}</p>}
           <button
             type="button"
             onClick={handleFreeze}

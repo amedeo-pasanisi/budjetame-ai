@@ -438,8 +438,8 @@ async def test_export_includes_rows_on_frozen_wallets(client: AsyncClient) -> No
         source_wallet_id=frozen, destination_wallet_id=wallet_a,
     )
     # Freeze the Wallet at Balance exactly €0 (ADR-0002).
-    response = await client.delete(f"/wallets/{frozen}", headers=_auth(token))
-    assert response.status_code == 204
+    response = await client.post(f"/wallets/{frozen}/freeze", headers=_auth(token))
+    assert response.status_code == 200
 
     rows = _cells(await _export(client, token, wallet_id=frozen))
 

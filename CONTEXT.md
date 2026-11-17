@@ -45,11 +45,11 @@ A definition of an income expected to repeat at a fixed interval (every N days, 
 _Avoid_: recurring earning, paycheck, salary entry
 
 **Frozen Recurring Cost**:
-A Recurring Cost that was frozen rather than deleted. It stays in the database with its linked Transactions viewable; while frozen it is read-only — no field can be edited, no new Occurrences are generated — and it appears only in the Recurring Costs screen's collapsed Frozen Recurring section. Unfreezing restores it to active: full editability, Occurrence generation resumes on the natural cycle from the original start date (the first due date on or after the unfreeze date).
+A Recurring Cost that was frozen rather than deleted. It stays in the database with its linked Transactions viewable; while frozen it is read-only — no field can be edited, no new Occurrences are generated — and it appears only in the Recurring Costs screen's collapsed Frozen Recurring section. Unfreezing restores it to active: full editability, Occurrence generation resumes on the natural cycle from the original start date (the first due date on or after the unfreeze date). A Frozen Recurring Cost with no linked Transaction can be Deleted (Definition: Delete).
 _Avoid_: deleted recurring, archived cost
 
 **Frozen Recurring Income**:
-A Recurring Income that was frozen rather than deleted. Mirror of Frozen Recurring Cost: read-only, collapsed section, unfreeze restores Occurrence generation.
+A Recurring Income that was frozen rather than deleted. Mirror of Frozen Recurring Cost: read-only, collapsed section, unfreeze restores Occurrence generation, and one with no linked Transaction can be Deleted.
 _Avoid_: deleted recurring, archived income
 
 **Occurrence**:
@@ -113,8 +113,12 @@ The algebraic sum of the balances of all Wallets, including Contact Wallets and 
 _Avoid_: total assets, equity
 
 **Frozen Wallet**:
-A Wallet deleted at balance exactly €0. It stays in the database with its Transactions viewable; while frozen it is read-only — no Transactions can be created, edited, or deleted on it — and it appears only in the Wallets screen's collapsed Frozen Wallets list. Unfreezing restores it to active: it returns to its type section, accepts Transactions again, and its existing Transactions become editable again.
+A Wallet deleted at balance exactly €0. It stays in the database with its Transactions viewable; while frozen it is read-only — no Transactions can be created, edited, or deleted on it — and it appears only in the Wallets screen's collapsed Frozen Wallets list. Unfreezing restores it to active: it returns to its type section, accepts Transactions again, and its existing Transactions become editable again. A Frozen Wallet no Transaction has ever touched can be Deleted (Definition: Delete).
 _Avoid_: deleted wallet, trashed wallet, archived wallet
+
+**Delete**:
+The permanent removal of a Frozen Wallet or a frozen Recurring definition that has no history: a Wallet no Transaction has ever touched — not as its Wallet, not as a Transfer leg, not by an Opening Balance — or a Recurring Cost or Recurring Income no Transaction is linked to. Only a frozen thing can be deleted, and only a history-free one: nothing is severed and no Balance or Budget changes, because there was nothing to change. Anything with history is never deleted; it stays frozen, and Freeze remains the one action on an active row. A delete is a single tap followed by an Undo window, like deleting a Transaction: Undo brings back the same Wallet or definition, still frozen, in the Frozen section.
+_Avoid_: remove, purge, erase, archive; and never "delete" for freeze — a Frozen Wallet is not a deleted one
 
 **Opening Balance**:
 A Transaction created when a Wallet is started with a nonzero initial balance (must be ≥ €0). It counts toward the Wallet's balance but never toward income/expense statistics.
@@ -163,7 +167,7 @@ The Settings action that replaces the Account's current data — Transactions, W
 _Avoid_: re-import, import a backup, rollback
 
 **Undo**:
-The 10-second window after deleting a Transaction in which that deletion can be reversed: a stack of up to three toasts (newest first) sits at the bottom of the screen, each with its own countdown, and tapping Undo re-creates the very same Transaction — same id, same Recurring pin — through a dedicated endpoint. If the pinned Occurrence was already paid by another Transaction in the meantime, the undo fails with a specific message rather than silently re-linking. The window is client-enforced and dies with the session.
+The 10-second window after deleting a Transaction, a Frozen Wallet or a frozen Recurring definition in which that deletion can be reversed: one stack of up to three toasts (newest first) sits at the bottom of the screen on every tab, each naming what was deleted and running its own countdown, and tapping Undo re-creates the very same entity — same id; for a Transaction the same Recurring pin, for a Wallet or definition still frozen — through a dedicated endpoint. If the pinned Occurrence was already paid by another Transaction in the meantime, or the deleted Wallet's or definition's name was taken, the undo fails with a specific message rather than silently re-linking or renaming. The window is client-enforced and dies with the session.
 _Avoid_: undo history, redo, soft delete, trash
 
 ### Forms
@@ -188,6 +192,7 @@ _Avoid_: language setting, regional format, i18n setting
 - Wallet names are unique per Account, case-insensitively. A Wallet's name can be edited after creation; its type cannot.
 - A Wallet can only be frozen when its balance is exactly €0.
 - A Frozen Wallet can be unfrozen at any time: its balance is always exactly €0 while frozen.
+- A Frozen Wallet with no Transaction — none as its Wallet, none as a Transfer leg, no Opening Balance — can be deleted; a Frozen Wallet with any Transaction stays frozen. Contact Wallets follow the same rule. An active Wallet is never deleted: freeze first.
 - A Place is attached to a Geographic Location by a name-search pick or a tap on the Google map; a coordinates-only pick (Leaflet tap, GPS), an import, or removing the Location clears it.
 - An import row is a Duplicate when date, amount, type, wallet(s), category, and description all match an existing Transaction or an earlier row of the same file; a blank description matches a missing one.
 - Searching the ledger matches Transactions whose Description contains the needle, case-insensitively (accents must match exactly), combined with any other filters.
@@ -198,6 +203,8 @@ _Avoid_: language setting, regional format, i18n setting
 - Freezing a Recurring Cost replaces the old delete: it keeps the definition in the database, all links to Transactions intact, but removes its Unpaid and Skipped Occurrences and stops generating new ones. A frozen Recurring Cost is read-only and shown in a collapsed Frozen Recurring section. Unfreezing restores editability and resumes Occurrence generation on the natural cycle from the original start date. Freezing a Recurring Income mirrors the same contract. There is no separate "delete that severs links" action — manually unlinking individual Transactions is the only way to sever a link.
 - A Recurring definition can be frozen at any time regardless of unpaid Occurrences: the freeze itself cleans up all Unpaid and Skipped Occurrences, leaving a clean slate.
 - A frozen Recurring definition can be unfrozen at any time. If its name collides with an active definition (case-insensitively), the unfreeze is rejected.
+- A frozen Recurring definition with no linked Transaction can be deleted; one with any linked Transaction stays frozen, and a delete never severs a link. An active definition is never deleted: freeze first.
+- Deleting a Wallet or a Recurring definition is a single tap followed by an Undo window, like deleting a Transaction (ADR-0031): Undo brings back the same entity, still frozen; it fails only when its name was taken in the meantime. One Undo stack serves every kind, on every tab.
 - The Budget excludes a frozen definition from months whose first post-freeze Occurrence would have fallen on or after the freeze date. Months before the freeze date are unaffected.
 - A skip is anchored to its Occurrence's period — the month for a monthly definition, the year for a yearly one, the date itself for daily and weekly ones — and travels with the Occurrence: editing the definition never drops it, and changing the interval unit maps the period along (a skipped month becomes its year, a skipped year becomes its month). A skip whose period holds no Occurrence lies dormant; only un-skipping removes it.
 - Occurrences and Backlog are always derived from the definition; editing interval or start date reshapes only the derived future.

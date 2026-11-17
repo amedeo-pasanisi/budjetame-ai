@@ -11,6 +11,7 @@ import {
   type WalletType,
 } from './api'
 import { useDataVersion } from './api/dataVersion'
+import { useUndo } from './undoContext'
 import { WalletModal } from './WalletModal'
 
 /** The message ids for each Wallet type (issue #117): the row subtitle keeps
@@ -73,6 +74,10 @@ export function WalletsScreen({
   // The cache clock (ADR-0022): a write anywhere re-fetches this list in
   // the background, so the tab is never stale when switched back to.
   const dataVersion = useDataVersion()
+  // The app-wide undo stack (ADR-0034): a deleted frozen Wallet goes in,
+  // and the one an Undo brings back comes out, to reappear in the Frozen
+  // Wallets list — same id, still frozen.
+  const { pushDeleted, restored } = useUndo()
 
   useEffect(() => {
     let cancelled = false
@@ -135,6 +140,30 @@ export function WalletsScreen({
   const handleUnfrozenFromModal = (wallet: Wallet) => {
     handleUnfrozen(wallet)
   }
+
+  /** Delete (ADR-0034): the row leaves the list — the Frozen Wallets list
+   * collapses away when it was the last — and the deleted row enters the
+   * undo stack; its toast is the confirmation. */
+  const handleDeleted = (deleted: Wallet) => {
+    setWallets((current) =>
+      current === null ? current : current.filter((existing) => existing.id !== deleted.id),
+    )
+    setModal(null)
+    pushDeleted({ kind: 'wallet', entity: deleted })
+  }
+
+  // An Undo restored a Wallet (ADR-0034): upsert it, still frozen, so it
+  // reappears in the Frozen Wallets list.
+  useEffect(() => {
+    if (restored?.kind !== 'wallet') return
+    const wallet = restored.entity
+    setWallets((current) => {
+      if (current === null) return [wallet]
+      return current.some((existing) => existing.id === wallet.id)
+        ? current.map((existing) => (existing.id === wallet.id ? wallet : existing))
+        : [...current, wallet]
+    })
+  }, [restored])
 
   // The sections are derived at render time: group by type in the fixed
   // order and sort A→Z case-insensitively, so a new or renamed Wallet lands
@@ -305,6 +334,7 @@ export function WalletsScreen({
           onSaved={handleSaved}
           onFrozen={handleFrozen}
           onUnfrozen={handleUnfrozenFromModal}
+          onDeleted={handleDeleted}
           onClose={() => setModal(null)}
         />
       )}

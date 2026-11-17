@@ -2,12 +2,14 @@
 
 Every rule from CONTEXT.md that concerns Wallets and Opening Balances lives here:
 name uniqueness (case-insensitive, per Account), the Opening Balance Transaction,
-and the derived Balance (ADR-0001).
+the derived Balance (ADR-0001), freezing (ADR-0002), and the delete of a Frozen
+Wallet with no history with its undo (ADR-0034).
 """
 
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models import Transaction, TransactionType, Wallet, WalletType
@@ -28,6 +30,16 @@ class FrozenWallet(Exception):
 
 class ContactWalletOpeningBalance(Exception):
     """Contact Wallets start at €0: money moves in and out only via Transfers."""
+
+
+class WalletNotDeletable(Exception):
+    """A delete was refused (ADR-0034): the Wallet is active (freeze first) or
+    has history — a Transaction references it. The message says which."""
+
+
+class WalletIdInUse(Exception):
+    """An undo's id is already a Wallet of the Account (ADR-0034): the row
+    was never deleted, or was already brought back."""
 
 
 def create_wallet(
@@ -106,6 +118,86 @@ def unfreeze_wallet(session: Session, wallet: Wallet) -> Wallet:
     (ADR-0002) — and unfreezing an active Wallet is a no-op, mirroring
     freeze's idempotency."""
     wallet.frozen = False
+    session.commit()
+    session.refresh(wallet)
+    return wallet
+
+
+def transaction_count(session: Session, wallet: Wallet) -> int:
+    """How many Transactions reference the Wallet — as their Wallet, as a
+    Transfer source or as a Transfer destination; an Opening Balance counts.
+    Zero means the Wallet has no history (ADR-0034)."""
+    count = session.scalar(
+        select(func.count()).select_from(Transaction).where(
+            Transaction.account_id == wallet.account_id,
+            or_(
+                Transaction.wallet_id == wallet.id,
+                Transaction.source_wallet_id == wallet.id,
+                Transaction.destination_wallet_id == wallet.id,
+            ),
+        )
+    )
+    return int(count or 0)
+
+
+def delete_wallet(session: Session, wallet: Wallet) -> None:
+    """Delete a Frozen Wallet with no history for good (ADR-0034). Only a
+    frozen Wallet qualifies — Freeze stays the one action on an active
+    Wallet — and only one no Transaction has ever touched: nothing is
+    severed, no Balance changes, because there was nothing to change. The
+    foreign keys' cascade never fires on real data; it is not relied upon."""
+    if not wallet.frozen:
+        raise WalletNotDeletable(
+            "Only a frozen wallet can be deleted — freeze it first"
+        )
+    count = transaction_count(session, wallet)
+    if count > 0:
+        raise WalletNotDeletable(
+            f"This wallet has {count} transaction{'s' if count != 1 else ''}"
+        )
+    session.delete(wallet)
+    session.commit()
+
+
+def undo_delete_wallet(
+    session: Session,
+    account_id: int,
+    *,
+    wallet_id: int,
+    name: str,
+    type: WalletType,
+    created_at: datetime,
+) -> Wallet:
+    """Re-insert a deleted Wallet with its original id, still frozen
+    (ADR-0034, mirroring the Transaction undo of ADR-0031). The replay is
+    safe because the delete's preconditions guarantee nothing referenced the
+    row. The one domain failure is a name taken in the meantime; an id now
+    held by another Account is foreign (`scoping.NotOwned`), one held by the
+    caller means there is nothing to undo. The Postgres sequence is re-synced
+    afterwards so later auto-generated ids never collide."""
+    existing = session.get(Wallet, wallet_id)
+    if existing is not None:
+        if existing.account_id != account_id:
+            raise scoping.NotOwned()
+        raise WalletIdInUse()
+    if scoping.name_is_taken(session, Wallet, account_id, name):
+        raise WalletNameTaken(name)
+    wallet = Wallet(
+        id=wallet_id,
+        account_id=account_id,
+        name=name,
+        type=type.value,
+        frozen=True,
+        created_at=created_at,
+    )
+    session.add(wallet)
+    session.flush()
+    session.execute(
+        text(
+            "SELECT setval(pg_get_serial_sequence('wallets', 'id'), "
+            "COALESCE((SELECT MAX(id) FROM wallets), 1))"
+        )
+    )
     session.commit()
     session.refresh(wallet)
     return wallet

@@ -17,15 +17,30 @@
  * flight, and an invalid draft reveals Field Errors under the wrong fields
  * instead of calling the API. The Opening balance is a tolerant Amount
  * Input — text, both separators, empty stays valid (the Wallet starts at
- * €0). */
+ * €0).
+ *
+ * A frozen Wallet's modal offers Delete below Unfreeze (ADR-0034): one tap
+ * deletes, the app-wide Undo toast is the confirmation, a refusal shows
+ * the backend's message inline. The delete cases render the screen inside
+ * the undo provider, as the shell does, since the toasts live there. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import { renderWithIntl } from './test/renderWithIntl'
 
+import { UndoProvider } from './UndoProvider'
 import { WalletsScreen } from './WalletsScreen'
 import type { Wallet } from './api'
-import { ApiError, createWallet, fetchWallets, freezeWallet, renameWallet, unfreezeWallet } from './api'
+import {
+  ApiError,
+  createWallet,
+  deleteWallet,
+  fetchWallets,
+  freezeWallet,
+  renameWallet,
+  undoWalletDelete,
+  unfreezeWallet,
+} from './api'
 
 vi.mock('./api', async () => {
   // The real display helpers, so the screen exercises the actual formatting
@@ -55,6 +70,11 @@ vi.mock('./api', async () => {
     renameWallet: vi.fn(),
     freezeWallet: vi.fn(),
     unfreezeWallet: vi.fn(),
+    deleteWallet: vi.fn(),
+    undoWalletDelete: vi.fn(),
+    undoTransaction: vi.fn(),
+    undoRecurringCostDelete: vi.fn(),
+    undoRecurringIncomeDelete: vi.fn(),
   }
 })
 
@@ -76,6 +96,8 @@ const createWalletMock = vi.mocked(createWallet)
 const renameWalletMock = vi.mocked(renameWallet)
 const freezeWalletMock = vi.mocked(freezeWallet)
 const unfreezeWalletMock = vi.mocked(unfreezeWallet)
+const deleteWalletMock = vi.mocked(deleteWallet)
+const undoWalletDeleteMock = vi.mocked(undoWalletDelete)
 
 /** The row tap surfaces inside one section: each row is a tap surface plus
  * sibling trailing buttons (✎ Edit, and Unfreeze on frozen rows, issue
@@ -317,7 +339,7 @@ describe('WalletsScreen sections (issue #47)', () => {
   })
 
   it('freezing a settled contact still works: tap-again confirm in the edit modal, wallet moves to the frozen list', async () => {
-    freezeWalletMock.mockResolvedValue(undefined)
+    freezeWalletMock.mockResolvedValue({ ...wallets[5], frozen: true })
     renderWithIntl(<WalletsScreen />)
 
     const contacts = await screen.findByRole('region', { name: 'Contacts' })
@@ -680,5 +702,117 @@ describe('Wallet form submit-and-validate (ADR-0029, issue #107)', () => {
     // Server rejections keep the form-level banner (ADR-0029); Field Errors
     // (role=alert) never appear — the two error kinds never mix.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('WalletsScreen delete with Undo (ADR-0034)', () => {
+  // The screen inside the app-wide undo provider, as the shell renders it:
+  // the toast stack belongs to the provider, so a delete's toast and its
+  // Undo are observable only through it.
+  const renderScreen = (locale: 'en' | 'it' = 'en') =>
+    renderWithIntl(
+      <UndoProvider>
+        <WalletsScreen />
+      </UndoProvider>,
+      { locale },
+    )
+
+  const openFrozenModal = async (name = 'Old Card') => {
+    await screen.findByRole('region', { name: 'Contacts' })
+    fireEvent.click(screen.getByRole('button', { name: /Frozen wallets \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${name}` }))
+    return screen.findByRole('dialog', { name: 'Edit wallet' })
+  }
+
+  it("a frozen wallet's modal shows Delete below Unfreeze; an active one's does not", async () => {
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    renderScreen()
+    const dialog = await openFrozenModal()
+
+    const unfreeze = within(dialog).getByRole('button', { name: 'Unfreeze wallet' })
+    const remove = within(dialog).getByRole('button', { name: 'Delete wallet' })
+    expect(remove).toBeEnabled()
+    // Below Unfreeze: Unfreeze precedes Delete in document order.
+    expect(unfreeze.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: /Freeze wallet/ })).not.toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Leo sits at €0.00, so its modal offers the Freeze action.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Leo' }))
+    const active = await screen.findByRole('dialog', { name: 'Edit wallet' })
+    expect(within(active).getByRole('button', { name: 'Freeze wallet' })).toBeInTheDocument()
+    expect(within(active).queryByRole('button', { name: 'Delete wallet' })).not.toBeInTheDocument()
+  })
+
+  it('one tap deletes: the row leaves the Frozen list, the list collapses away, and a toast names the kind and the name', async () => {
+    deleteWalletMock.mockResolvedValue(frozenWallet)
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    renderScreen()
+    const dialog = await openFrozenModal()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete wallet' }))
+
+    await waitFor(() => expect(deleteWalletMock).toHaveBeenCalledWith('', 7))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByText('Old Card')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Frozen wallets/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Wallet deleted · Old Card')
+    // The active sections are untouched.
+    expect(screen.getByRole('region', { name: 'Contacts' })).toBeInTheDocument()
+  })
+
+  it('Undo on the toast calls the wallet undo api and the row reappears in the Frozen list', async () => {
+    deleteWalletMock.mockResolvedValue(frozenWallet)
+    undoWalletDeleteMock.mockResolvedValue(frozenWallet)
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    renderScreen()
+    const dialog = await openFrozenModal()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete wallet' }))
+    await screen.findByRole('status')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+    await waitFor(() => expect(undoWalletDeleteMock).toHaveBeenCalledWith('', frozenWallet))
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    // The list was expanded before the delete; a restored row shows at once.
+    const header = await screen.findByRole('button', { name: /Frozen wallets \(1\)/ })
+    if (header.getAttribute('aria-expanded') === 'false') fireEvent.click(header)
+    expect(screen.getByText('Old Card')).toBeInTheDocument()
+    expect(screen.getByText('Credit Card · Frozen')).toBeInTheDocument()
+  })
+
+  it("a rule error from the delete api renders inline in the modal with the backend's message", async () => {
+    deleteWalletMock.mockRejectedValue(new ApiError('This wallet has 12 transactions', 422))
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    renderScreen()
+    const dialog = await openFrozenModal()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete wallet' }))
+
+    expect(await within(dialog).findByText('This wallet has 12 transactions')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Edit wallet' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Delete wallet' })).toBeEnabled()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    // The wallet stays frozen, in the list.
+    expect(screen.getByRole('button', { name: /Frozen wallets \(1\)/ })).toBeInTheDocument()
+  })
+
+  it('reads the button, the hint and the toast in Italian', async () => {
+    deleteWalletMock.mockResolvedValue(frozenWallet)
+    fetchWalletsMock.mockResolvedValue([...wallets, frozenWallet])
+    renderScreen('it')
+    await screen.findByRole('region', { name: 'Contatti' })
+    fireEvent.click(screen.getByRole('button', { name: /Portafogli congelati \(1\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Modifica Old Card' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+    expect(within(dialog).getByText(/può essere eliminato definitivamente/)).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Elimina portafoglio' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Portafoglio eliminato · Old Card')
+    expect(screen.getByRole('button', { name: 'Annulla' })).toBeInTheDocument()
   })
 })

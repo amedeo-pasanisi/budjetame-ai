@@ -623,7 +623,7 @@ async def test_preview_checks_category_type_and_wallet_rules(client: AsyncClient
     await _create_category(client, token, "Rules Income Cat", "income")
     wallets = (await client.get("/wallets", headers=_auth(token))).json()
     frozen_id = next(w["id"] for w in wallets if w["name"] == "Rules Frozen")
-    await client.delete(f"/wallets/{frozen_id}", headers=_auth(token))
+    await client.post(f"/wallets/{frozen_id}/freeze", headers=_auth(token))
 
     response = await client.post(
         "/import/preview",

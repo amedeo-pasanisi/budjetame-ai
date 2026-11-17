@@ -1032,8 +1032,8 @@ async def test_opening_balance_transactions_are_read_only(client: AsyncClient) -
 
 
 async def _freeze_wallet(client: AsyncClient, token: str, wallet_id: int) -> None:
-    response = await client.delete(f"/wallets/{wallet_id}", headers=_auth(token))
-    assert response.status_code == 204
+    response = await client.post(f"/wallets/{wallet_id}/freeze", headers=_auth(token))
+    assert response.status_code == 200
 
 
 async def test_frozen_wallet_rejects_new_transactions(client: AsyncClient) -> None:

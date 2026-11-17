@@ -3,7 +3,11 @@
  * ends; vertical scrolls, gestures starting on a control or within ~20px of a
  * screen edge, and touches inside an open modal never switch; the bottom nav
  * and desktop mouse behavior are unchanged. The API client is mocked;
- * gestures are fired as real touch events, never via internal state. */
+ * gestures are fired as real touch events, never via internal state.
+ *
+ * The shell also owns the app-wide Undo stack (ADR-0031, ADR-0034): a
+ * delete's toast stays visible across tab switches, three is the cap
+ * across every kind, and a Restore clears the stack. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
@@ -59,6 +63,8 @@ vi.mock('./api', async () => {
     renameWallet: vi.fn(),
     freezeWallet: vi.fn(),
     unfreezeWallet: vi.fn(),
+    deleteWallet: vi.fn(),
+    undoWalletDelete: vi.fn(),
     fetchCategories: vi.fn(),
     createCategory: vi.fn(),
     updateCategory: vi.fn(),
@@ -68,6 +74,7 @@ vi.mock('./api', async () => {
     createTransaction: vi.fn(),
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),
+    undoTransaction: vi.fn(),
     fetchDashboardSummary: vi.fn(),
     fetchTrend: vi.fn(),
     fetchBudget: vi.fn(),
@@ -79,11 +86,19 @@ vi.mock('./api', async () => {
     updateRecurringCost: vi.fn(),
     freezeRecurringCost: vi.fn(),
     unfreezeRecurringCost: vi.fn(),
+    deleteRecurringCost: vi.fn(),
+    undoRecurringCostDelete: vi.fn(),
+    fetchRecurringCostOccurrences: vi.fn().mockResolvedValue([]),
     fetchRecurringIncomes: vi.fn(),
     createRecurringIncome: vi.fn(),
     updateRecurringIncome: vi.fn(),
     freezeRecurringIncome: vi.fn(),
     unfreezeRecurringIncome: vi.fn(),
+    deleteRecurringIncome: vi.fn(),
+    undoRecurringIncomeDelete: vi.fn(),
+    fetchRecurringIncomeOccurrences: vi.fn().mockResolvedValue([]),
+    exportBackup: vi.fn(),
+    restoreBackup: vi.fn(),
     fetchAccountLanguage: vi.fn().mockResolvedValue('en'),
     updateAccountLanguage: vi.fn().mockResolvedValue(undefined),
   }
@@ -95,6 +110,8 @@ vi.mock('./MapPicker', () => ({
 }))
 
 import {
+  deleteRecurringCost,
+  deleteWallet,
   fetchBudget,
   fetchCategories,
   fetchDashboardSummary,
@@ -105,9 +122,11 @@ import {
   fetchRecurringIncomes,
   fetchTransactions,
   fetchWallets,
+  restoreBackup,
   updateAccountLanguage,
 } from './api'
 import { getLocale, setLocale } from './api/format'
+import { setRecurringSide } from './recurringSide'
 import { TOKEN_KEY } from './api'
 import type { Account, Category, RecurringCost, RecurringIncome, Wallet } from './api'
 
@@ -122,6 +141,9 @@ const fetchRecurringIncomesMock = vi.mocked(fetchRecurringIncomes)
 const fetchAccountLanguageMock = vi.mocked(fetchAccountLanguage)
 const fetchCurrentAccountMock = vi.mocked(fetchCurrentAccount)
 const updateAccountLanguageMock = vi.mocked(updateAccountLanguage)
+const deleteWalletMock = vi.mocked(deleteWallet)
+const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
+const restoreBackupMock = vi.mocked(restoreBackup)
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
@@ -669,6 +691,7 @@ describe('AppShell recurring ledger jump (ADR-0026)', () => {
       next_due_date: '2026-09-01',
       next_unpaid_occurrence_date: '2026-09-01',
       backlog_count: 0,
+      freeze_date: null,
       frozen: false,
       created_at: createdAt,
     },
@@ -684,6 +707,7 @@ describe('AppShell recurring ledger jump (ADR-0026)', () => {
       next_due_date: '2026-09-01',
       next_unpaid_occurrence_date: '2026-09-01',
       backlog_count: 0,
+      freeze_date: null,
       frozen: false,
       created_at: createdAt,
     },
@@ -804,5 +828,132 @@ describe('AppShell Locale (issue #114)', () => {
     } finally {
       languageSpy.mockRestore()
     }
+  })
+})
+
+describe('AppShell undo stack (ADR-0034)', () => {
+  const createdAt = '2026-08-01T10:00:00Z'
+  const frozenWallet = (id: number, name: string): Wallet => ({
+    id,
+    name,
+    type: 'credit_card',
+    balance: '0.00',
+    frozen: true,
+    created_at: createdAt,
+  })
+  const frozenCost = (id: number, name: string): RecurringCost => ({
+    id,
+    name,
+    amount: '15.00',
+    interval_value: 1,
+    interval_unit: 'months',
+    start_date: '2025-01-01',
+    next_due_date: null,
+    next_unpaid_occurrence_date: null,
+    backlog_count: 0,
+    frozen: true,
+    freeze_date: '2026-11-01',
+    created_at: createdAt,
+  })
+  const wallets = [
+    { id: 1, name: 'Marco', type: 'contact' as const, balance: '10.00', frozen: false, created_at: createdAt },
+    frozenWallet(3, 'Old Card'),
+    frozenWallet(4, 'Older Card'),
+  ]
+  const costs = [frozenCost(7, 'Old Netflix'), frozenCost(8, 'Old Gym')]
+
+  beforeEach(() => {
+    // The Recurring tab remembers its last side for the session; these
+    // cases delete Recurring Costs.
+    setRecurringSide('costs')
+    fetchWalletsMock.mockResolvedValue(wallets)
+    fetchRecurringCostsMock.mockResolvedValue(costs)
+    // Each delete answers with the row it removed — the Undo payload.
+    deleteWalletMock.mockImplementation(async (_token, id) => wallets.find((w) => w.id === id)!)
+    deleteRecurringCostMock.mockImplementation(async (_token, id) => costs.find((c) => c.id === id)!)
+  })
+
+  /** Delete a frozen Wallet from its modal on the Wallets tab. */
+  async function deleteWalletFromTab(name: string, frozenCount: number) {
+    fireEvent.click(screen.getByRole('button', { name: 'Wallets' }))
+    await expectTab('wallets')
+    const header = await screen.findByRole('button', {
+      name: new RegExp(`Frozen wallets \\(${frozenCount}\\)`),
+    })
+    if (header.getAttribute('aria-expanded') === 'false') fireEvent.click(header)
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${name}` }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit wallet' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete wallet' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  }
+
+  /** Delete a frozen Recurring Cost from its modal on the Recurring tab. */
+  async function deleteCostFromTab(name: string, frozenCount: number) {
+    fireEvent.click(screen.getByRole('button', { name: 'Recurring' }))
+    await expectTab('recurring')
+    const header = await screen.findByRole('button', {
+      name: new RegExp(`Frozen recurring costs \\(${frozenCount}\\)`),
+    })
+    if (header.getAttribute('aria-expanded') === 'false') fireEvent.click(header)
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${name}` }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit recurring cost' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete recurring cost' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  }
+
+  it('a toast pushed from one tab stays visible after switching tabs', async () => {
+    await renderShell()
+    await deleteWalletFromTab('Old Card', 2)
+    expect(screen.getByRole('status')).toHaveTextContent('Wallet deleted · Old Card')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dashboard' }))
+    await expectTab('dashboard')
+
+    expect(panelOf('New wallet')).toHaveAttribute('hidden')
+    expect(screen.getByRole('status')).toHaveTextContent('Wallet deleted · Old Card')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+  })
+
+  it('three is the cap across kinds, newest on top', async () => {
+    await renderShell()
+    await deleteWalletFromTab('Old Card', 2)
+    await deleteCostFromTab('Old Netflix', 2)
+    await deleteCostFromTab('Old Gym', 1)
+    expect(screen.getAllByRole('status')).toHaveLength(3)
+
+    await deleteWalletFromTab('Older Card', 1)
+
+    const toasts = screen.getAllByRole('status').map((toast) => toast.textContent ?? '')
+    expect(toasts).toHaveLength(3)
+    expect(toasts[0]).toContain('Wallet deleted · Older Card')
+    expect(toasts[1]).toContain('Recurring cost deleted · Old Gym')
+    expect(toasts[2]).toContain('Recurring cost deleted · Old Netflix')
+    // The oldest opportunity (Old Card) retired.
+    expect(screen.queryByText(/Old Card/)).not.toBeInTheDocument()
+  })
+
+  afterEach(() => {
+    localStorage.removeItem(TOKEN_KEY)
+  })
+
+  it('a Restore clears the stack', async () => {
+    // The restore flow reads the bearer token itself and does nothing
+    // without one.
+    localStorage.setItem(TOKEN_KEY, 'token')
+    restoreBackupMock.mockResolvedValue({ status: 'ok' })
+    await renderShell()
+    await deleteWalletFromTab('Old Card', 2)
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error('File input not found')
+    fireEvent.change(input, { target: { files: [new File(['fake-content'], 'backup.xlsx')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Restore from backup' }))
+
+    await waitFor(() => expect(restoreBackupMock).toHaveBeenCalled())
+    expect(await screen.findByText('Restore complete')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
   })
 })

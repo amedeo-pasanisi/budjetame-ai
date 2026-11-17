@@ -5,6 +5,34 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+
+- **A frozen Wallet or frozen Recurring definition with no history can be
+  deleted for good, with Undo** (ADR-0034, #121). The read-only modal of a
+  frozen thing gains a red Delete button below Unfreeze. One tap deletes;
+  a 10-second Undo toast brings the very same Wallet or definition back,
+  same id, still frozen. A Wallet any Transaction has ever touched (its
+  own, a Transfer leg, an Opening Balance) and a definition with any
+  linked Transaction are refused with a message that says why ("This
+  wallet has 12 transactions", "3 transactions are linked to this
+  recurring cost — unlink them first"): nothing is severed, no Balance or
+  past Budget ever changes. Freeze stays the only action on an active row.
+- The Undo toasts now live in the app shell: one stack for deleted
+  Transactions, Wallets and Recurring definitions, visible on every tab,
+  each toast naming what was deleted, at most three at a time. A Restore
+  clears the stack.
+
+### Changed
+
+- **API:** Wallet freeze moved from `DELETE /wallets/{id}` to
+  `POST /wallets/{id}/freeze` (returning the frozen Wallet, like the
+  Recurring freeze); `DELETE /wallets/{id}` and `DELETE /recurring-costs/{id}`
+  / `DELETE /recurring-incomes/{id}` now delete, and each resource gains a
+  `POST …/undo` that re-inserts the deleted row. Recurring definitions
+  expose their `freeze_date`.
+
 ## [v1.9.2] — 2026-11-11
 
 ### Fixed

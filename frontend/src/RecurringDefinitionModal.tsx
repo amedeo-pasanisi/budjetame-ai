@@ -10,6 +10,8 @@ type RecurringDefinitionModalProps = {
   onSaved: (definition: RecurringDefinition) => void
   onFreeze?: (definition: RecurringDefinition) => void
   onUnfreeze?: (definition: RecurringDefinition) => void
+  /** A frozen definition was deleted for good (ADR-0034). */
+  onDeleted?: (definition: RecurringDefinition) => void
   onClose: () => void
 }
 
@@ -18,13 +20,15 @@ type RecurringDefinitionModalProps = {
  * edit share this one modal, like Wallets and Categories; the shell adds
  * the dismissal paths — backdrop tap, Escape, and Cancel all abandon the
  * draft without saving. Freeze/Unfreeze (ADR-0028) replaces the old delete
- * action. */
+ * action; a frozen definition with no history can be deleted for good
+ * from its read-only form (ADR-0034). */
 export function RecurringDefinitionModal({
   side,
   definition,
   onSaved,
   onFreeze,
   onUnfreeze,
+  onDeleted,
   onClose,
 }: RecurringDefinitionModalProps) {
   const { formatMessage } = useIntl()
@@ -39,6 +43,7 @@ export function RecurringDefinitionModal({
         onSaved={onSaved}
         onFreeze={onFreeze}
         onUnfreeze={onUnfreeze}
+        onDeleted={onDeleted}
         onCancel={onClose}
       />
     </ModalShell>

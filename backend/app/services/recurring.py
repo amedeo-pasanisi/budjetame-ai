@@ -18,16 +18,18 @@ columns the Occurrence Timeline reads pins and skips through), and
 
 Derived Occurrences are not this module's business: the Occurrence
 Timeline (app.services.occurrences) owns every derived read and the skip
-write. This module keeps create, update, freeze and unfreeze.
+write. This module keeps create, update, freeze, unfreeze, and — for a
+frozen definition with no linked Transaction — delete and its undo
+(ADR-0034).
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import cast
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.models import (
@@ -237,3 +239,98 @@ def unfreeze(session: Session, definition: Definition) -> Definition:
     session.commit()
     session.refresh(definition)
     return definition
+
+
+def linked_transaction_count(session: Session, definition: Definition) -> int:
+    """How many Transactions carry a link to the definition. Zero means it
+    has no history (ADR-0034): skips are not history — freezing already
+    removed them."""
+    count = session.scalar(
+        select(func.count())
+        .select_from(Transaction)
+        .where(kind_of(definition).pin_column == definition.id)
+    )
+    return int(count or 0)
+
+
+def delete(session: Session, definition: Definition) -> None:
+    """Delete a frozen definition with no history for good (ADR-0034). Only
+    a frozen definition qualifies — Freeze stays the one action on an active
+    row — and only one no Transaction is linked to: a delete never severs a
+    link, so a paid Occurrence never silently becomes Discretionary. The
+    foreign keys' set-null and the skip cascade never fire on real data;
+    they are not relied upon."""
+    kind = kind_of(definition)
+    if not definition.frozen:
+        raise RecurringRuleError(
+            f"Only a frozen recurring {kind.noun} can be deleted — freeze it first"
+        )
+    count = linked_transaction_count(session, definition)
+    if count > 0:
+        linked = "1 transaction is" if count == 1 else f"{count} transactions are"
+        pronoun = "it" if count == 1 else "them"
+        raise RecurringRuleError(
+            f"{linked} linked to this recurring {kind.noun} — unlink {pronoun} first"
+        )
+    session.delete(definition)
+    session.commit()
+
+
+class RecurringIdInUse(Exception):
+    """An undo's id is already a definition of the Account (ADR-0034): the
+    row was never deleted, or was already brought back."""
+
+
+def undo_delete(
+    session: Session,
+    kind: Kind,
+    account_id: int,
+    *,
+    definition_id: int,
+    name: str,
+    amount: Decimal,
+    interval_value: int,
+    interval_unit: IntervalUnit,
+    start_date: str,
+    freeze_date: str | None,
+    created_at: datetime,
+) -> Definition:
+    """Re-insert a deleted definition of `kind` with its original id, still
+    frozen with its freeze date (ADR-0034, mirroring the Transaction undo of
+    ADR-0031). The replay is safe because the delete's preconditions
+    guarantee nothing referenced the row. The one domain failure is a name
+    taken in the meantime; an id now held by another Account is foreign
+    (`scoping.NotOwned`), one held by the caller means there is nothing to
+    undo. The Postgres sequence is re-synced afterwards so later
+    auto-generated ids never collide."""
+    existing = cast(Definition | None, session.get(kind.model, definition_id))
+    if existing is not None:
+        if existing.account_id != account_id:
+            raise scoping.NotOwned()
+        raise RecurringIdInUse()
+    if scoping.name_is_taken(session, kind.model, account_id, name):
+        raise RecurringNameTaken(name)
+    definition = kind.model(
+        id=definition_id,
+        account_id=account_id,
+        name=name,
+        amount=amount,
+        interval_value=interval_value,
+        interval_unit=interval_unit.value,
+        start_date=date.fromisoformat(start_date),
+        frozen=True,
+        freeze_date=_parse_start_date(freeze_date),
+        created_at=created_at,
+    )
+    session.add(definition)
+    session.flush()
+    table = kind.model.__tablename__
+    session.execute(
+        text(
+            f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+            f"COALESCE((SELECT MAX(id) FROM {table}), 1))"
+        )
+    )
+    session.commit()
+    session.refresh(definition)
+    return cast(Definition, definition)

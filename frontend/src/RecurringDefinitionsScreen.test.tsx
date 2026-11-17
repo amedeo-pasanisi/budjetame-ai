@@ -13,13 +13,20 @@
  * is gone (ADR-0026), and the badge stays the only Backlog signal
  * (ADR-0025). Create, edit, and freeze live in a modal on this screen. The
  * API client is mocked; the real display helpers (interval text, euro
- * formatting) stay live. */
+ * formatting) stay live.
+ *
+ * A frozen definition's modal offers Delete below Unfreeze (ADR-0034): one
+ * tap deletes, the app-wide Undo toast is the confirmation, a refusal
+ * shows the backend's message inline. The delete cases render the screen
+ * inside the undo provider, as the shell does, since the toasts live
+ * there. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import { renderWithIntl } from './test/renderWithIntl'
 import type { LedgerFilterRequest } from './App'
 import { RecurringDefinitionsScreen } from './RecurringDefinitionsScreen'
+import { UndoProvider } from './UndoProvider'
 import type { RecurringDefinition } from './api'
 import type { RecurringSide } from './recurringSide'
 
@@ -49,6 +56,8 @@ vi.mock('./api', async () => {
     updateRecurringCost: vi.fn(),
     freezeRecurringCost: vi.fn(),
     unfreezeRecurringCost: vi.fn(),
+    deleteRecurringCost: vi.fn(),
+    undoRecurringCostDelete: vi.fn(),
     fetchRecurringCostOccurrences: vi.fn(),
     setRecurringCostOccurrenceSkipped: vi.fn(),
     fetchRecurringIncomes: vi.fn(),
@@ -56,8 +65,12 @@ vi.mock('./api', async () => {
     updateRecurringIncome: vi.fn(),
     freezeRecurringIncome: vi.fn(),
     unfreezeRecurringIncome: vi.fn(),
+    deleteRecurringIncome: vi.fn(),
+    undoRecurringIncomeDelete: vi.fn(),
     fetchRecurringIncomeOccurrences: vi.fn(),
     setRecurringIncomeOccurrenceSkipped: vi.fn(),
+    undoTransaction: vi.fn(),
+    undoWalletDelete: vi.fn(),
   }
 })
 
@@ -65,12 +78,16 @@ import {
   ApiError,
   createRecurringCost,
   createRecurringIncome,
+  deleteRecurringCost,
+  deleteRecurringIncome,
   fetchRecurringCostOccurrences,
   fetchRecurringCosts,
   fetchRecurringIncomeOccurrences,
   fetchRecurringIncomes,
   freezeRecurringCost,
   freezeRecurringIncome,
+  undoRecurringCostDelete,
+  undoRecurringIncomeDelete,
   updateRecurringCost,
   updateRecurringIncome,
 } from './api'
@@ -95,6 +112,7 @@ const definitions: RecurringDefinition[] = [
     next_due_date: '2026-09-01',
     next_unpaid_occurrence_date: '2026-09-01',
     backlog_count: 0,
+    freeze_date: null,
   },
   {
     ...template,
@@ -107,6 +125,7 @@ const definitions: RecurringDefinition[] = [
     next_due_date: '2026-08-20',
     next_unpaid_occurrence_date: '2026-08-20',
     backlog_count: 3,
+    freeze_date: null,
   },
   {
     ...template,
@@ -119,6 +138,7 @@ const definitions: RecurringDefinition[] = [
     next_due_date: '2026-12-01',
     next_unpaid_occurrence_date: '2026-12-01',
     backlog_count: 0,
+    freeze_date: null,
   },
 ]
 
@@ -141,6 +161,7 @@ const created: RecurringDefinition = {
   next_due_date: '2026-08-24',
   next_unpaid_occurrence_date: '2026-08-24',
   backlog_count: 1,
+  freeze_date: null,
   frozen: false,
   created_at: createdAt,
 }
@@ -157,6 +178,8 @@ const SIDES = [
     create: vi.mocked(createRecurringCost),
     update: vi.mocked(updateRecurringCost),
     freeze: vi.mocked(freezeRecurringCost),
+    remove: vi.mocked(deleteRecurringCost),
+    undoRemove: vi.mocked(undoRecurringCostDelete),
     fetchOccurrences: vi.mocked(fetchRecurringCostOccurrences),
   },
   {
@@ -167,6 +190,8 @@ const SIDES = [
     create: vi.mocked(createRecurringIncome),
     update: vi.mocked(updateRecurringIncome),
     freeze: vi.mocked(freezeRecurringIncome),
+    remove: vi.mocked(deleteRecurringIncome),
+    undoRemove: vi.mocked(undoRecurringIncomeDelete),
     fetchOccurrences: vi.mocked(fetchRecurringIncomeOccurrences),
   },
 ]
@@ -187,7 +212,7 @@ function mainSurface(name: string): HTMLElement {
 
 describe.each(SIDES)(
   'RecurringDefinitionsScreen · $side',
-  ({ side, noun, jumpKind, fetchAll, create, update, freeze, fetchOccurrences }) => {
+  ({ side, noun, jumpKind, fetchAll, create, update, freeze, remove, undoRemove, fetchOccurrences }) => {
     const newLabel = `New ${noun}`
     const editLabel = `Edit ${noun}`
     const createLabel = `Create ${noun}`
@@ -383,6 +408,7 @@ describe.each(SIDES)(
           next_due_date: null,
           next_unpaid_occurrence_date: null,
           backlog_count: 0,
+          freeze_date: null,
         })
         renderScreen()
         await screen.findByText('Coffee')
@@ -447,6 +473,7 @@ describe.each(SIDES)(
           ...definitions[0],
           amount: '900.00',
           backlog_count: 2,
+          freeze_date: null,
         })
         renderScreen()
         await screen.findByText('Coffee')
@@ -473,6 +500,112 @@ describe.each(SIDES)(
 
         await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
         expect(mainSurface('Gym').textContent).toContain('1 unpaid')
+      })
+    })
+    describe('delete with Undo (ADR-0034)', () => {
+      /** A frozen definition, as the freeze left it: badge-less, no next
+       * due date, a freeze date. */
+      const frozenDefinition: RecurringDefinition = {
+        ...definitions[2],
+        id: 4,
+        name: 'Old Gym',
+        frozen: true,
+        freeze_date: '2026-11-01',
+        next_due_date: null,
+        next_unpaid_occurrence_date: null,
+        backlog_count: 0,
+      }
+      const deletedHeadline = `${noun[0].toUpperCase()}${noun.slice(1)} deleted`
+
+      // The screen inside the app-wide undo provider, as the shell renders
+      // it: the toast stack belongs to the provider.
+      const renderInProvider = () =>
+        renderWithIntl(
+          <UndoProvider>
+            <RecurringDefinitionsScreen side={side} />
+          </UndoProvider>,
+        )
+
+      const openFrozenModal = async () => {
+        await screen.findByText('Coffee')
+        fireEvent.click(screen.getByRole('button', { name: `Frozen ${noun}s (1)` }))
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Old Gym' }))
+        return screen.findByRole('dialog', { name: editLabel })
+      }
+
+      beforeEach(() => {
+        fetchAll.mockResolvedValue([...definitions, frozenDefinition])
+      })
+
+      it("a frozen definition's modal shows Delete below Unfreeze; an active one's does not", async () => {
+        renderInProvider()
+        const dialog = await openFrozenModal()
+
+        const unfreeze = within(dialog).getByRole('button', { name: `Unfreeze ${noun}` })
+        const remove = within(dialog).getByRole('button', { name: `Delete ${noun}` })
+        expect(remove).toBeEnabled()
+        expect(
+          unfreeze.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy()
+        expect(within(dialog).queryByRole('button', { name: `Freeze ${noun}` })).not.toBeInTheDocument()
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Rent' }))
+        const active = await screen.findByRole('dialog', { name: editLabel })
+        expect(within(active).getByRole('button', { name: `Freeze ${noun}` })).toBeInTheDocument()
+        expect(within(active).queryByRole('button', { name: `Delete ${noun}` })).not.toBeInTheDocument()
+      })
+
+      it('one tap deletes: the row leaves the Frozen section, the section collapses away, and a toast names the kind and the name', async () => {
+        remove.mockResolvedValue(frozenDefinition)
+        renderInProvider()
+        const dialog = await openFrozenModal()
+
+        fireEvent.click(within(dialog).getByRole('button', { name: `Delete ${noun}` }))
+
+        await waitFor(() => expect(remove).toHaveBeenCalledWith('', 4))
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+        expect(screen.queryByText('Old Gym')).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /^Frozen / })).not.toBeInTheDocument()
+        expect(screen.getByRole('status')).toHaveTextContent(`${deletedHeadline} · Old Gym`)
+        // The active list is untouched.
+        expect(mainSurface('Rent')).toBeInTheDocument()
+      })
+
+      it("Undo on the toast calls the kind's undo api and the row reappears in the Frozen section", async () => {
+        remove.mockResolvedValue(frozenDefinition)
+        undoRemove.mockResolvedValue(frozenDefinition)
+        renderInProvider()
+        const dialog = await openFrozenModal()
+        fireEvent.click(within(dialog).getByRole('button', { name: `Delete ${noun}` }))
+        await screen.findByRole('status')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+        await waitFor(() => expect(undoRemove).toHaveBeenCalledWith('', frozenDefinition))
+        await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+        // The section was expanded before the delete; a restored row shows
+        // at once, still frozen.
+        const header = await screen.findByRole('button', { name: `Frozen ${noun}s (1)` })
+        if (header.getAttribute('aria-expanded') === 'false') fireEvent.click(header)
+        expect(mainSurface('Old Gym').textContent).toContain('Every year · Frozen')
+      })
+
+      it("a rule error from the delete api renders inline in the modal with the backend's message", async () => {
+        const refusal = `3 transactions are linked to this ${noun} — unlink them first`
+        remove.mockRejectedValue(new ApiError(refusal, 422))
+        renderInProvider()
+        const dialog = await openFrozenModal()
+
+        fireEvent.click(within(dialog).getByRole('button', { name: `Delete ${noun}` }))
+
+        expect(await within(dialog).findByText(refusal)).toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: editLabel })).toBeInTheDocument()
+        expect(within(dialog).getByRole('button', { name: `Delete ${noun}` })).toBeEnabled()
+        expect(screen.queryByRole('status')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: `Frozen ${noun}s (1)` })).toBeInTheDocument()
       })
     })
   },

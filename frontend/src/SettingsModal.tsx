@@ -11,7 +11,8 @@ type SettingsModalProps = {
   onDeleteAccount: () => Promise<void>
   onDeleted: () => void
   onClose: () => void
-  /** Called after a successful restore — parent should clear undo stack. */
+  /** Called the moment a restore succeeds — before the success screen is
+   * dismissed — so the parent clears the undo stack at once (ADR-0034). */
   onRestored?: () => void
 }
 
@@ -79,6 +80,7 @@ export function SettingsModal({ email, language, onChangeLanguage, onDeleteAccou
     setRestoreError(null)
     try {
       const result = await restoreBackup(token, fileRef.current)
+      onRestored?.()
       if (result.warning) {
         setRestoreWarning(result.warning)
         setRestoreStep('warning')
@@ -107,7 +109,6 @@ export function SettingsModal({ email, language, onChangeLanguage, onDeleteAccou
 
   /** Close the whole modal once the restore is done. */
   const handleDoneClose = () => {
-    onRestored?.()
     onClose()
   }
 

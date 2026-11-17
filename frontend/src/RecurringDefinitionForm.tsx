@@ -31,6 +31,9 @@ type RecurringDefinitionFormProps = {
   onSaved: (definition: RecurringDefinition) => void
   onFreeze?: (definition: RecurringDefinition) => void
   onUnfreeze?: (definition: RecurringDefinition) => void
+  /** A frozen definition was deleted for good (ADR-0034): the deleted row
+   * is the Undo replay payload. */
+  onDeleted?: (definition: RecurringDefinition) => void
   onCancel: () => void
 }
 
@@ -57,7 +60,11 @@ type RecurringDefinitionFormProps = {
  * refreshes the derived state (badge, next due date) on the cards behind.
  * Cancel — like the shell's backdrop and Escape — abandons the draft
  * without saving. Field Errors (ADR-0029) reveal inline under each wrong
- * field on a Save attempt; frozen/read-only rendering never validates. */
+ * field on a Save attempt; frozen/read-only rendering never validates. A
+ * frozen definition's form offers Unfreeze and, below it, a red Delete
+ * (ADR-0034): one tap deletes — the shell's Undo toast is the
+ * confirmation — and a refusal (a linked Transaction) shows inline with
+ * the backend's message, the single source of the explanation. */
 
 /** The form's draft, as submit-and-validate (ADR-0029) sees it: everything
  * that can be wrong, in one flat record, so the pure `validate()` below can
@@ -120,6 +127,7 @@ export function RecurringDefinitionForm({
   onSaved,
   onFreeze,
   onUnfreeze,
+  onDeleted,
   onCancel,
 }: RecurringDefinitionFormProps) {
   const { formatMessage } = useIntl()
@@ -145,6 +153,7 @@ export function RecurringDefinitionForm({
   const [errors, setErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   // The Occurrences section's rows (ADR-0026): their own read, loaded when
   // an existing definition opens the form (a definition under creation has
@@ -277,6 +286,27 @@ export function RecurringDefinitionForm({
     } catch {
       setError(text('error.unfreeze'))
       setSubmitting(false)
+    }
+  }
+
+  // Delete (ADR-0034): one tap, no confirmation step — the Undo toast is
+  // the confirmation. The backend's rule error (an active definition, or
+  // one with a linked Transaction) is shown as it came: it names the
+  // count and the hint to unlink first.
+  const handleDelete = async () => {
+    if (definition === undefined || !definition.frozen) {
+      return
+    }
+    setDeleting(true)
+    setError(null)
+    try {
+      const deleted = await api.delete(token, definition.id)
+      onDeleted?.(deleted)
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 422 ? err.message : text('error.delete'),
+      )
+      setDeleting(false)
     }
   }
 
@@ -475,7 +505,7 @@ export function RecurringDefinitionForm({
           <button
             type="button"
             onClick={handleUnfreeze}
-            disabled={submitting}
+            disabled={submitting || deleting}
             className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100"
           >
             {submitting ? text('unfreezing') : text('unfreeze')}
@@ -487,6 +517,23 @@ export function RecurringDefinitionForm({
             className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-600"
           >
             {text('cancel')}
+          </button>
+        </div>
+      )}
+
+      {/* Delete (ADR-0034), below Unfreeze: always tappable — the backend
+          says why when it refuses, instead of a greyed-out button leaving
+          the user guessing. */}
+      {editing && readOnly && onDeleted !== undefined && (
+        <div className="border-t border-slate-100 pt-4">
+          <p className="text-xs text-slate-500">{text('deleteHint')}</p>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting || submitting}
+            className="mt-3 w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 disabled:opacity-60"
+          >
+            {deleting ? text('deleting') : text('delete')}
           </button>
         </div>
       )}

@@ -12,7 +12,6 @@ import {
   formatEuros,
   formatLedgerDate,
   TOKEN_KEY,
-  undoTransaction,
   ApiError,
   type Category,
   type RecurringCost,
@@ -29,13 +28,7 @@ import type { ImportDraftController } from './importDraft'
 import { RecurringDefinitionModal } from './RecurringDefinitionModal'
 import { TransactionModal } from './TransactionModal'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
-import { UndoToastStack } from './UndoToastStack'
-import {
-  expireEntries,
-  pushEntry,
-  removeEntry,
-  type UndoEntry,
-} from './undoStack'
+import { useUndo } from './undoContext'
 import { WalletModal } from './WalletModal'
 import { signedAmount, locationSuffix, transactionTitle } from './transactions'
 
@@ -133,10 +126,10 @@ export function TransactionsScreen({
   const [recurringIncomeToSelect, setRecurringIncomeToSelect] = useState<number | null>(null)
   const [savedWarning, setSavedWarning] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
-  const [undoError, setUndoError] = useState<string | null>(null)
-  // The undo stack (ADR-0031): in-memory buffer of deleted Transactions
-  // waiting for a 10-second undo window. Newest first; max 3.
-  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
+  // The undo stack (ADR-0031) lives in the app shell since ADR-0034 — one
+  // stack for every deletable kind, visible on every tab. The screen only
+  // reports a delete and reloads when an Undo brings a Transaction back.
+  const { pushDeleted, restored } = useUndo()
   // True only when the unfiltered, unsearched ledger is empty (issue #54):
   // then the whole toolbar row hides (issue #92) — there is nothing to
   // search or filter.
@@ -613,46 +606,23 @@ export function TransactionsScreen({
 
   const handleDeleted = (deleted: Transaction) => {
     closeForm()
-    // Push the deleted Transaction onto the undo stack (ADR-0031)
-    // The reload happens after the undo buffer state is updated.
-    setUndoStack((current) => pushEntry(current, deleted, Date.now()).stack)
+    // The deleted Transaction enters the app-wide undo stack (ADR-0031,
+    // ADR-0034); the ledger reloads without it.
+    pushDeleted({ kind: 'transaction', entity: deleted })
     reload()
     setSavedWarning(null)
   }
 
-  // Undo a deletion (ADR-0031): call the undo endpoint, then reload.
-  const handleUndo = async (entry: UndoEntry) => {
-    const token = localStorage.getItem(TOKEN_KEY) ?? ''
-    try {
-      await undoTransaction(token, entry.transaction)
-      setUndoStack((current) => removeEntry(current, entry.transaction.id))
-      setUndoError(null)
-      reload()
-    } catch (error) {
-      // Undo failed (e.g. pin already taken or network error); remove
-      // from the stack so the toast disappears.
-      setUndoStack((current) => removeEntry(current, entry.transaction.id))
-      setUndoError(
-        error instanceof ApiError
-          ? error.message
-          : formatMessage({ id: 'transactions.error.undo' }),
-      )
-      reload()
-    }
-  }
-
-  // Dismiss an undo entry (expiry or manual ✕).
-  const handleDismissUndo = (transactionId: number) => {
-    setUndoStack((current) => removeEntry(current, transactionId))
-  }
-
-  // Periodically expire entries that have outlived their window.
+  // An Undo brought a Transaction back (ADR-0031): the ledger reloads so
+  // it shows under its original date. `reload` is read through a ref so
+  // only a new restore — never a re-render — triggers the reload.
+  const reloadRef = useRef(reload)
+  reloadRef.current = reload
   useEffect(() => {
-    const timer = setInterval(() => {
-      setUndoStack((current) => expireEntries(current, Date.now()).stack)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
+    if (restored?.kind === 'transaction') {
+      reloadRef.current()
+    }
+  }, [restored])
 
   // Clear all filters (panel footer, issue #92): resets the five panel
   // filters only — the search box keeps its text. The existing
@@ -742,9 +712,6 @@ export function TransactionsScreen({
           {loadError !== null && <p className="mt-2 text-sm text-red-600">{loadError}</p>}
           {exportError !== null && (
             <p className="mt-2 text-sm text-red-600">{exportError}</p>
-          )}
-          {undoError !== null && (
-            <p className="mt-2 text-sm text-red-600">{undoError}</p>
           )}
           {savedWarning !== null && (
             <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -1105,12 +1072,6 @@ export function TransactionsScreen({
           }}
         />
       )}
-
-      <UndoToastStack
-        stack={undoStack}
-        onUndo={handleUndo}
-        onDismiss={handleDismissUndo}
-      />
     </>
   )
 }
