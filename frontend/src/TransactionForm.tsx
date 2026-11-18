@@ -44,12 +44,42 @@ import { NON_CONTACT_WALLET_TYPES, todayInRome } from './transactions'
 import { FieldError } from './FieldError'
 import { fieldErrorProps, parseAmount, type FieldErrors } from './validation'
 
+/** The fields the form can start from: the Transaction's own, minus what
+ * the server assigns (id, pin, warning, timestamp). */
+type InitialField = Exclude<keyof Transaction, 'id' | 'occurrence_date' | 'warning' | 'created_at'>
+
+/** The partial initial values the form starts from when it is neither
+ * empty nor editing (issue #124, ADR-0036): the Transaction's field names,
+ * each possibly missing — absent or null — so a Draft Transaction, which
+ * carries the same fields each nullable, passes as it stands, and a
+ * Transaction does too. What they carry is rendered as is. What they miss
+ * stays empty where the field can show empty (amount, date), so Save
+ * reveals the Field Error on it, and takes the create form's default where
+ * it cannot: a missing type is an Expense, and a Wallet the pickers cannot
+ * offer — missing, frozen (ADR-0002) or unknown — gives way to the first
+ * active one, the way a new Transaction starts. */
+export type TransactionInitialValues = {
+  [K in InitialField]?: Transaction[K] | null
+}
+
 type TransactionFormProps = {
   wallets: Wallet[]
   categories: Category[]
   recurringCosts: RecurringCost[]
   recurringIncomes: RecurringIncome[]
   editing: Transaction | null
+  /** Partial initial values for a form that is not editing (issue #124,
+   * ADR-0036): a Draft Transaction opens pre-filled from them. Ignored
+   * while `editing` is set, which seeds the form from the Transaction
+   * itself. */
+  initialValues?: TransactionInitialValues | null
+  /** The caller-supplied save (issue #124, ADR-0036): given the validated
+   * payload, persists it and returns the Transaction that resulted. When
+   * set, the form never calls the create or update endpoint itself — a
+   * Draft Transaction's Save goes through Approve this way. Validation,
+   * the error banner and `onSaved` work exactly as for the form's own
+   * save. */
+  save?: (input: TransactionInput) => Promise<Transaction>
   onSaved: (transaction: Transaction) => void
   /** Called with the full Transaction after a successful single-tap delete
    * (ADR-0031). The screen uses it to populate the undo buffer. */
@@ -161,6 +191,12 @@ function validate(draft: TransactionDraft): FieldErrors {
   return errors
 }
 
+/** The form type a stored type opens as: an Opening Balance (never edited
+ * here) and a missing type both fall back to the create default, Expense. */
+function formTypeOf(type: Transaction['type'] | null | undefined): TransactionFormType {
+  return type === 'transfer' ? 'transfer' : type === 'income' ? 'income' : 'expense'
+}
+
 /** The create/edit/delete form for a Transaction (Expense, Income, or
  * Transfer), hosted in the modal shell (TransactionModal) by the
  * Transactions tab. Cancel — like the shell's backdrop and Escape —
@@ -171,6 +207,8 @@ export function TransactionForm({
   recurringCosts,
   recurringIncomes,
   editing,
+  initialValues = null,
+  save,
   onSaved,
   onDeleted,
   onCancel,
@@ -184,15 +222,15 @@ export function TransactionForm({
   recurringIncomeToSelect,
 }: TransactionFormProps) {
   const { formatMessage } = useIntl()
-  const [type, setType] = useState<TransactionFormType>(
-    editing?.type === 'transfer'
-      ? 'transfer'
-      : editing?.type === 'income'
-        ? 'income'
-        : 'expense',
-  )
-  const [amount, setAmount] = useState(editing?.amount ?? '')
-  const [date, setDate] = useState(editing?.date ?? todayInRome())
+  // What the form starts from (issue #124): the Transaction being edited,
+  // else the partial initial values, else nothing — a new Transaction with
+  // the create defaults.
+  const seed: TransactionInitialValues | null = editing ?? initialValues
+  const [type, setType] = useState<TransactionFormType>(formTypeOf(seed?.type))
+  const [amount, setAmount] = useState(seed?.amount ?? '')
+  // Initial values without a date leave the field empty for Save to point
+  // at; only a form starting from nothing takes today.
+  const [date, setDate] = useState(seed === null ? todayInRome() : (seed.date ?? ''))
   // Frozen Wallets are read-only (ADR-0002): they can never receive a new
   // Transaction, so the form only offers active Wallets in its pickers and
   // seeds its defaults from them. The screen passes the full list
@@ -207,11 +245,46 @@ export function TransactionForm({
     [assignableWallets],
   )
   const firstSpendableWalletId = spendableWallets[0]?.id
-  const [walletId, setWalletId] = useState<number | undefined>(
-    editing?.type === 'transfer'
-      ? undefined
-      : (editing?.wallet_id ?? firstSpendableWalletId),
-  )
+  // The create defaults for the three Wallet fields: the first spendable
+  // Wallet for an Expense/Income, the first two active ones for a
+  // Transfer's legs.
+  const defaultWalletIds = {
+    wallet: firstSpendableWalletId,
+    source: assignableWallets[0]?.id,
+    destination: assignableWallets[1]?.id ?? assignableWallets[0]?.id,
+  }
+  // An initial Wallet counts only when the pickers can offer it (issue
+  // #124): a frozen or unknown one would sit invisibly behind a select
+  // showing its first row, so it gives way to the create default instead.
+  const offeredWalletId = (id: number | null | undefined): number | undefined =>
+    id !== null && id !== undefined && assignableWallets.some((wallet) => wallet.id === id)
+      ? id
+      : undefined
+  // The Wallet fields a form starts with: while editing, the Transaction's
+  // own for its type and the defaults for the fields its type never shows
+  // (the type is locked, so they never surface); otherwise the initial
+  // values where the pickers can offer them, the defaults everywhere else.
+  const initialWalletIds =
+    editing !== null
+      ? editing.type === 'transfer'
+        ? {
+            wallet: undefined,
+            source: editing.source_wallet_id ?? undefined,
+            destination: editing.destination_wallet_id ?? undefined,
+          }
+        : {
+            wallet: editing.wallet_id ?? defaultWalletIds.wallet,
+            source: defaultWalletIds.source,
+            destination: defaultWalletIds.destination,
+          }
+      : {
+          wallet: offeredWalletId(initialValues?.wallet_id) ?? defaultWalletIds.wallet,
+          source: offeredWalletId(initialValues?.source_wallet_id) ?? defaultWalletIds.source,
+          destination:
+            offeredWalletId(initialValues?.destination_wallet_id) ??
+            defaultWalletIds.destination,
+        }
+  const [walletId, setWalletId] = useState<number | undefined>(initialWalletIds.wallet)
   // The Wallet picker's allowed types depend on the form type (ADR-0017):
   // Expenses may record consumption a Contact paid for, Incomes may not.
   // There is no silent reset anymore (ADR-0029): switching an Expense that
@@ -219,14 +292,12 @@ export function TransactionForm({
   // it with the "Incomes can't be recorded on contact wallets." Field
   // Error instead of swapping the Wallet behind the user's back.
   const [sourceWalletId, setSourceWalletId] = useState<number | undefined>(
-    editing?.type === 'transfer' ? (editing.source_wallet_id ?? undefined) : assignableWallets[0]?.id,
+    initialWalletIds.source,
   )
   const [destinationWalletId, setDestinationWalletId] = useState<number | undefined>(
-    editing?.type === 'transfer'
-      ? (editing.destination_wallet_id ?? undefined)
-      : (assignableWallets[1]?.id ?? assignableWallets[0]?.id),
+    initialWalletIds.destination,
   )
-  const [categoryId, setCategoryId] = useState<number | null>(editing?.category_id ?? null)
+  const [categoryId, setCategoryId] = useState<number | null>(seed?.category_id ?? null)
 
   // Inline entity creation (ADR-0013): when the screen's inner Category
   // modal saves, it reports the new Category's id here so this field
@@ -253,10 +324,11 @@ export function TransactionForm({
   }, [walletToSelect])
   // The optional Recurring Cost link (issue #57, ADR-0027): an Expense —
   // or a Transfer to a Contact Wallet — pins one cost, paying its oldest
-  // Unpaid Occurrence. Seeded from the Transaction being edited, so an
-  // untouched link is never re-sent (and never re-pinned).
+  // Unpaid Occurrence. Seeded from what the form starts from — the
+  // Transaction being edited, so an untouched link is never re-sent (and
+  // never re-pinned), or the initial values (issue #124).
   const [recurringCostId, setRecurringCostId] = useState<number | null>(
-    editing?.recurring_cost_id ?? null,
+    seed?.recurring_cost_id ?? null,
   )
   // Inline entity creation (ADR-0013): when the screen's inner Recurring
   // Cost modal saves, it reports the new definition's id here so this field
@@ -272,9 +344,9 @@ export function TransactionForm({
   // The optional Recurring Income link (issue #61, ADR-0027), mirroring
   // the cost link: an Income — or a Transfer from a Contact Wallet — pins
   // one Recurring Income, paying its oldest Unpaid Occurrence. Same
-  // seed-from-editing contract.
+  // seeding contract.
   const [recurringIncomeId, setRecurringIncomeId] = useState<number | null>(
-    editing?.recurring_income_id ?? null,
+    seed?.recurring_income_id ?? null,
   )
   // The Recurring Income field's inline creation, the mirror of the cost
   // one above: the new definition's id arrives from the screen and takes
@@ -284,7 +356,7 @@ export function TransactionForm({
       setRecurringIncomeId(recurringIncomeToSelect)
     }
   }, [recurringIncomeToSelect])
-  const [description, setDescription] = useState(editing?.description ?? '')
+  const [description, setDescription] = useState(seed?.description ?? '')
   const descriptionField = useRef<HTMLTextAreaElement | null>(null)
   // Auto-grow (issue #53): rows follow the explicit line count so the field
   // always holds every line; the measured-height effect below absorbs soft
@@ -301,14 +373,14 @@ export function TransactionForm({
     }
   }, [description])
   const [location, setLocation] = useState<LatLng | null>(() =>
-    latLngFromWire(editing?.latitude ?? null, editing?.longitude ?? null),
+    latLngFromWire(seed?.latitude ?? null, seed?.longitude ?? null),
   )
   // The optional Place reference (ADR-0005): set by a pick that carries one
   // (search pick, Google-map tap), cleared by a coordinates-only pick
   // (Leaflet tap, GPS), or Remove. It always accompanies coordinates — never
   // the reverse.
   const [place, setPlace] = useState<Place | null>(() =>
-    placeFromWire(editing?.place_name ?? null, editing?.place_id ?? null),
+    placeFromWire(seed?.place_name ?? null, seed?.place_id ?? null),
   )
   const [showingPicker, setShowingPicker] = useState(false)
   // GPS feedback (issue #35): true while the "Use my location" lookup runs,
@@ -494,8 +566,13 @@ export function TransactionForm({
             ...latLngToWire(finalLocation),
             ...placeToWire(place),
           }
+      // The caller-supplied save (issue #124, ADR-0036) takes the
+      // validated payload in place of both endpoints — a Draft
+      // Transaction's Save goes through Approve this way.
       const saved =
-        isEditing && editing !== null
+        save !== undefined
+          ? await save(input)
+          : isEditing && editing !== null
           ? await updateTransaction(token, editing.id, {
               amount: canonicalAmount,
               date,

@@ -3,10 +3,11 @@ import {
   type RecurringCost,
   type RecurringIncome,
   type Transaction,
+  type TransactionInput,
   type Wallet,
 } from './api'
 import { ModalShell } from './ModalShell'
-import { TransactionForm } from './TransactionForm'
+import { TransactionForm, type TransactionInitialValues } from './TransactionForm'
 import type { TransactionFormType, WalletTarget } from './transactionFields'
 
 type TransactionModalProps = {
@@ -15,6 +16,14 @@ type TransactionModalProps = {
   recurringCosts: RecurringCost[]
   recurringIncomes: RecurringIncome[]
   editing: Transaction | null
+  /** Partial initial values for a form that is not editing (issue #124,
+   * ADR-0036), passed through to the form: a Draft Transaction opens
+   * pre-filled from them. */
+  initialValues?: TransactionInitialValues | null
+  /** The caller-supplied save (issue #124, ADR-0036), passed through to
+   * the form: when set, the form's Save goes through it — Approve for a
+   * Draft Transaction — instead of the create or update endpoint. */
+  save?: (input: TransactionInput) => Promise<Transaction>
   onSaved: (transaction: Transaction) => void
   /** Called with the deleted Transaction after a successful single-tap delete
    * (ADR-0031). The screen pushes it into the undo buffer. */
@@ -58,6 +67,8 @@ export function TransactionModal({
   recurringCosts,
   recurringIncomes,
   editing,
+  initialValues = null,
+  save,
   onSaved,
   onDeleted,
   onClose,
@@ -82,6 +93,8 @@ export function TransactionModal({
         recurringCosts={recurringCosts}
         recurringIncomes={recurringIncomes}
         editing={editing}
+        initialValues={initialValues}
+        save={save}
         onSaved={onSaved}
         onDeleted={onDeleted}
         onCancel={onClose}
