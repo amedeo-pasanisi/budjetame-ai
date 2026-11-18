@@ -102,6 +102,13 @@ export {
 } from './assistantSettings'
 
 export {
+  type AssistantBlock,
+  type AssistantMessage,
+  type AssistantTurnResult,
+  sendAssistantTurn,
+} from './assistant'
+
+export {
   type DraftTransaction,
   type DraftTransactionInput,
   type DraftTransactionType,

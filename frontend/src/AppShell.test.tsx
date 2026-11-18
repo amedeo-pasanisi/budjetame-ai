@@ -116,6 +116,8 @@ vi.mock('./api', async () => {
     removeAssistantSettings: vi.fn(),
     // ...and the provider's model list for the picker (#127).
     fetchAssistantModels: vi.fn().mockResolvedValue([]),
+    // The Assistant modal's one call (#132).
+    sendAssistantTurn: vi.fn(),
   }
 })
 
@@ -125,8 +127,10 @@ vi.mock('./MapPicker', () => ({
 }))
 
 import {
+  ApiError,
   deleteRecurringCost,
   deleteWallet,
+  fetchAssistantSettings,
   fetchBudget,
   fetchCategories,
   fetchDashboardSummary,
@@ -138,6 +142,7 @@ import {
   fetchTransactions,
   fetchWallets,
   restoreBackup,
+  sendAssistantTurn,
   updateAccountLanguage,
 } from './api'
 import { getLocale, setLocale } from './api/format'
@@ -159,6 +164,8 @@ const updateAccountLanguageMock = vi.mocked(updateAccountLanguage)
 const deleteWalletMock = vi.mocked(deleteWallet)
 const deleteRecurringCostMock = vi.mocked(deleteRecurringCost)
 const restoreBackupMock = vi.mocked(restoreBackup)
+const fetchAssistantSettingsMock = vi.mocked(fetchAssistantSettings)
+const sendAssistantTurnMock = vi.mocked(sendAssistantTurn)
 
 type Tab = 'dashboard' | 'wallets' | 'transactions' | 'categories' | 'recurring'
 
@@ -184,17 +191,19 @@ async function expectTab(tab: Tab) {
   }
 }
 
-async function renderShell() {
+async function renderShell(locale: 'en' | 'it' = 'en') {
   renderWithIntl(
     <AppShell
       email="demo@budjetame.example"
       onSignOut={vi.fn()}
       onDeleteAccount={vi.fn()}
-      locale="en"
+      locale={locale}
       onChangeLanguage={vi.fn()}
     />,
+    { locale },
   )
-  await expectTab('dashboard')
+  if (locale === 'en') await expectTab('dashboard')
+  else await screen.findByText('Patrimonio netto')
 }
 
 /** One finger down at `from`, a single move to `to`, then lift. */
@@ -212,8 +221,12 @@ function swipe(
   fireEvent.touchEnd(target, { touches: [] })
 }
 
+const NOT_CONFIGURED = { configured: false, provider: null, model: null, last4: null }
+const CONFIGURED = { configured: true, provider: 'anthropic' as const, model: 'claude-opus-5-5', last4: 'ab12' }
+
 beforeEach(() => {
   fetchAccountLanguageMock.mockResolvedValue('en')
+  fetchAssistantSettingsMock.mockResolvedValue(NOT_CONFIGURED)
   fetchWalletsMock.mockResolvedValue([])
   fetchCategoriesMock.mockResolvedValue([])
   fetchRecurringCostsMock.mockResolvedValue([])
@@ -970,5 +983,94 @@ describe('AppShell undo stack (ADR-0034)', () => {
     expect(await screen.findByText('Restore complete')).toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+  })
+})
+
+describe('AppShell Assistant (ADR-0035, issue #132)', () => {
+  it('has no Assistant button without Assistant Settings', async () => {
+    await renderShell()
+    await waitFor(() => expect(fetchAssistantSettingsMock).toHaveBeenCalledWith(''))
+    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+  })
+
+  it('shows the Assistant button on every tab when the Settings are configured', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue(CONFIGURED)
+    await renderShell()
+    expect(await screen.findByRole('button', { name: 'Assistant' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recurring' }))
+    await expectTab('recurring')
+    expect(screen.getByRole('button', { name: 'Assistant' })).toBeInTheDocument()
+  })
+
+  it('hides the button right after the key is removed in Settings', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue(CONFIGURED)
+    await renderShell()
+    await screen.findByRole('button', { name: 'Assistant' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    await screen.findByRole('dialog', { name: 'Settings' })
+    // The key is removed while Settings is open; the shell re-checks the
+    // status as the modal closes.
+    fetchAssistantSettingsMock.mockResolvedValue(NOT_CONFIGURED)
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('opens the Assistant modal, and closing it forgets the conversation', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue(CONFIGURED)
+    sendAssistantTurnMock.mockResolvedValue({
+      reply: 'Expense 30.00 € today: Food',
+      transcript_tail: [
+        { role: 'user', content: [{ type: 'text', text: '30 euro of food' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'Expense 30.00 € today: Food' }] },
+      ],
+    })
+    await renderShell()
+    fireEvent.click(await screen.findByRole('button', { name: 'Assistant' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Assistant' })
+
+    fireEvent.change(within(dialog).getByLabelText('Your sentence'), {
+      target: { value: '30 euro of food' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }))
+    expect(await within(dialog).findByText('Expense 30.00 € today: Food')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close the Assistant' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Reopened: the transcript lives in the modal only (ADR-0035).
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    const reopened = await screen.findByRole('dialog', { name: 'Assistant' })
+    expect(within(reopened).queryByText('Expense 30.00 € today: Food')).not.toBeInTheDocument()
+    expect(within(reopened).queryByText('30 euro of food')).not.toBeInTheDocument()
+  })
+
+  it('a 409 from a turn closes the modal and hides the button', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue(CONFIGURED)
+    sendAssistantTurnMock.mockRejectedValue(new ApiError('no settings', 409))
+    await renderShell()
+    fireEvent.click(await screen.findByRole('button', { name: 'Assistant' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Assistant' })
+
+    fireEvent.change(within(dialog).getByLabelText('Your sentence'), {
+      target: { value: '30 euro of food' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+  })
+
+  it('is labelled in Italian for an Italian Account', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue(CONFIGURED)
+    await renderShell('it')
+    fireEvent.click(await screen.findByRole('button', { name: 'Assistente' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Assistente' })
+    expect(within(dialog).getByRole('button', { name: 'Invia' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('La tua frase')).toBeInTheDocument()
   })
 })

@@ -12,6 +12,7 @@ import {
   useDataVersion,
 } from './dataVersion'
 import { request } from './transport'
+import { sendAssistantTurn } from './assistant'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -58,6 +59,20 @@ describe('transport bumps on writes only (ADR-0022)', () => {
       token: 't',
       errorMessage: 'Could not create wallet',
     })
+
+    expect(getDataVersion()).toBe(before + 1)
+  })
+
+  it('bumps after a successful Assistant turn, so the Transactions tab refetches its Drafts (issue #132)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ reply: 'Ok', transcript_tail: [] }), { status: 200 }),
+      ),
+    )
+    const before = getDataVersion()
+
+    await sendAssistantTurn('t', [], 'trenta euro di cibo')
 
     expect(getDataVersion()).toBe(before + 1)
   })

@@ -9,6 +9,21 @@ here and on GitHub Releases.
 
 ### Added
 
+- **Assistant on every tab** (ADR-0035, #132): an Assistant button in the
+  header of every tab, shown only while the Assistant Settings status
+  reports configured — it goes the moment the key is removed in Settings,
+  and a 409 from a turn (settings removed elsewhere) hides it too. It
+  opens a centered modal (ADR-0008) with the conversation, a text box,
+  Send and, where the browser has speech recognition, a microphone that
+  dictates into the text box in the Account's Locale (`it-IT` / `en-US`)
+  and never sends on its own. Send posts the transcript plus the sentence
+  to `POST /assistant/turns`, shows the written reply, and carries the
+  returned tail back untouched on the next Send; the turn bumps the cache
+  clock (ADR-0022), so the Transactions tab shows the new Drafts in the
+  background. The conversation lives in the modal only and is gone on
+  close or reload. The server's replies for its bounds and the provider's
+  failures read as ordinary Assistant lines; the hourly 429 and a provider
+  failure get a line of the client's own.
 - **Assistant turn** (ADR-0035, #128): `POST /assistant/turns` runs the
   Assistant on the server, stateless: the client sends the transcript as
   it last received it plus the new sentence and gets back the written

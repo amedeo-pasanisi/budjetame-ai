@@ -27,6 +27,26 @@ export const enMessages = {
   'app.tab.transactions': 'Transactions',
   'app.tab.categories': 'Categories',
   'app.tab.recurring': 'Recurring',
+  'app.assistantLabel': 'Assistant',
+
+  // -- Assistant modal (ADR-0035, issue #132) --
+  'assistant.title': 'Assistant',
+  'assistant.closeAria': 'Close the Assistant',
+  'assistant.log': 'Conversation',
+  'assistant.empty': 'Say or type what you spent or received. Each Draft lands on the Transactions tab, to approve with one tap.',
+  'assistant.line.user': 'You',
+  'assistant.line.assistant': 'Assistant',
+  'assistant.thinking': 'The Assistant is writing…',
+  'assistant.input': 'Your sentence',
+  'assistant.input.placeholder': 'e.g. 30 euro at the supermarket with the card',
+  'assistant.send': 'Send',
+  'assistant.sending': 'Sending…',
+  'assistant.dictation.start': 'Dictate',
+  'assistant.dictation.stop': 'Stop dictating',
+  'assistant.dictation.listening': 'Listening…',
+  'assistant.dictation.error': 'Dictation did not work. Type the sentence instead.',
+  'assistant.error.hourly': 'You have reached the hourly limit of Assistant requests. Try again later.',
+  'assistant.error.generic': 'The Assistant could not answer. Try again.',
 
   // -- Dashboard screen --
   'dashboard.title': 'Dashboard',
@@ -586,6 +606,26 @@ export const itMessages: Record<string, string> = {
   'app.tab.transactions': 'Transazioni',
   'app.tab.categories': 'Categorie',
   'app.tab.recurring': 'Ricorrenti',
+  'app.assistantLabel': 'Assistente',
+
+  // -- Assistant modal (ADR-0035, issue #132) --
+  'assistant.title': 'Assistente',
+  'assistant.closeAria': "Chiudi l'Assistente",
+  'assistant.log': 'Conversazione',
+  'assistant.empty': "Di' o scrivi cosa hai speso o ricevuto. Ogni bozza finisce nella scheda Transazioni, da approvare con un tocco.",
+  'assistant.line.user': 'Tu',
+  'assistant.line.assistant': 'Assistente',
+  'assistant.thinking': "L'Assistente sta scrivendo…",
+  'assistant.input': 'La tua frase',
+  'assistant.input.placeholder': 'es. 30 euro al supermercato con la carta',
+  'assistant.send': 'Invia',
+  'assistant.sending': 'Invio…',
+  'assistant.dictation.start': 'Detta',
+  'assistant.dictation.stop': 'Ferma la dettatura',
+  'assistant.dictation.listening': 'In ascolto…',
+  'assistant.dictation.error': 'La dettatura non ha funzionato. Scrivi la frase.',
+  'assistant.error.hourly': "Hai raggiunto il limite orario di richieste all'Assistente. Riprova più tardi.",
+  'assistant.error.generic': "L'Assistente non ha potuto rispondere. Riprova.",
 
   // -- Dashboard screen --
   'dashboard.title': 'Home',

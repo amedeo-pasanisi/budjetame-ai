@@ -65,6 +65,15 @@ vi.mock('./api', () => ({
   freezeWallet: vi.fn(),
   fetchAccountLanguage: vi.fn().mockResolvedValue('en'),
   updateAccountLanguage: vi.fn().mockResolvedValue(undefined),
+  // The shell checks the Assistant Settings status at mount (#132): not
+  // configured here, so no Assistant button and no turn is ever sent.
+  fetchAssistantSettings: vi.fn().mockResolvedValue({
+    configured: false,
+    provider: null,
+    model: null,
+    last4: null,
+  }),
+  sendAssistantTurn: vi.fn(),
 }))
 
 // The map picker is a separate seam (issue #27); this test is about tabs.

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { IntlProvider, useIntl } from 'react-intl'
 
-import { fetchAccountLanguage, setLocale, TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account, updateAccountLanguage } from './api'
+import { fetchAccountLanguage, fetchAssistantSettings, setLocale, TOKEN_KEY, deleteAccount, fetchCurrentAccount, googleSignIn, login, register, requestPasswordReset, resetPassword, type Account, updateAccountLanguage } from './api'
 import { enMessages, itMessages } from './i18n/catalogs'
+import { AssistantModal } from './AssistantModal'
 import { CategoriesScreen } from './CategoriesScreen'
 import { DashboardScreen } from './DashboardScreen'
 import { useImportDraft, type ImportDraftController } from './importDraft'
@@ -281,6 +282,42 @@ function AppShellBody({
   }
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // The Assistant (ADR-0035, issue #132): one button on every tab, shown
+  // only while the Assistant Settings status reports configured — an
+  // Account without Assistant Settings has no Assistant. The status is
+  // checked at mount and again whenever the Settings modal closes (the
+  // key is set or removed there), so the button goes right after a
+  // removal; a 409 from a turn (removed elsewhere) hides it too.
+  const [assistantConfigured, setAssistantConfigured] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantStatusTick, setAssistantStatusTick] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    fetchAssistantSettings(localStorage.getItem(TOKEN_KEY) ?? '')
+      .then((status) => {
+        if (!cancelled) setAssistantConfigured(status.configured)
+      })
+      .catch(() => {
+        if (!cancelled) setAssistantConfigured(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [assistantStatusTick])
+
+  const closeSettings = () => {
+    setSettingsOpen(false)
+    setAssistantStatusTick((count) => count + 1)
+  }
+
+  const handleAssistantGone = useCallback(() => {
+    setAssistantOpen(false)
+    setAssistantConfigured(false)
+  }, [])
+
+  const closeAssistant = useCallback(() => setAssistantOpen(false), [])
+
   // The Import Draft lives here, not in the Transactions screen, so it
   // survives tab switches (issue #43) — under keep-alive the screen never
   // unmounts, and the shell-owned draft is what it was from the start.
@@ -335,6 +372,16 @@ function AppShellBody({
           <p className="mt-0.5 text-xs text-slate-500">{email}</p>
         </div>
         <div className="flex items-center gap-2">
+          {assistantConfigured && (
+            <button
+              type="button"
+              onClick={() => setAssistantOpen(true)}
+              aria-label={formatMessage({ id: 'app.assistantLabel' })}
+              className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700"
+            >
+              ✦
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
@@ -360,9 +407,13 @@ function AppShellBody({
           onChangeLanguage={onChangeLanguage}
           onDeleteAccount={onDeleteAccount}
           onDeleted={onSignOut}
-          onClose={() => setSettingsOpen(false)}
+          onClose={closeSettings}
           onRestored={clearUndoStack}
         />
+      )}
+
+      {assistantOpen && (
+        <AssistantModal locale={locale} onClose={closeAssistant} onNoSettings={handleAssistantGone} />
       )}
 
       <main className="mx-auto mt-6 max-w-sm" {...swipeHandlers}>
