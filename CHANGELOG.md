@@ -5,6 +5,25 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+
+- **Assistant Settings** (ADR-0035, #126): Settings gains an Assistant
+  block where an Account picks a provider (Anthropic, OpenRouter, Google
+  Gemini), pastes its Assistant Key and optionally types a model id; Save
+  stores the three together, Remove clears them, and a status line reads
+  "Configured: provider / model, key ends in …". The key is encrypted at
+  rest (AES-GCM under the new `BUDJETAME_ASSISTANT_KEY_SECRET`, generated
+  by the provision script next to the JWT secret) and is write-only: it
+  appears in no response, Backup, Export or log, and a Restore never
+  writes one. Switching provider replaces the key and resets the model to
+  that provider's default. A key stored under a lost or rotated secret
+  reads as "Not configured" and is re-entered.
+- **API:** `GET`/`PUT`/`DELETE /assistant/settings` (status, set-or-replace,
+  remove). `BUDJETAME_ASSISTANT_KEY_SECRET` is required by the compose
+  files like the JWT secret.
+
 ## [v1.10.0] — 2026-11-17
 
 ### Added

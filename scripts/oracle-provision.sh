@@ -405,17 +405,22 @@ say "Docker installed."
 
 # ── Stage 6: secrets → .env ──────────────────────────────────────────────────
 stage "Secrets → .env" 3
-say "The wizard generates the two random secrets; you only provide your login."
+say "The wizard generates the three random secrets; you only provide your login."
 POSTGRES_PASSWORD=$(_existing POSTGRES_PASSWORD || true)
 [[ -n "$POSTGRES_PASSWORD" ]] || POSTGRES_PASSWORD=$(gen_secret)
 BUDJETAME_JWT_SECRET=$(_existing BUDJETAME_JWT_SECRET || true)
 [[ -n "$BUDJETAME_JWT_SECRET" ]] || BUDJETAME_JWT_SECRET=$(gen_secret)
+# The Assistant Key encryption secret (ADR-0035): kept across re-runs, since
+# changing it makes every stored Assistant Key unreadable.
+BUDJETAME_ASSISTANT_KEY_SECRET=$(_existing BUDJETAME_ASSISTANT_KEY_SECRET || true)
+[[ -n "$BUDJETAME_ASSISTANT_KEY_SECRET" ]] || BUDJETAME_ASSISTANT_KEY_SECRET=$(gen_secret)
 ask BUDJETAME_SEED_ACCOUNT_EMAIL "Seed account email (your Budjetame login):"
 ask_secret BUDJETAME_SEED_ACCOUNT_PASSWORD "Seed account password (your Budjetame login):"
 ask DOMAIN "Site hostname for this VM (e.g. dev.budjetame.de — its DNS A record must point at this VM before first boot):"
 warn "The Account is seeded ONCE, at first boot, from these values — check before deploying."
 write_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
 write_env BUDJETAME_JWT_SECRET "$BUDJETAME_JWT_SECRET"
+write_env BUDJETAME_ASSISTANT_KEY_SECRET "$BUDJETAME_ASSISTANT_KEY_SECRET"
 write_env BUDJETAME_SEED_ACCOUNT_EMAIL "$BUDJETAME_SEED_ACCOUNT_EMAIL"
 write_env BUDJETAME_SEED_ACCOUNT_PASSWORD "$BUDJETAME_SEED_ACCOUNT_PASSWORD"
 write_env DOMAIN "$DOMAIN"

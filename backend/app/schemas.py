@@ -11,7 +11,13 @@ from pydantic import (
     model_validator,
 )
 
-from app.models import CategoryType, IntervalUnit, TransactionType, WalletType
+from app.models import (
+    AssistantProvider,
+    CategoryType,
+    IntervalUnit,
+    TransactionType,
+    WalletType,
+)
 
 
 class LoginRequest(BaseModel):
@@ -63,6 +69,36 @@ class AccountOut(BaseModel):
     id: int
     email: str
     language: str
+
+
+class AssistantSettingsIn(BaseModel):
+    """Set or replace the Assistant Settings (ADR-0035, issue #126): the
+    provider from the fixed list, the Assistant Key and an optional model id
+    (empty or absent means the provider's default).
+
+    Validated by the handler itself, not as a typed parameter: a Pydantic
+    validation error echoes the offending input in the 422 body, and the
+    key must never be echoed (app.assistant_settings strips it). `key`
+    carries no constraint either: emptiness is a service rule (422 with a
+    plain detail).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: AssistantProvider
+    key: str
+    model: str | None = None
+
+
+class AssistantSettingsOut(BaseModel):
+    """The status of the Assistant Settings: everything but the key."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    configured: bool
+    provider: AssistantProvider | None
+    model: str | None
+    last4: str | None
 
 
 class LanguageUpdate(BaseModel):

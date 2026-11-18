@@ -14,8 +14,15 @@ vi.mock('./api', async (importOriginal) => {
     ...actual,
     exportBackup: vi.fn(),
     restoreBackup: vi.fn(),
+    fetchAssistantSettings: vi.fn(),
+    saveAssistantSettings: vi.fn(),
+    removeAssistantSettings: vi.fn(),
   }
 })
+
+import { fetchAssistantSettings } from './api'
+
+const fetchAssistantSettingsMock = vi.mocked(fetchAssistantSettings)
 
 const renderModal = (locale: string, language = 'en') =>
   renderWithIntl(
@@ -32,6 +39,12 @@ const renderModal = (locale: string, language = 'en') =>
 
 beforeEach(() => {
   localStorage.setItem(TOKEN_KEY, 'test-token')
+  fetchAssistantSettingsMock.mockReset().mockResolvedValue({
+    configured: false,
+    provider: null,
+    model: null,
+    last4: null,
+  })
 })
 
 afterEach(() => {
@@ -87,6 +100,52 @@ describe('SettingsModal i18n (issue #117)', () => {
       screen.getByRole('button', { name: 'Ripristina da backup' }),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Annulla' })).toBeInTheDocument()
+  })
+
+  it('renders the Assistant Settings block in English under locale en', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue({
+      configured: true,
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      last4: 'ab12',
+    })
+    renderModal('en')
+
+    expect(screen.getByText('Assistant')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Provider' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Assistant Key')).toBeInTheDocument()
+    expect(screen.getByLabelText('Model')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+    expect(
+      await screen.findByText('Configured: Anthropic / claude-opus-5-5, key ends in ab12'),
+    ).toBeInTheDocument()
+  })
+
+  it('renders the Assistant Settings block in Italian under locale it', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue({
+      configured: true,
+      provider: 'gemini',
+      model: 'gemini-4-hydrogen',
+      last4: 'ab12',
+    })
+    renderModal('it')
+
+    expect(screen.getByText('Assistente')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Provider' })).toBeInTheDocument()
+    expect(screen.getByLabelText("Chiave dell'Assistente")).toBeInTheDocument()
+    expect(screen.getByLabelText('Modello')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Salva' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rimuovi' })).toBeInTheDocument()
+    expect(
+      await screen.findByText('Configurato: Google Gemini / gemini-4-hydrogen, la chiave termina con ab12'),
+    ).toBeInTheDocument()
+  })
+
+  it('renders "Non configurato" in Italian without settings', async () => {
+    renderModal('it')
+
+    expect(await screen.findByText('Non configurato')).toBeInTheDocument()
   })
 
   it('falls back to English for untranslated keys', () => {

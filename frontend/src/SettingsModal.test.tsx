@@ -18,8 +18,19 @@ vi.mock('./api', async (importOriginal) => {
     ...actual,
     exportBackup: vi.fn(),
     restoreBackup: vi.fn(),
+    fetchAssistantSettings: vi.fn(),
+    saveAssistantSettings: vi.fn(),
+    removeAssistantSettings: vi.fn(),
   }
 })
+
+import { fetchAssistantSettings, removeAssistantSettings, saveAssistantSettings } from './api'
+
+const fetchAssistantSettingsMock = vi.mocked(fetchAssistantSettings)
+const saveAssistantSettingsMock = vi.mocked(saveAssistantSettings)
+const removeAssistantSettingsMock = vi.mocked(removeAssistantSettings)
+
+const NOT_CONFIGURED = { configured: false, provider: null, model: null, last4: null }
 
 const renderModal = (
   overrides: Partial<{
@@ -46,6 +57,9 @@ const renderModal = (
 describe('SettingsModal (issue #84)', () => {
   beforeEach(() => {
     localStorage.setItem(TOKEN_KEY, 'test-token')
+    fetchAssistantSettingsMock.mockReset().mockResolvedValue(NOT_CONFIGURED)
+    saveAssistantSettingsMock.mockReset()
+    removeAssistantSettingsMock.mockReset().mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -63,7 +77,7 @@ describe('SettingsModal (issue #84)', () => {
   it('shows the language picker with the current locale selected', () => {
     renderModal({ language: 'en' })
 
-    const picker = screen.getByRole('combobox') as HTMLSelectElement
+    const picker = screen.getByRole('combobox', { name: 'Language' }) as HTMLSelectElement
     expect(picker).toBeInTheDocument()
     expect(picker.value).toBe('en')
     expect(screen.getByRole('option', { name: 'English' })).toBeInTheDocument()
@@ -74,9 +88,132 @@ describe('SettingsModal (issue #84)', () => {
     const onChangeLanguage = vi.fn()
     renderModal({ language: 'en', onChangeLanguage })
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'it' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'it' } })
 
     expect(onChangeLanguage).toHaveBeenCalledWith('it')
+  })
+
+  // --- Assistant Settings (issue #126, ADR-0035) ---
+
+  describe('Assistant Settings', () => {
+    it('shows the block with the three providers, the key and model fields, and "Not configured"', async () => {
+      renderModal()
+
+      expect(screen.getByText('Assistant')).toBeInTheDocument()
+      const provider = screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement
+      expect(provider.value).toBe('anthropic')
+      expect(screen.getByRole('option', { name: 'Anthropic' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'OpenRouter' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'Google Gemini' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Assistant Key')).toHaveAttribute('type', 'password')
+      expect(screen.getByLabelText('Model')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+
+      expect(await screen.findByText('Not configured')).toBeInTheDocument()
+      expect(fetchAssistantSettingsMock).toHaveBeenCalledWith('test-token')
+    })
+
+    it('shows the status line and preselects the provider and model when configured', async () => {
+      fetchAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'openrouter',
+        model: 'nvidia/nemotron-nano-9b-v2:free',
+        last4: 'ab12',
+      })
+      renderModal()
+
+      expect(
+        await screen.findByText('Configured: OpenRouter / nvidia/nemotron-nano-9b-v2:free, key ends in ab12'),
+      ).toBeInTheDocument()
+      expect((screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement).value).toBe('openrouter')
+      expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('nvidia/nemotron-nano-9b-v2:free')
+      // The key is write-only: the field never shows the stored one.
+      expect((screen.getByLabelText('Assistant Key') as HTMLInputElement).value).toBe('')
+    })
+
+    it('saves provider, key and model, then shows the new status and clears the key field', async () => {
+      saveAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'gemini',
+        model: 'gemini-4-hydrogen',
+        last4: '0001',
+      })
+      renderModal()
+      await screen.findByText('Not configured')
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'gemini' } })
+      fireEvent.change(screen.getByLabelText('Assistant Key'), { target: { value: 'AIzaSy-test-0001' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() =>
+        expect(saveAssistantSettingsMock).toHaveBeenCalledWith('test-token', {
+          provider: 'gemini',
+          key: 'AIzaSy-test-0001',
+          model: '',
+        }),
+      )
+      expect(
+        await screen.findByText('Configured: Google Gemini / gemini-4-hydrogen, key ends in 0001'),
+      ).toBeInTheDocument()
+      expect((screen.getByLabelText('Assistant Key') as HTMLInputElement).value).toBe('')
+      expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('gemini-4-hydrogen')
+    })
+
+    it('switching provider resets the typed model, since the provider default takes over', async () => {
+      fetchAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'anthropic',
+        model: 'claude-sonnet-5-5',
+        last4: 'ab12',
+      })
+      renderModal()
+      await screen.findByText(/key ends in ab12/)
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'openrouter' } })
+
+      expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('')
+    })
+
+    it('refuses to save without a key, as a Field Error, and calls nothing', async () => {
+      renderModal()
+      await screen.findByText('Not configured')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Enter the Assistant Key')
+      expect(saveAssistantSettingsMock).not.toHaveBeenCalled()
+    })
+
+    it('shows an error banner when saving fails', async () => {
+      saveAssistantSettingsMock.mockRejectedValue(new Error('boom'))
+      renderModal()
+      await screen.findByText('Not configured')
+
+      fireEvent.change(screen.getByLabelText('Assistant Key'), { target: { value: 'sk-ant-x' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      expect(
+        await screen.findByText('Could not save the Assistant Settings. Please try again.'),
+      ).toBeInTheDocument()
+    })
+
+    it('removes the settings and shows "Not configured"', async () => {
+      fetchAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'anthropic',
+        model: 'claude-opus-5-5',
+        last4: 'ab12',
+      })
+      renderModal()
+      await screen.findByText(/key ends in ab12/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+      await waitFor(() => expect(removeAssistantSettingsMock).toHaveBeenCalledWith('test-token'))
+      expect(await screen.findByText('Not configured')).toBeInTheDocument()
+      expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('')
+    })
   })
 
   it('surfaces the Export all action', () => {

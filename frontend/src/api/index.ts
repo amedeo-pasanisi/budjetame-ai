@@ -90,6 +90,16 @@ export {
 } from './backup'
 
 export {
+  type AssistantProvider,
+  type AssistantSettingsInput,
+  type AssistantSettingsStatus,
+  ASSISTANT_PROVIDERS,
+  fetchAssistantSettings,
+  removeAssistantSettings,
+  saveAssistantSettings,
+} from './assistantSettings'
+
+export {
   type IntervalUnit,
   type RecurringDefinition,
   type RecurringDefinitionApi,

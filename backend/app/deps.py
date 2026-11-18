@@ -29,3 +29,11 @@ def get_mailer(request: Request) -> Mailer:
     """The app's mailer (issue #83): SmtpMailer when configured, LoggingMailer
     in dev, whatever tests injected via create_app."""
     return request.app.state.mailer
+
+
+def get_assistant_key_secret(request: Request) -> str:
+    """The server secret the Assistant Key is encrypted under (ADR-0035,
+    issue #126): settings in production, whatever tests injected via
+    create_app."""
+    secret: str = request.app.state.assistant_key_secret
+    return secret

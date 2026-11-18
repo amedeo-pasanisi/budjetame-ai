@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { useIntl } from 'react-intl'
+import { AssistantSettingsSection } from './AssistantSettingsSection'
 import { DeleteAccountButton } from './DeleteAccountButton'
 import { ModalShell } from './ModalShell'
 import { TOKEN_KEY, exportBackup, restoreBackup } from './api'
@@ -19,9 +20,10 @@ type SettingsModalProps = {
 type RestoreStep = 'idle' | 'confirm' | 'warning' | 'restoring' | 'done' | 'error'
 
 /** The app's settings (issue #84): account info, the display Locale picker
- * (issue #114), the export-all backup action (issue #112), the Restore from
- * backup flow (issue #115), and the destructive actions, behind a gear in
- * the header instead of cluttering every tab. */
+ * (issue #114), the Assistant Settings block (issue #126, ADR-0035), the
+ * export-all backup action (issue #112), the Restore from backup flow
+ * (issue #115), and the destructive actions, behind a gear in the header
+ * instead of cluttering every tab. */
 export function SettingsModal({ email, language, onChangeLanguage, onDeleteAccount, onDeleted, onClose, onRestored }: SettingsModalProps) {
   const { formatMessage } = useIntl()
   const [restoreStep, setRestoreStep] = useState<RestoreStep>('idle')
@@ -289,6 +291,7 @@ export function SettingsModal({ email, language, onChangeLanguage, onDeleteAccou
           <select
             value={language}
             onChange={handleLanguageChange}
+            aria-label={formatMessage({ id: 'settings.language' })}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700"
           >
             <option value="en">{formatMessage({ id: 'settings.language.en' })}</option>
@@ -296,6 +299,8 @@ export function SettingsModal({ email, language, onChangeLanguage, onDeleteAccou
           </select>
         </div>
       </div>
+
+      <AssistantSettingsSection />
 
       <div className="mt-6 border-t border-slate-200 pt-4">
         <p className="text-sm font-medium text-slate-900">{formatMessage({ id: 'settings.exportAll' })}</p>

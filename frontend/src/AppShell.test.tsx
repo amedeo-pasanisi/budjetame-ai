@@ -101,6 +101,16 @@ vi.mock('./api', async () => {
     restoreBackup: vi.fn(),
     fetchAccountLanguage: vi.fn().mockResolvedValue('en'),
     updateAccountLanguage: vi.fn().mockResolvedValue(undefined),
+    // The Settings modal loads the Assistant Settings status on open (#126).
+    ASSISTANT_PROVIDERS: ['anthropic', 'openrouter', 'gemini'],
+    fetchAssistantSettings: vi.fn().mockResolvedValue({
+      configured: false,
+      provider: null,
+      model: null,
+      last4: null,
+    }),
+    saveAssistantSettings: vi.fn(),
+    removeAssistantSettings: vi.fn(),
   }
 })
 

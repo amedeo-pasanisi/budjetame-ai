@@ -24,6 +24,7 @@ services:
     environment:
       BUDJETAME_DATABASE_URL: postgresql+psycopg://budjetame:${POSTGRES_PASSWORD:?}@db:5432/budjetame
       BUDJETAME_JWT_SECRET: ${BUDJETAME_JWT_SECRET:?set in .env}
+      BUDJETAME_ASSISTANT_KEY_SECRET: ${BUDJETAME_ASSISTANT_KEY_SECRET:?set in .env}
       BUDJETAME_SEED_ACCOUNT_EMAIL: ${BUDJETAME_SEED_ACCOUNT_EMAIL:?set in .env}
       BUDJETAME_SEED_ACCOUNT_PASSWORD: ${BUDJETAME_SEED_ACCOUNT_PASSWORD:?set in .env}
     depends_on:

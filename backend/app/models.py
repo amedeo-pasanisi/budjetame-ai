@@ -62,6 +62,15 @@ class IntervalUnit(str, enum.Enum):
     YEARS = "years"
 
 
+class AssistantProvider(str, enum.Enum):
+    """The fixed list of LLM providers an Account's Assistant may run on
+    (ADR-0035): never a user-entered endpoint."""
+
+    ANTHROPIC = "anthropic"
+    OPENROUTER = "openrouter"
+    GEMINI = "gemini"
+
+
 class Account(Base):
     """A person's login identity and personal data space (ADR-0020): created
     by email+password registration or by a first Google sign-in (issue #81,
@@ -70,6 +79,11 @@ class Account(Base):
     Stores the display Locale (`en` or `it`), auto-detected from the browser
     on first load and changeable in Settings. Wire formats, Export, and Backup
     stay US-canonical regardless of locale (issue #114).
+
+    Carries the Assistant Settings (ADR-0035, issue #126): the provider, the
+    model id and the Assistant Key encrypted with AES-GCM under the server's
+    `assistant_key_secret`. The three are set and removed together; the key
+    is write-only — never in an API response, a Backup, an Export or a log.
     """
 
     __tablename__ = "accounts"
@@ -78,6 +92,10 @@ class Account(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     language: Mapped[str] = mapped_column(String(5), default="en")
+    assistant_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    assistant_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # base64(nonce || AES-GCM ciphertext) of the Assistant Key, or NULL.
+    assistant_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

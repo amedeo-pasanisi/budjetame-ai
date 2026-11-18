@@ -30,6 +30,9 @@ services:
     environment:
       BUDJETAME_DATABASE_URL: postgresql+psycopg://budjetame:${POSTGRES_PASSWORD:?}@db:5432/budjetame
       BUDJETAME_JWT_SECRET: ${BUDJETAME_JWT_SECRET:?set in .env}
+      # The Assistant Key encryption secret (ADR-0035): required like the
+      # JWT secret — an empty one would encrypt every key under a known value.
+      BUDJETAME_ASSISTANT_KEY_SECRET: ${BUDJETAME_ASSISTANT_KEY_SECRET:?set in .env}
       # Session length (Android client): 90 days instead of the 24h default,
       # so phone users don't re-login daily. Optional per environment —
       # absent from .env, this compose default applies.

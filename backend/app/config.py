@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24
 
+    # The server secret the per-Account Assistant Key is encrypted under
+    # (ADR-0035, issue #126). Like the JWT secret it has a dev default and
+    # must be overridden in production; losing it makes every stored key
+    # unreadable and every Account re-enters theirs.
+    assistant_key_secret: str = "dev-assistant-key-secret-change-me-please"
+
     # Google sign-in (issue #81): the OAuth client id is public (it ships to
     # the browser); empty disables the Google button.
     google_oauth_client_id: str = ""
