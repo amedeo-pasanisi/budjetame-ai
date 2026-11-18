@@ -73,6 +73,9 @@ type RequestOptions = {
   json?: unknown
   /** Multipart body (import upload): sent as-is; the browser sets the boundary. */
   formData?: FormData
+  /** Extra request headers (the Assistant model listing sends the key it is
+   * about to save in one, issue #127). */
+  headers?: Record<string, string>
   /** The message carried by the ApiError when the request fails. */
   errorMessage: string
   /** Import endpoints surface the backend's error detail when it has one;
@@ -84,7 +87,7 @@ type RequestOptions = {
  * here, a non-OK response thrown here as an ApiError. Callers parse the
  * response body (or ignore it for 204 deletes). */
 export async function request(path: string, options: RequestOptions): Promise<Response> {
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { ...options.headers }
   if (options.token !== undefined) headers.Authorization = `Bearer ${options.token}`
   if (options.json !== undefined) headers['Content-Type'] = 'application/json'
   const method = options.method ?? 'GET'

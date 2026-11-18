@@ -113,6 +113,8 @@ vi.mock('./api', async () => {
     }),
     saveAssistantSettings: vi.fn(),
     removeAssistantSettings: vi.fn(),
+    // ...and the provider's model list for the picker (#127).
+    fetchAssistantModels: vi.fn().mockResolvedValue([]),
   }
 })
 

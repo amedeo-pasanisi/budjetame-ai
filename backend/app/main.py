@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
+from app.assistant_catalogue import CatalogueFetcher, HttpCatalogueFetcher
+from app.assistant_models import router as assistant_models_router
 from app.assistant_settings import router as assistant_settings_router
 from app.auth import router as auth_router
 from app.categories import router as categories_router
@@ -30,12 +32,14 @@ def create_app(
     password_reset_expire_minutes: int | None = None,
     public_base_url: str | None = None,
     assistant_key_secret: str | None = None,
+    catalogue_fetcher: CatalogueFetcher | None = None,
 ) -> FastAPI:
     """Build the application. `database_url` and the seed credentials override
     settings for tests; `google_client_id`/`google_verifier` override the
     Google sign-in seam (issue #81), `mailer`/`password_reset_expire_minutes`
     the password-reset seam (issue #83) and `assistant_key_secret` the secret
-    the Assistant Key is encrypted under (ADR-0035, issue #126)."""
+    the Assistant Key is encrypted under (ADR-0035, issue #126) and
+    `catalogue_fetcher` the provider model-listing seam (issue #127)."""
     app = FastAPI(title="Budjetame API", version="0.1.0")
     engine = create_db_engine(database_url or settings.database_url)
     app.state.sessionmaker = sessionmaker(bind=engine, expire_on_commit=False)
@@ -63,6 +67,7 @@ def create_app(
     )
     app.state.public_base_url = public_base_url or settings.public_base_url
     app.state.assistant_key_secret = assistant_key_secret or settings.assistant_key_secret
+    app.state.catalogue_fetcher = catalogue_fetcher or HttpCatalogueFetcher()
 
     seed_account(
         app.state.sessionmaker,
@@ -81,6 +86,7 @@ def create_app(
     app.include_router(backup_router)
     app.include_router(assistant_settings_router)
     app.include_router(draft_transactions_router)
+    app.include_router(assistant_models_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

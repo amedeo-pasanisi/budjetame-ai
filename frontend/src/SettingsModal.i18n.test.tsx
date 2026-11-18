@@ -17,12 +17,14 @@ vi.mock('./api', async (importOriginal) => {
     fetchAssistantSettings: vi.fn(),
     saveAssistantSettings: vi.fn(),
     removeAssistantSettings: vi.fn(),
+    fetchAssistantModels: vi.fn(),
   }
 })
 
-import { fetchAssistantSettings } from './api'
+import { ApiError, fetchAssistantModels, fetchAssistantSettings } from './api'
 
 const fetchAssistantSettingsMock = vi.mocked(fetchAssistantSettings)
+const fetchAssistantModelsMock = vi.mocked(fetchAssistantModels)
 
 const renderModal = (locale: string, language = 'en') =>
   renderWithIntl(
@@ -45,6 +47,7 @@ beforeEach(() => {
     model: null,
     last4: null,
   })
+  fetchAssistantModelsMock.mockReset().mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -146,6 +149,45 @@ describe('SettingsModal i18n (issue #117)', () => {
     renderModal('it')
 
     expect(await screen.findByText('Non configurato')).toBeInTheDocument()
+  })
+
+  // --- Model picker (issue #127) ---
+
+  it('renders the model picker in Italian, free models marked, and the key hint', async () => {
+    fetchAssistantSettingsMock.mockResolvedValue({
+      configured: true,
+      provider: 'openrouter',
+      model: null,
+      last4: 'ab12',
+    })
+    fetchAssistantModelsMock.mockResolvedValue([
+      { id: 'nvidia/nemotron-nano-9b-v2:free', label: 'NVIDIA: Nemotron Nano 9B V2', free: true },
+    ])
+    renderModal('it')
+
+    expect(await screen.findByRole('combobox', { name: 'Scegli un modello' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Predefinito del provider' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('option', { name: 'NVIDIA: Nemotron Nano 9B V2 — gratuito' }),
+    ).toBeInTheDocument()
+
+    fetchAssistantModelsMock.mockRejectedValue(new ApiError('Could not load the models', 409))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'gemini' } })
+
+    expect(
+      await screen.findByText("Inserisci la chiave dell'Assistente per elencare i modelli di questo provider."),
+    ).toBeInTheDocument()
+  })
+
+  it('renders the model picker in English with the free marker', async () => {
+    fetchAssistantModelsMock.mockResolvedValue([
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', free: false },
+    ])
+    renderModal('en')
+
+    expect(await screen.findByRole('combobox', { name: 'Pick a model' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Provider default' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: 'Claude Opus 5.5' })).toBeInTheDocument()
   })
 
   it('falls back to English for untranslated keys', () => {

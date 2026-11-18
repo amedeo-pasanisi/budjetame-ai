@@ -90,10 +90,12 @@ export {
 } from './backup'
 
 export {
+  type AssistantModel,
   type AssistantProvider,
   type AssistantSettingsInput,
   type AssistantSettingsStatus,
   ASSISTANT_PROVIDERS,
+  fetchAssistantModels,
   fetchAssistantSettings,
   removeAssistantSettings,
   saveAssistantSettings,

@@ -51,6 +51,37 @@ export async function saveAssistantSettings(
   return (await response.json()) as AssistantSettingsStatus
 }
 
+/** One model of a provider's catalogue (issue #127): the id Assistant
+ * Settings store, the picker's label, and whether the provider prices it at
+ * zero (OpenRouter's free models; nothing else is flagged). */
+export type AssistantModel = {
+  id: string
+  label: string
+  free: boolean
+}
+
+/** The models of `provider` for the picker (issue #127): Anthropic's fixed
+ * three, OpenRouter's tool-capable public catalogue, or the models a Gemini
+ * key can list. `key` is the key typed but not yet saved, sent in the
+ * `X-Assistant-Key` header (never the query string, which access logs
+ * print) so Gemini can list before Save; empty means "use the stored key
+ * when it belongs to this provider". Rejections keep their status on the
+ * ApiError: 409 no key where one is needed, 422 the provider rejected the
+ * key, 502 the catalogue is unreachable. */
+export async function fetchAssistantModels(
+  token: string,
+  provider: AssistantProvider,
+  key: string,
+): Promise<AssistantModel[]> {
+  const response = await request(`/assistant/models?provider=${encodeURIComponent(provider)}`, {
+    token,
+    headers: key.trim() === '' ? undefined : { 'X-Assistant-Key': key.trim() },
+    errorMessage: 'Could not load the Assistant models',
+  })
+  const body = (await response.json()) as { provider: AssistantProvider; models: AssistantModel[] }
+  return body.models
+}
+
 /** Remove the provider, key and model together; the Account then has no
  * Assistant. */
 export async function removeAssistantSettings(token: string): Promise<void> {

@@ -21,14 +21,22 @@ vi.mock('./api', async (importOriginal) => {
     fetchAssistantSettings: vi.fn(),
     saveAssistantSettings: vi.fn(),
     removeAssistantSettings: vi.fn(),
+    fetchAssistantModels: vi.fn(),
   }
 })
 
-import { fetchAssistantSettings, removeAssistantSettings, saveAssistantSettings } from './api'
+import {
+  ApiError,
+  fetchAssistantModels,
+  fetchAssistantSettings,
+  removeAssistantSettings,
+  saveAssistantSettings,
+} from './api'
 
 const fetchAssistantSettingsMock = vi.mocked(fetchAssistantSettings)
 const saveAssistantSettingsMock = vi.mocked(saveAssistantSettings)
 const removeAssistantSettingsMock = vi.mocked(removeAssistantSettings)
+const fetchAssistantModelsMock = vi.mocked(fetchAssistantModels)
 
 const NOT_CONFIGURED = { configured: false, provider: null, model: null, last4: null }
 
@@ -60,6 +68,7 @@ describe('SettingsModal (issue #84)', () => {
     fetchAssistantSettingsMock.mockReset().mockResolvedValue(NOT_CONFIGURED)
     saveAssistantSettingsMock.mockReset()
     removeAssistantSettingsMock.mockReset().mockResolvedValue(undefined)
+    fetchAssistantModelsMock.mockReset().mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -213,6 +222,129 @@ describe('SettingsModal (issue #84)', () => {
       await waitFor(() => expect(removeAssistantSettingsMock).toHaveBeenCalledWith('test-token'))
       expect(await screen.findByText('Not configured')).toBeInTheDocument()
       expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('')
+    })
+  })
+
+  // --- Model picker fed by the provider's catalogue (issue #127, ADR-0035) ---
+
+  describe('Model picker', () => {
+    const OPENROUTER_MODELS = [
+      { id: 'anthropic/claude-sonnet-5.5', label: 'Anthropic: Claude Sonnet 5.5', free: false },
+      { id: 'nvidia/nemotron-nano-9b-v2:free', label: 'NVIDIA: Nemotron Nano 9B V2', free: true },
+    ]
+
+    it('lists the configured provider\'s models once the status is loaded, marking the free ones', async () => {
+      fetchAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'openrouter',
+        model: 'nvidia/nemotron-nano-9b-v2:free',
+        last4: 'ab12',
+      })
+      fetchAssistantModelsMock.mockResolvedValue(OPENROUTER_MODELS)
+      renderModal()
+      await screen.findByText(/key ends in ab12/)
+
+      await waitFor(() => expect(fetchAssistantModelsMock).toHaveBeenCalledWith('test-token', 'openrouter', ''))
+      // The status loads before the listing, so the first listing is the
+      // configured provider's, never the select's initial Anthropic.
+      expect(fetchAssistantModelsMock).toHaveBeenCalledTimes(1)
+      const picker = (await screen.findByRole('combobox', { name: 'Pick a model' })) as HTMLSelectElement
+      expect(screen.getByRole('option', { name: 'Anthropic: Claude Sonnet 5.5' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'NVIDIA: Nemotron Nano 9B V2 — free' })).toBeInTheDocument()
+      // The stored model is preselected in the picker.
+      expect(picker.value).toBe('nvidia/nemotron-nano-9b-v2:free')
+    })
+
+    it('picking a model fills the id, and a typed id overrides the picked one', async () => {
+      fetchAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'openrouter',
+        model: null,
+        last4: 'ab12',
+      })
+      fetchAssistantModelsMock.mockResolvedValue(OPENROUTER_MODELS)
+      saveAssistantSettingsMock.mockResolvedValue({
+        configured: true,
+        provider: 'openrouter',
+        model: 'mistralai/devstral-small',
+        last4: 'ab12',
+      })
+      renderModal()
+      const picker = (await screen.findByRole('combobox', { name: 'Pick a model' })) as HTMLSelectElement
+      await screen.findByRole('option', { name: 'Anthropic: Claude Sonnet 5.5' })
+
+      fireEvent.change(picker, { target: { value: 'anthropic/claude-sonnet-5.5' } })
+      expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('anthropic/claude-sonnet-5.5')
+
+      fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'mistralai/devstral-small' } })
+      expect(picker.value).toBe('mistralai/devstral-small')
+      expect(screen.getByRole('option', { name: 'mistralai/devstral-small (typed)' })).toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('Assistant Key'), { target: { value: 'sk-or-v1-x' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() =>
+        expect(saveAssistantSettingsMock).toHaveBeenCalledWith('test-token', {
+          provider: 'openrouter',
+          key: 'sk-or-v1-x',
+          model: 'mistralai/devstral-small',
+        }),
+      )
+    })
+
+    it('switching provider lists that provider, and Gemini lists with the typed key once it is left', async () => {
+      fetchAssistantModelsMock.mockImplementation(async (_token, provider) =>
+        provider === 'gemini'
+          ? [{ id: 'gemini-4-hydrogen', label: 'gemini-4-hydrogen', free: false }]
+          : [{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', free: false }],
+      )
+      renderModal()
+      await screen.findByText('Not configured')
+      await screen.findByRole('option', { name: 'Claude Opus 5.5' })
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'gemini' } })
+      await waitFor(() => expect(fetchAssistantModelsMock).toHaveBeenLastCalledWith('test-token', 'gemini', ''))
+      expect(screen.queryByRole('option', { name: 'Claude Opus 5.5' })).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('Assistant Key'), { target: { value: 'AIzaSy-test-0001' } })
+      fireEvent.blur(screen.getByLabelText('Assistant Key'))
+      await waitFor(() =>
+        expect(fetchAssistantModelsMock).toHaveBeenLastCalledWith('test-token', 'gemini', 'AIzaSy-test-0001'),
+      )
+      expect(await screen.findByRole('option', { name: 'gemini-4-hydrogen' })).toBeInTheDocument()
+    })
+
+    it('says the key is needed when the server answers 409, and keeps the free-text id', async () => {
+      fetchAssistantModelsMock.mockRejectedValue(new ApiError('Could not load the models', 409))
+      renderModal()
+      await screen.findByText('Not configured')
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'gemini' } })
+
+      expect(
+        await screen.findByText("Enter the Assistant Key to list this provider's models."),
+      ).toBeInTheDocument()
+      expect(screen.getByLabelText('Model')).toBeInTheDocument()
+    })
+
+    it('points at the key when the provider rejects it (422), and falls back to the id on any other failure', async () => {
+      fetchAssistantModelsMock.mockRejectedValueOnce(
+        new ApiError('Could not load the models', 422, 'The provider rejected the Assistant Key'),
+      )
+      renderModal()
+      await screen.findByText('Not configured')
+
+      expect(
+        await screen.findByText('The provider rejected the Assistant Key. Check it and try again.'),
+      ).toBeInTheDocument()
+
+      fetchAssistantModelsMock.mockRejectedValueOnce(new ApiError('Could not load the models', 502))
+      fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'openrouter' } })
+
+      expect(
+        await screen.findByText('Could not load the model list. Type a model id instead.'),
+      ).toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'typed/model' } })
+      expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('typed/model')
     })
   })
 

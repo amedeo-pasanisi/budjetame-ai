@@ -36,6 +36,20 @@ here and on GitHub Releases.
   with #125; the Assistant that writes Drafts with #128.
 - **API:** `GET`/`POST /draft-transactions`, `PATCH`/`DELETE
   /draft-transactions/{id}`; a foreign or missing Draft answers 403.
+- **Assistant model picker fed by the provider's catalogue** (ADR-0035,
+  #127): the Assistant block in Settings gains a "Pick a model" list for
+  the chosen provider — Anthropic's three current models, OpenRouter's
+  public catalogue kept to the models that can call tools with the free
+  ones marked "— free", and the models a Google Gemini key can list (for
+  Gemini the list fills as soon as the key field is left, before Save).
+  Picking fills the model id; a typed id still overrides the picked one.
+  When the list cannot load the block says why (key needed, key rejected
+  by the provider, catalogue unreachable) and the typed id keeps working.
+- **API:** `GET /assistant/models?provider=` lists the models of the
+  Account's configured provider or of the one named; a key not yet saved
+  travels in the `X-Assistant-Key` header. 409 without a key where one is
+  needed, 422 when the provider rejects the key, 502 when its catalogue is
+  unreachable — never a 500.
 
 ## [v1.10.0] — 2026-11-17
 

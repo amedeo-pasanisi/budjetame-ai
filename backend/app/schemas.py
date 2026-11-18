@@ -101,6 +101,27 @@ class AssistantSettingsOut(BaseModel):
     last4: str | None
 
 
+class AssistantModelOut(BaseModel):
+    """One model of the picker (issue #127): the id the Assistant Settings
+    store, a label for the list, and whether the provider prices it at zero
+    (prompt and completion both)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    label: str
+    free: bool
+
+
+class AssistantModelsOut(BaseModel):
+    """`GET /assistant/models` (issue #127): the provider listed — so a
+    client can drop a response for a provider it no longer shows — and its
+    models in picker order."""
+
+    provider: AssistantProvider
+    models: list[AssistantModelOut]
+
+
 class LanguageUpdate(BaseModel):
     """Change the Account's display Locale (issue #114).
     Accepted values: `en` (English) or `it` (Italian).

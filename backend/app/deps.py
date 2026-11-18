@@ -4,6 +4,7 @@ from fastapi import Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.assistant_catalogue import CatalogueFetcher
 from app.google_auth import GoogleVerifier
 from app.mailer import Mailer
 
@@ -37,3 +38,10 @@ def get_assistant_key_secret(request: Request) -> str:
     create_app."""
     secret: str = request.app.state.assistant_key_secret
     return secret
+
+
+def get_catalogue_fetcher(request: Request) -> CatalogueFetcher:
+    """The Assistant's catalogue fetcher (ADR-0035, issue #127): the httpx
+    one in production, whatever tests injected via create_app."""
+    fetcher: CatalogueFetcher = request.app.state.catalogue_fetcher
+    return fetcher

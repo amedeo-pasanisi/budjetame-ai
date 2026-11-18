@@ -245,6 +245,7 @@ _Avoid_: language setting, regional format, i18n setting
 - A Draft Transaction counts toward nothing: no Balance, Net Worth, Budget or dashboard figure, and no Export, Backup or Restore carries it. Approve creates the Transaction through the same rules as the form — a rejected Draft opens pre-filled in the form instead — and removes the Draft in the same step; a Draft is never approved twice. Discard has no Undo. Drafts never expire.
 - The Assistant never creates, edits or deletes a Transaction, a Wallet or a Category; it is given only the Account's Wallet, Category and Recurring names and writes only Draft Transactions. It corrects or discards only the Draft Transactions of the open conversation, which no client or server stores.
 - An Assistant Key is stored encrypted, per Account, and is never returned by the API, written to a file or logged. The provider is always one of the fixed list; the app never calls a user-entered endpoint.
+- The model list of a provider comes from the provider itself (Anthropic's from the fixed table), kept to what can call tools where the provider says so; the stored Assistant Key is sent only to the provider it was entered for, and a key not yet saved may be sent along once, in a request header, to list before Save. Asking for the Assistant without Assistant Settings, or for a listing without the key it needs, is a 409.
 
 ## Non-goals
 
