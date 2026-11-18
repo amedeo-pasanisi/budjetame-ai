@@ -156,6 +156,32 @@ _Avoid_: dump, statement
 What a Wallet, Category, or Recurring definition row's whole-surface tap does: it opens the Transactions tab with the ledger already filtered to exactly that Wallet, that Category, or — for a Recurring Cost or Recurring Income — that definition's linked Transactions — the previous filters, search, and open Filters panel are all reset by the jump, and a Frozen Wallet's history lands read-only. Editing the row is the card's separate trailing Edit button, never the tap itself.
 _Avoid_: transactions filtering on card tap, row-tap filter, filter shortcut
 
+### Assistant
+
+**Assistant**:
+The conversational agent, reachable from every tab, that turns what the user says or types — in the Account's Locale — into Draft Transactions. It writes a Draft Transaction at once with what it understood, answers in writing with a one-line summary of each, asks at most one question and only when a spoken name matches more than one existing Wallet, Category or Recurring definition, and corrects or discards the Draft Transactions of the open conversation on request ("no, it was 5 euro", "scrap that"). It never creates a Transaction, a Wallet or a Category, and it never speaks aloud.
+_Avoid_: vocal assistant, voice assistant, chatbot, bot, agent
+
+**Draft Transaction**:
+A stored, unapproved record of a money movement produced by the Assistant: the same fields a Transaction carries, any of which may still be missing, scoped to the Account like everything else. It is not a Transaction: it counts toward no Balance, Net Worth or Budget, appears in no dashboard figure, Export, Backup or Restore, and takes no part in the Duplicate check. It sits pinned above the ledger on the Transactions tab until it is Approved or Discarded. Not to be confused with an Import Draft, which is the unconfirmed state of an import.
+_Avoid_: draft, pending transaction, voice note, unconfirmed transaction, suggestion
+
+**Approve**:
+The one tap that turns a Draft Transaction into a Transaction through the same rules the form applies — Wallet and Category types, Recurring pins, warnings — and removes the Draft Transaction. A Draft Transaction that cannot be saved as it stands (a missing or rejected field) opens pre-filled in the Transaction form instead, where the Field Errors point at what is left.
+_Avoid_: confirm, save, accept, promote
+
+**Discard**:
+The removal of a Draft Transaction without creating anything. Nothing it referred to changes.
+_Avoid_: delete, reject, cancel
+
+**Assistant Settings**:
+What an Account configures so its Assistant can run: a provider chosen from a fixed list (Anthropic, OpenRouter, Google Gemini), its Assistant Key, and a model picked from that provider's list or typed by id. One setting per Account: switching provider replaces the key and resets the model to the provider's default. An Account without Assistant Settings has no Assistant. Quality is the user's choice: the app vets only that the chosen model can call tools.
+_Avoid_: AI settings, LLM config, provider config
+
+**Assistant Key**:
+The provider key inside the Assistant Settings, set and removed in Settings. It is write-only: once stored it is never shown again beyond its last characters, never leaves the server, and travels in no Backup, Export or log.
+_Avoid_: API key, token, credential, secret
+
 ### Backup and recovery
 
 **Backup**:
@@ -216,6 +242,9 @@ _Avoid_: language setting, regional format, i18n setting
 - Imports never set the link.
 - An Export never carries the link either: an exported row has no Recurring link and no Place — coordinates only — and Opening Balance Transactions are not exported.
 - All data is scoped to its owning Account; foreign data gets a 403.
+- A Draft Transaction counts toward nothing: no Balance, Net Worth, Budget or dashboard figure, and no Export, Backup or Restore carries it. Approve creates the Transaction through the same rules as the form — a rejected Draft opens pre-filled in the form instead — and removes the Draft in the same step; a Draft is never approved twice. Discard has no Undo. Drafts never expire.
+- The Assistant never creates, edits or deletes a Transaction, a Wallet or a Category; it only reads the Account's Wallet, Category and Recurring names and writes Draft Transactions. It corrects or discards only the Draft Transactions of the open conversation, which no client or server stores.
+- An Assistant Key is stored encrypted, per Account, and is never returned by the API, written to a file or logged. The provider is always one of the fixed list; the app never calls a user-entered endpoint.
 
 ## Non-goals
 
