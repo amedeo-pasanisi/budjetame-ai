@@ -80,6 +80,12 @@ type TransactionFormProps = {
    * the error banner and `onSaved` work exactly as for the form's own
    * save. */
   save?: (input: TransactionInput) => Promise<Transaction>
+  /** The message the error banner shows from the start (issue #125,
+   * ADR-0036): the rule a one-tap Approve of a Draft Transaction broke —
+   * a frozen Wallet, a Category of the wrong type — which the pre-filled
+   * fields alone cannot show. Cleared by the next Save attempt like any
+   * banner message. */
+  initialError?: string | null
   onSaved: (transaction: Transaction) => void
   /** Called with the full Transaction after a successful single-tap delete
    * (ADR-0031). The screen uses it to populate the undo buffer. */
@@ -209,6 +215,7 @@ export function TransactionForm({
   editing,
   initialValues = null,
   save,
+  initialError = null,
   onSaved,
   onDeleted,
   onCancel,
@@ -395,7 +402,7 @@ export function TransactionForm({
   // True while the Google map's Places API looks up a tapped POI's name,
   // propagated from GoogleMapPicker via MapPicker's onLookingUpChange.
   const [lookingUpForPlace, setLookingUpForPlace] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
   // Field Errors (ADR-0029): revealed by a Save attempt, they persist
   // while the user types and refresh only on the next Save click — never
   // live, never on blur.

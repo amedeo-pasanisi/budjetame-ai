@@ -1,10 +1,15 @@
-/** Draft Transactions resource (ADR-0036, issues #122/#123): the stored,
- * unapproved records the Assistant produces. The same columns as a
- * Transaction, each nullable — the Assistant may not have caught it — and
- * counting toward nothing until approved (#125). Every write goes through
+/** Draft Transactions resource (ADR-0036, issues #122/#123/#125): the
+ * stored, unapproved records the Assistant produces. The same columns as
+ * a Transaction, each nullable — the Assistant may not have caught it —
+ * and counting toward nothing until approved. Every write goes through
  * the transport, so it bumps the cache clock (ADR-0022). */
 
-import type { TransactionType } from './transactions'
+import {
+  transactionCreateBody,
+  type Transaction,
+  type TransactionInput,
+  type TransactionType,
+} from './transactions'
 import { request } from './transport'
 
 /** The types a Draft can take: a Transaction's minus Opening Balance,
@@ -64,6 +69,29 @@ export async function updateDraftTransaction(
     errorMessage: 'Could not update draft transaction',
   })
   return (await response.json()) as DraftTransaction
+}
+
+/** Approve (ADR-0036, #125): one request creates the Transaction through
+ * the create rules the form runs and removes the Draft. Without `input`
+ * the Draft is judged as it stands — the one tap; with it, the form's
+ * validated payload replaces the Draft's fields — the Save after a
+ * rejected one tap. A rule the Draft breaks is a 422 whose `detail` is
+ * the message, carried on the ApiError (`readDetail`) so the form can
+ * show it in its banner; a Draft already approved or discarded is a 403.
+ * Resolves to the Transaction the ledger shows, warning included. */
+export async function approveDraftTransaction(
+  token: string,
+  draftId: number,
+  input?: TransactionInput,
+): Promise<Transaction> {
+  const response = await request(`/draft-transactions/${draftId}/approve`, {
+    method: 'POST',
+    token,
+    json: input === undefined ? undefined : transactionCreateBody(input),
+    errorMessage: 'Could not approve draft transaction',
+    readDetail: true,
+  })
+  return (await response.json()) as Transaction
 }
 
 /** Discard (ADR-0036): the Draft is removed, nothing is created, nothing

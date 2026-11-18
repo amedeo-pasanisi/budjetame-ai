@@ -34,6 +34,7 @@ vi.mock('./api', () => ({
   fetchTransactions: vi.fn(),
   fetchDraftTransactions: vi.fn().mockResolvedValue([]),
   discardDraftTransaction: vi.fn(),
+  approveDraftTransaction: vi.fn(),
   fetchDashboardSummary: vi.fn(),
   fetchTrend: vi.fn(),
   fetchBudget: vi.fn().mockResolvedValue({

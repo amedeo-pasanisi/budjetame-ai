@@ -55,6 +55,7 @@ vi.mock('./api', () => {
     // none in this suite, so it resolves empty by default.
     fetchDraftTransactions: vi.fn(async () => []),
     discardDraftTransaction: vi.fn(),
+    approveDraftTransaction: vi.fn(),
     createTransaction: vi.fn(),
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),

@@ -50,6 +50,20 @@ here and on GitHub Releases.
   travels in the `X-Assistant-Key` header. 409 without a key where one is
   needed, 422 when the provider rejects the key, 502 when its catalogue is
   unreachable — never a 500.
+- **Approve and Edit a Draft Transaction** (ADR-0036, #122, #125): Approve
+  on a Draft row is one tap that turns it into a Transaction through the
+  same rules the form applies and removes the Draft in the same request —
+  the Wallet's Balance moves only then, and the ledger shows the new row
+  with the usual negative-Cash warning. A Draft the rules reject (a
+  missing or frozen Wallet, a Category of the wrong type, a link on a
+  frozen Recurring definition, a missing type, amount or date) opens
+  pre-filled in the Transaction form instead, the rule message in its
+  banner and the Field Errors on what is left; that form's Save completes
+  the approval with the edited fields. Edit opens the same pre-filled form
+  directly. A Draft is never approved twice.
+- **API:** `POST /draft-transactions/{id}/approve`, taking an optional
+  full `TransactionCreate` override; rule errors answer 422 with the
+  message as `detail`, a Draft already approved or discarded answers 403.
 
 ## [v1.10.0] — 2026-11-17
 

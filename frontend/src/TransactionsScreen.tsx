@@ -3,6 +3,7 @@ import { useIntl } from 'react-intl'
 
 import {
   PAGE_LIMIT,
+  approveDraftTransaction,
   discardDraftTransaction,
   exportTransactions,
   fetchCategories,
@@ -38,9 +39,15 @@ import { signedAmount, locationSuffix, transactionTitle } from './transactions'
 
 const ALL_CATEGORIES = -1
 
-/** The modal form's draft: create (no Transaction) or edit (a Transaction).
- * Null means the modal is closed (US8–US10). */
-type FormDraft = { kind: 'create' } | { kind: 'edit'; transaction: Transaction }
+/** The modal form's draft: create (no Transaction), edit (a Transaction),
+ * or approve (a Draft Transaction opened pre-filled, ADR-0036 — after a
+ * rejected one-tap Approve, carrying the rule message the endpoint
+ * answered, or straight from Edit with none). Null means the modal is
+ * closed (US8–US10). */
+type FormDraft =
+  | { kind: 'create' }
+  | { kind: 'edit'; transaction: Transaction }
+  | { kind: 'approve'; draft: DraftTransaction; message: string | null }
 
 /** The merged ledger (issue #33): the History tab's filters live in a
  * collapsible bar (closed by default) over the paged all-transactions list.
@@ -618,6 +625,44 @@ export function TransactionsScreen({
     )
   }
 
+  // A Draft became a Transaction (ADR-0036): its row goes at once — the
+  // reload's refetch would drop it too, but not before the ledger's own
+  // round trip — and then everything a save does: close the form, reload
+  // the ledger (which now shows the Transaction), show the write warning.
+  const handleApproved = (draft: DraftTransaction, transaction: Transaction) => {
+    setDrafts((current) => current.filter((d) => d.id !== draft.id))
+    handleSaved(transaction)
+  }
+
+  // Approve (ADR-0036): one tap calls the atomic endpoint with the Draft as
+  // it stands. A 422 is the rules rejecting it — a missing or frozen
+  // Wallet, a Category of the wrong type, a paid pin — and opens the
+  // Transaction form pre-filled from the Draft, the rule message in its
+  // banner, so its Save can go back through Approve with the edited
+  // payload. Any other failure (the Draft already approved from another
+  // device, the network) leaves the row with a message and refetches, so
+  // a Draft that is gone goes here too.
+  const handleApproveDraft = (draft: DraftTransaction) => {
+    setDraftError(null)
+    approveDraftTransaction(token, draft.id)
+      .then((transaction) => handleApproved(draft, transaction))
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 422) {
+          setForm({ kind: 'approve', draft, message: error.message })
+          return
+        }
+        setDraftError(formatMessage({ id: 'drafts.error.approve' }))
+        reload()
+      })
+  }
+
+  // Edit (ADR-0036): the same pre-filled form, opened directly — no round
+  // trip first, no message; the Save goes through Approve all the same.
+  const handleEditDraft = (draft: DraftTransaction) => {
+    setDraftError(null)
+    setForm({ kind: 'approve', draft, message: null })
+  }
+
   const handleDeleted = (deleted: Transaction) => {
     closeForm()
     // The deleted Transaction enters the app-wide undo stack (ADR-0031,
@@ -984,6 +1029,8 @@ export function TransactionsScreen({
               wallets={wallets}
               categories={categories}
               error={draftError}
+              onApprove={handleApproveDraft}
+              onEdit={handleEditDraft}
               onDiscard={handleDiscardDraft}
             />
           )}
@@ -1052,12 +1099,31 @@ export function TransactionsScreen({
 
       {form !== null && wallets !== null && categories !== null && (
         <TransactionModal
+          // A Draft's form is keyed by the Draft (ADR-0036): opening
+          // another Draft starts a fresh form from its values.
+          key={form.kind === 'approve' ? `draft-${form.draft.id}` : form.kind}
           wallets={wallets}
           categories={categories}
           recurringCosts={recurringCosts}
           recurringIncomes={recurringIncomes}
           editing={form.kind === 'edit' ? form.transaction : null}
-          onSaved={handleSaved}
+          // The Draft flow (ADR-0036, issues #124/#125): the form opens
+          // pre-filled from the Draft as it stands, its Save goes through
+          // Approve with the edited payload instead of the create call,
+          // and the rule message a one-tap Approve got shows in the banner
+          // from the start — the Field Errors then point at what is left.
+          initialValues={form.kind === 'approve' ? form.draft : null}
+          initialError={form.kind === 'approve' ? form.message : null}
+          save={
+            form.kind === 'approve'
+              ? (input) => approveDraftTransaction(token, form.draft.id, input)
+              : undefined
+          }
+          onSaved={
+            form.kind === 'approve'
+              ? (transaction) => handleApproved(form.draft, transaction)
+              : handleSaved
+          }
           onDeleted={handleDeleted}
           onClose={closeForm}
           onAddCategory={(type) => {

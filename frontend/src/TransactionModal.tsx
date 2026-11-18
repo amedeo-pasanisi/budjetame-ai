@@ -24,6 +24,10 @@ type TransactionModalProps = {
    * the form: when set, the form's Save goes through it — Approve for a
    * Draft Transaction — instead of the create or update endpoint. */
   save?: (input: TransactionInput) => Promise<Transaction>
+  /** The message the form's banner shows from the start (issue #125,
+   * ADR-0036), passed through to the form: the rule a one-tap Approve
+   * broke. */
+  initialError?: string | null
   onSaved: (transaction: Transaction) => void
   /** Called with the deleted Transaction after a successful single-tap delete
    * (ADR-0031). The screen pushes it into the undo buffer. */
@@ -69,6 +73,7 @@ export function TransactionModal({
   editing,
   initialValues = null,
   save,
+  initialError = null,
   onSaved,
   onDeleted,
   onClose,
@@ -95,6 +100,7 @@ export function TransactionModal({
         editing={editing}
         initialValues={initialValues}
         save={save}
+        initialError={initialError}
         onSaved={onSaved}
         onDeleted={onDeleted}
         onCancel={onClose}

@@ -535,3 +535,249 @@ async def test_restore_nulls_the_drafts_references(client: AsyncClient) -> None:
     assert restored["category_id"] is None
     assert restored["amount"] == "8.00"
     assert restored["type"] == "expense"
+
+
+# --- Approve (ADR-0036, issue #125) ---------------------------------------
+
+
+async def _transactions_on(client: AsyncClient, token: str, wallet_id: int) -> list[dict]:
+    """The Wallet's Transactions through the ledger filter — the ledger is
+    paginated, so a filter is how a test reads a row back."""
+    response = await client.get(
+        "/transactions", params={"wallet_id": wallet_id}, headers=_auth(token)
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["items"]
+
+
+async def _approve(client: AsyncClient, token: str, draft_id: int, body: dict | None = None):
+    return await client.post(
+        f"/draft-transactions/{draft_id}/approve", json=body, headers=_auth(token)
+    )
+
+
+async def test_approve_creates_the_transaction_and_removes_the_draft_in_one_request(
+    client: AsyncClient,
+) -> None:
+    """One tap (ADR-0036): the Transaction exists, the Draft is gone, and
+    the Wallet's Balance moves only now — the create rules the form runs
+    judged the Draft, so the response is the Transaction the ledger shows,
+    carrying the write warning like the create endpoint's."""
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, _name("Approve Wallet"), "checking", "100.00")
+    category = await _create_category(client, token, _name("Approve Cat"))
+    draft = await _create_draft(
+        client,
+        token,
+        type="expense",
+        amount="30.00",
+        date="2026-11-18",
+        wallet_id=wallet,
+        category_id=category,
+        description="Esselunga",
+    )
+    assert await _wallet_balance(client, token, wallet) == Decimal("100.00")
+
+    response = await _approve(client, token, draft["id"])
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["type"] == "expense"
+    assert body["amount"] == "30.00"
+    assert body["date"] == "2026-11-18"
+    assert body["wallet_id"] == wallet
+    assert body["category_id"] == category
+    assert body["description"] == "Esselunga"
+    assert body["warning"] is False
+    rows = await _transactions_on(client, token, wallet)
+    assert [r["id"] for r in rows if r["type"] == "expense"] == [body["id"]]
+    assert await _wallet_balance(client, token, wallet) == Decimal("70.00")
+    assert draft["id"] not in {d["id"] for d in await _list_drafts(client, token)}
+
+
+async def _assert_rejected(
+    client: AsyncClient, token: str, draft: dict, detail_fragment: str
+) -> None:
+    """Approve answers 422 with the rule message as `detail`, writes nothing
+    and leaves the Draft exactly as it was."""
+    response = await _approve(client, token, draft["id"])
+    assert response.status_code == 422, response.text
+    assert detail_fragment.lower() in response.json()["detail"].lower()
+    assert await _draft(client, token, draft["id"]) == draft
+
+
+async def test_approve_rejects_a_draft_the_create_rules_reject_and_leaves_it(
+    client: AsyncClient,
+) -> None:
+    """The rules run at Approve time, not at Draft time (ADR-0036): a
+    missing Wallet, a Wallet frozen in between, a Category of the wrong
+    type and a link on a frozen Recurring Cost each answer 422 with the
+    create endpoint's own message — never a 500 — and the Draft stays,
+    for the form to open pre-filled."""
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, _name("Reject Wallet"), "checking", "100.00")
+    income_category = await _create_category(client, token, _name("Reject Income Cat"), "income")
+    cost = await _create_recurring_cost(client, token, _name("Reject Cost"))
+    today = "2026-11-18"
+
+    no_wallet = await _create_draft(client, token, type="expense", amount="5.00", date=today)
+    await _assert_rejected(client, token, no_wallet, "wallet_id is required")
+
+    wrong_category = await _create_draft(
+        client,
+        token,
+        type="expense",
+        amount="5.00",
+        date=today,
+        wallet_id=wallet,
+        category_id=income_category,
+    )
+    await _assert_rejected(client, token, wrong_category, "category")
+
+    frozen_link = await _create_draft(
+        client, token, type="expense", amount="9.99", date=today, wallet_id=wallet, recurring_cost_id=cost
+    )
+    assert (
+        await client.post(f"/recurring-costs/{cost}/freeze", headers=_auth(token))
+    ).status_code == 200
+    await _assert_rejected(client, token, frozen_link, "frozen recurring cost")
+
+    # Only a Wallet at zero Balance can freeze (ADR-0002).
+    freezable = await _create_wallet(client, token, _name("Reject Frozen Wallet"))
+    frozen_wallet = await _create_draft(
+        client, token, type="expense", amount="5.00", date=today, wallet_id=freezable
+    )
+    assert (await client.post(f"/wallets/{freezable}/freeze", headers=_auth(token))).status_code == 200
+    await _assert_rejected(client, token, frozen_wallet, "frozen")
+
+    assert await _wallet_balance(client, token, wallet) == Decimal("100.00")
+
+
+async def test_approve_without_a_required_field_is_a_rule_error_not_a_500(
+    client: AsyncClient,
+) -> None:
+    """A Draft the Assistant only half caught — no type, no amount or no
+    date — is a 422 naming the field, like the form's Field Error on it,
+    so the client opens the form instead of showing a failure."""
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, _name("Half Wallet"))
+    complete = {"type": "expense", "amount": "5.00", "date": "2026-11-18", "wallet_id": wallet}
+
+    for field, fragment in (("type", "type"), ("amount", "amount"), ("date", "date")):
+        draft = await _create_draft(client, token, **{k: v for k, v in complete.items() if k != field})
+        await _assert_rejected(client, token, draft, fragment)
+
+
+async def test_approve_with_an_override_creates_from_the_override(
+    client: AsyncClient,
+) -> None:
+    """The form's Save after a rejected one-tap (ADR-0036): the edited
+    payload — a full `TransactionCreate` — is what gets created, the
+    Draft's own fields are ignored, and the Draft is removed."""
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, _name("Override Wallet"), "checking", "50.00")
+    category = await _create_category(client, token, _name("Override Cat"))
+    draft = await _create_draft(client, token, type="expense", amount="99.00", description="bar")
+
+    response = await _approve(
+        client,
+        token,
+        draft["id"],
+        {
+            "type": "expense",
+            "amount": "12.50",
+            "date": "2026-11-17",
+            "wallet_id": wallet,
+            "category_id": category,
+            "description": "the bar, edited",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["amount"] == "12.50"
+    assert body["date"] == "2026-11-17"
+    assert body["description"] == "the bar, edited"
+    assert await _wallet_balance(client, token, wallet) == Decimal("37.50")
+    assert draft["id"] not in {d["id"] for d in await _list_drafts(client, token)}
+    # An override that breaks a rule is rejected like the Draft itself,
+    # and the Draft stays.
+    other = await _create_draft(client, token, type="expense", amount="1.00")
+    response = await _approve(
+        client,
+        token,
+        other["id"],
+        {
+            "type": "income",
+            "amount": "1.00",
+            "date": "2026-11-17",
+            "wallet_id": wallet,
+            "category_id": category,
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "category" in response.json()["detail"].lower()
+    assert await _draft(client, token, other["id"]) == other
+    assert await _wallet_balance(client, token, wallet) == Decimal("37.50")
+
+
+async def test_a_draft_is_never_approved_twice(client: AsyncClient) -> None:
+    """The insert and the delete share one commit (ADR-0036): the second
+    Approve finds no Draft — 403, indistinguishable from foreign
+    (ADR-0003) — and exactly one Transaction exists."""
+    token = await _login(client)
+    wallet = await _create_wallet(client, token, _name("Twice Wallet"), "checking", "100.00")
+    draft = await _create_draft(
+        client, token, type="expense", amount="10.00", date="2026-11-18", wallet_id=wallet
+    )
+
+    first = await _approve(client, token, draft["id"])
+    second = await _approve(client, token, draft["id"])
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 403, second.text
+    rows = await _transactions_on(client, token, wallet)
+    assert [r["id"] for r in rows if r["type"] == "expense"] == [first.json()["id"]]
+    assert await _wallet_balance(client, token, wallet) == Decimal("90.00")
+
+
+async def test_approve_of_a_foreign_or_missing_draft_answers_403(
+    client: AsyncClient, database_url: str
+) -> None:
+    token = await _login(client)
+    stranger_id = insert_foreign_account(database_url, "draft-approve-stranger@budjetame.dev")
+    try:
+        stranger = await _login_as(client, "draft-approve-stranger@budjetame.dev", "whatever")
+        foreign_wallet = await _create_wallet(client, stranger, _name("Foreign Approve Wallet"))
+        foreign = await _create_draft(
+            client, stranger, type="expense", amount="7.00", date="2026-11-18", wallet_id=foreign_wallet
+        )
+
+        assert (await _approve(client, token, foreign["id"])).status_code == 403
+        assert (await _approve(client, token, 999999)).status_code == 403
+        # The foreign Draft survived the attempt, and its Account can still
+        # approve it.
+        assert foreign["id"] in {d["id"] for d in await _list_drafts(client, stranger)}
+        assert (await _approve(client, stranger, foreign["id"])).status_code == 201
+    finally:
+        delete_account(database_url, stranger_id)
+
+
+async def test_approve_carries_the_create_endpoints_write_warning(client: AsyncClient) -> None:
+    """The one tap answers like the create endpoint (ADR-0036): a Cash
+    Wallet pushed negative by the approved Expense flags `warning`."""
+    token = await _login(client)
+    cash = await _create_wallet(client, token, _name("Warn Cash"), "cash", "5.00")
+    draft = await _create_draft(
+        client, token, type="expense", amount="8.00", date="2026-11-18", wallet_id=cash
+    )
+
+    response = await _approve(client, token, draft["id"])
+
+    assert response.status_code == 201, response.text
+    assert response.json()["warning"] is True
+    assert await _wallet_balance(client, token, cash) == Decimal("-3.00")
+
+
+async def test_approve_requires_authentication(client: AsyncClient) -> None:
+    assert (await client.post("/draft-transactions/1/approve")).status_code == 401

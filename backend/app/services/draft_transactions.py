@@ -1,15 +1,21 @@
-"""Draft Transaction rules (ADR-0036, issues #122/#123). Called by the HTTP
-layer and, once the Assistant lands (#128), by its tools; never from tests.
+"""Draft Transaction rules (ADR-0036, issues #122/#123/#125). Called by the
+HTTP layer and, once the Assistant lands (#128), by its tools; never from
+tests.
 
 A Draft is a stored, unapproved record of a money movement: the fields of
-a Transaction, any of which may be missing. The only rule enforced here is
-ownership — every Wallet, Category or Recurring definition a Draft points
-at must belong to the Account (ADR-0003) — because the create rules the
-form applies (Wallet and Category types, Recurring pins, frozen Wallets)
-run at Approve time (#125), not at Draft time: a Wallet frozen in between
-or a pin paid in between surfaces then, as the form's rule errors. A Draft
-counts toward nothing: it lives in its own table and no derived read, Export,
-Backup, Restore or Duplicate check ever selects from it.
+a Transaction, any of which may be missing. The only rule enforced on a
+Draft's own writes is ownership — every Wallet, Category or Recurring
+definition a Draft points at must belong to the Account (ADR-0003) —
+because the create rules the form applies (Wallet and Category types,
+Recurring pins, frozen Wallets) run at Approve time, not at Draft time: a
+Wallet frozen in between or a pin paid in between surfaces then, as the
+form's rule errors. Approve (#125) is one step in one database
+transaction: the same `create_transaction` the ledger uses judges the
+Draft (or the edited fields the form sends back), inserts the Transaction
+and the Draft is deleted before the commit — so a Draft is never approved
+twice and never left behind. A Draft counts toward nothing: it lives in
+its own table and no derived read, Export, Backup, Restore or Duplicate
+check ever selects from it.
 """
 
 from datetime import date as DateObj
@@ -24,9 +30,11 @@ from app.models import (
     DraftTransaction,
     RecurringCost,
     RecurringIncome,
+    Transaction,
     Wallet,
 )
 from app.services.scoping import owned_or_raise
+from app.services.transactions import TransactionRuleError, create_transaction
 
 # The fields a Draft carries, in the wire's order; the Assistant tools and
 # the endpoints write any subset of them.
@@ -146,3 +154,58 @@ def delete_draft(session: Session, draft: DraftTransaction) -> None:
     history and is cheaper to dictate again than to keep in the stack."""
     session.delete(draft)
     session.commit()
+
+
+# What a Draft must carry before the create rules can even start: the
+# fields `TransactionCreate` requires. Missing, each is a rule error — the
+# form's Field Error on the same field — never a server error (#125).
+_REQUIRED_MESSAGES = {
+    "type": "A type is required: expense, income, or transfer",
+    "amount": "An amount is required",
+    "date": "A date is required",
+}
+
+
+def _draft_as_create(draft: DraftTransaction) -> dict[str, Any]:
+    """The Draft's fields — `DRAFT_FIELDS`, the date back on the wire as a
+    Rome day — as `create_transaction` keyword arguments, or
+    `TransactionRuleError` naming the first required field it lacks."""
+    for field, message in _REQUIRED_MESSAGES.items():
+        if getattr(draft, field) is None:
+            raise TransactionRuleError(message)
+    assert draft.date is not None  # checked just above
+    return {
+        field: draft.date.isoformat() if field == "date" else getattr(draft, field)
+        for field in DRAFT_FIELDS
+    }
+
+
+def approve_draft(
+    session: Session,
+    account_id: int,
+    draft: DraftTransaction,
+    *,
+    override: dict[str, Any] | None = None,
+) -> Transaction:
+    """Approve (ADR-0036, #125): create the Transaction and remove the Draft
+    in one database transaction. `override`, when given, is the full
+    create payload the form sent back after a rejected one-tap Approve
+    (the edited fields, `TransactionCreate`'s keyword arguments); without
+    it the Draft is judged as it stands. Either way the rules are the
+    ledger's own `create_transaction` — Wallet and Category types, frozen
+    Wallets, Recurring pins — so a typed Transaction and an approved Draft
+    cannot drift; a rule it breaks raises `TransactionRuleError` (422) and
+    a foreign reference raises `NotOwned` (403), and in both cases nothing
+    is written and the Draft stays. The insert and the delete share one
+    commit: a second Approve finds no Draft (403), and no Draft outlives
+    its Transaction."""
+    fields = override if override is not None else _draft_as_create(draft)
+    try:
+        transaction = create_transaction(session, account_id, commit=False, **fields)
+        session.delete(draft)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    session.refresh(transaction)
+    return transaction

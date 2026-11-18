@@ -105,6 +105,7 @@ export {
   type DraftTransaction,
   type DraftTransactionInput,
   type DraftTransactionType,
+  approveDraftTransaction,
   createDraftTransaction,
   discardDraftTransaction,
   fetchDraftTransactions,

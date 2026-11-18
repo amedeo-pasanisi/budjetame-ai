@@ -182,10 +182,11 @@ export async function exportTransactions(
   }
 }
 
-export async function createTransaction(
-  token: string,
-  input: TransactionInput,
-): Promise<Transaction> {
+/** The form's validated payload as the backend's `TransactionCreate` body:
+ * what the create endpoint takes, and what Approve of a Draft Transaction
+ * takes as its override (ADR-0036, #125) — one serialization, so the two
+ * paths cannot drift. An empty description is sent as null. */
+export function transactionCreateBody(input: TransactionInput): Record<string, unknown> {
   const base = {
     type: input.type,
     amount: input.amount,
@@ -196,24 +197,29 @@ export async function createTransaction(
     place_name: input.place_name,
     place_id: input.place_id,
   }
-  const body =
-    input.type === 'transfer'
-      ? {
-          ...base,
-          source_wallet_id: input.sourceWalletId,
-          destination_wallet_id: input.destinationWalletId,
-        }
-      : {
-          ...base,
-          wallet_id: input.walletId,
-          category_id: input.categoryId,
-          recurring_cost_id: input.recurringCostId,
-          recurring_income_id: input.recurringIncomeId,
-        }
+  return input.type === 'transfer'
+    ? {
+        ...base,
+        source_wallet_id: input.sourceWalletId,
+        destination_wallet_id: input.destinationWalletId,
+      }
+    : {
+        ...base,
+        wallet_id: input.walletId,
+        category_id: input.categoryId,
+        recurring_cost_id: input.recurringCostId,
+        recurring_income_id: input.recurringIncomeId,
+      }
+}
+
+export async function createTransaction(
+  token: string,
+  input: TransactionInput,
+): Promise<Transaction> {
   const response = await request('/transactions', {
     method: 'POST',
     token,
-    json: body,
+    json: transactionCreateBody(input),
     errorMessage: 'Could not create transaction',
   })
   return (await response.json()) as Transaction

@@ -113,7 +113,10 @@ export const enMessages = {
   'drafts.missing.wallet': 'Wallet missing',
   'drafts.missing.source': 'Source missing',
   'drafts.missing.destination': 'Destination missing',
+  'drafts.approve': 'Approve',
+  'drafts.edit': 'Edit',
   'drafts.discard': 'Discard',
+  'drafts.error.approve': 'Could not approve the draft.',
   'drafts.error.discard': 'Could not discard the draft.',
 
   // -- Transaction form --
@@ -668,7 +671,10 @@ export const itMessages: Record<string, string> = {
   'drafts.missing.wallet': 'Portafoglio mancante',
   'drafts.missing.source': 'Origine mancante',
   'drafts.missing.destination': 'Destinazione mancante',
+  'drafts.approve': 'Approva',
+  'drafts.edit': 'Modifica',
   'drafts.discard': 'Scarta',
+  'drafts.error.approve': 'Impossibile approvare la bozza.',
   'drafts.error.discard': 'Impossibile scartare la bozza.',
 
   // -- Transaction form --

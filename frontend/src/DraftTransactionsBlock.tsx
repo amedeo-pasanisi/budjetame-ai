@@ -9,25 +9,33 @@ import {
 import { draftIsTransfer, draftSignedAmount } from './draftTransactions'
 import { descriptionText } from './transactions'
 
-/** The pinned Drafts block (ADR-0036, issues #122/#123): the Account's
+/** The pinned Drafts block (ADR-0036, issues #122/#123/#125): the Account's
  * Draft Transactions above the ledger, one row per Draft with the same
  * columns as a Transaction row — title, date · wallet, amount — and each
  * missing field visibly marked, so the user sees at a glance what the
- * Assistant did not catch. Discard removes the row at once; Approve and
- * Edit join the actions column in a later ticket (#125). Rendered only
- * when there is at least one Draft; no tab badge (ADR-0036). */
+ * Assistant did not catch. Three actions per row: Approve, the one tap
+ * that turns the Draft into a Transaction (or opens the form pre-filled
+ * when the rules reject it); Edit, which opens that form directly; and
+ * Discard, which removes the row at once. The block only reports the
+ * taps — the screen owns the calls and the form. Rendered only when there
+ * is at least one Draft; no tab badge (ADR-0036). */
 export function DraftTransactionsBlock({
   drafts,
   wallets,
   categories,
   error,
+  onApprove,
+  onEdit,
   onDiscard,
 }: {
   drafts: DraftTransaction[]
   wallets: Wallet[]
   categories: Category[]
-  /** The last Discard failure, shown under the heading; null when none. */
+  /** The last Approve or Discard failure, shown under the heading; null
+   * when none. */
   error: string | null
+  onApprove: (draft: DraftTransaction) => void
+  onEdit: (draft: DraftTransaction) => void
   onDiscard: (draft: DraftTransaction) => void
 }) {
   const { formatMessage } = useIntl()
@@ -104,9 +112,21 @@ export function DraftTransactionsBlock({
               <span className="shrink-0 text-sm font-semibold text-slate-900">
                 {amount === null ? missing('drafts.missing.amount') : amount}
               </span>
-              {/* The actions column: Discard now; Approve and Edit land
-                  here with #125. */}
               <span className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onApprove(draft)}
+                  className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                >
+                  {formatMessage({ id: 'drafts.approve' })}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onEdit(draft)}
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900"
+                >
+                  {formatMessage({ id: 'drafts.edit' })}
+                </button>
                 <button
                   type="button"
                   onClick={() => onDiscard(draft)}
