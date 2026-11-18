@@ -9,11 +9,18 @@ export function todayInRome(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date())
 }
 
+/** A ledger amount signed by its type: an Expense negative, an Income
+ * positive, anything else — a Transfer, an Opening Balance, a Draft whose
+ * type is not yet known — unsigned. Shared by the ledger rows and the
+ * Drafts block (ADR-0036) so both read alike. */
+export function signAmount(type: string | null, amount: string): string {
+  if (type === 'expense') return `-€${amount}`
+  if (type === 'income') return `+€${amount}`
+  return `€${amount}`
+}
+
 export function signedAmount(transaction: Transaction): string {
-  if (transaction.type === 'expense') return `-€${transaction.amount}`
-  if (transaction.type === 'income') return `+€${transaction.amount}`
-  // A Transfer and an Opening Balance move money without income/expense signs.
-  return `€${transaction.amount}`
+  return signAmount(transaction.type, transaction.amount)
 }
 
 /** The Description as display text: trimmed, or null when missing or blank —

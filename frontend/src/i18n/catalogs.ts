@@ -100,6 +100,22 @@ export const enMessages = {
   'transactions.warning.negativeCash': 'Saved — this made a Cash wallet negative.',
   'transactions.frozenSuffix': 'Frozen',
 
+  // -- Drafts block (ADR-0036) --
+  'drafts.title': 'Drafts',
+  'drafts.hint': 'Not yet transactions — they count for nothing until approved.',
+  'drafts.untitled': 'Draft transaction',
+  'drafts.type.expense': 'Expense',
+  'drafts.type.income': 'Income',
+  'drafts.type.transfer': 'Transfer',
+  'drafts.missing.type': 'Type missing',
+  'drafts.missing.amount': 'Amount missing',
+  'drafts.missing.date': 'Date missing',
+  'drafts.missing.wallet': 'Wallet missing',
+  'drafts.missing.source': 'Source missing',
+  'drafts.missing.destination': 'Destination missing',
+  'drafts.discard': 'Discard',
+  'drafts.error.discard': 'Could not discard the draft.',
+
   // -- Transaction form --
   'txForm.title.edit': 'Edit transaction',
   'txForm.title.new': 'New transaction',
@@ -629,6 +645,22 @@ export const itMessages: Record<string, string> = {
   'transactions.error.export': 'Impossibile esportare le transazioni',
   'transactions.warning.negativeCash': 'Salvato — questo ha reso negativo un portafoglio Contanti.',
   'transactions.frozenSuffix': 'Congelato',
+
+  // -- Drafts block (ADR-0036) --
+  'drafts.title': 'Bozze',
+  'drafts.hint': 'Non sono ancora transazioni — non contano finché non vengono approvate.',
+  'drafts.untitled': 'Bozza di transazione',
+  'drafts.type.expense': 'Spesa',
+  'drafts.type.income': 'Entrata',
+  'drafts.type.transfer': 'Trasferimento',
+  'drafts.missing.type': 'Tipo mancante',
+  'drafts.missing.amount': 'Importo mancante',
+  'drafts.missing.date': 'Data mancante',
+  'drafts.missing.wallet': 'Portafoglio mancante',
+  'drafts.missing.source': 'Origine mancante',
+  'drafts.missing.destination': 'Destinazione mancante',
+  'drafts.discard': 'Scarta',
+  'drafts.error.discard': 'Impossibile scartare la bozza.',
 
   // -- Transaction form --
   'txForm.title.edit': 'Modifica transazione',

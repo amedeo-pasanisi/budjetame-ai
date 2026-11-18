@@ -51,6 +51,10 @@ vi.mock('./api', () => {
     fetchRecurringCosts: vi.fn(),
     fetchRecurringIncomes: vi.fn(),
     fetchTransactions: vi.fn(),
+    // The pinned Drafts (ADR-0036): an auxiliary fetch on every reload;
+    // none in this suite, so it resolves empty by default.
+    fetchDraftTransactions: vi.fn(async () => []),
+    discardDraftTransaction: vi.fn(),
     createTransaction: vi.fn(),
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),

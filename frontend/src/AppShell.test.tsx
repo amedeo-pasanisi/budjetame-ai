@@ -71,6 +71,8 @@ vi.mock('./api', async () => {
     deleteCategory: vi.fn(),
     mergeCategories: vi.fn(),
     fetchTransactions: vi.fn(),
+    fetchDraftTransactions: vi.fn(async () => []),
+    discardDraftTransaction: vi.fn(),
     createTransaction: vi.fn(),
     updateTransaction: vi.fn(),
     deleteTransaction: vi.fn(),

@@ -3,8 +3,10 @@ import { useIntl } from 'react-intl'
 
 import {
   PAGE_LIMIT,
+  discardDraftTransaction,
   exportTransactions,
   fetchCategories,
+  fetchDraftTransactions,
   fetchRecurringCosts,
   fetchRecurringIncomes,
   fetchTransactions,
@@ -14,6 +16,7 @@ import {
   TOKEN_KEY,
   ApiError,
   type Category,
+  type DraftTransaction,
   type RecurringCost,
   type RecurringIncome,
   type Transaction,
@@ -23,6 +26,7 @@ import {
 import { useDataVersion, getDataVersion } from './api/dataVersion'
 import type { LedgerFilterRequest } from './App'
 import { CategoryModal } from './CategoryModal'
+import { DraftTransactionsBlock } from './DraftTransactionsBlock'
 import { ImportScreen } from './ImportScreen'
 import type { ImportDraftController } from './importDraft'
 import { RecurringDefinitionModal } from './RecurringDefinitionModal'
@@ -72,6 +76,11 @@ export function TransactionsScreen({
   // The link picker's incomes (issue #61), the mirror of the costs fetch:
   // auxiliary and silent, same reasoning.
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>([])
+  // The pinned Drafts (ADR-0036): an auxiliary fetch like the recurring
+  // lists — a Drafts failure never takes down the ledger, the block just
+  // stays hidden until the next reload. Empty hides the block.
+  const [drafts, setDrafts] = useState<DraftTransaction[]>([])
+  const [draftError, setDraftError] = useState<string | null>(null)
   const [transactions, setTransactions] = useState<Transaction[] | null>(null)
   // The accumulated list pages one at a time: the sentinel at the bottom of
   // the list (IntersectionObserver) fetches the next page while scrolling.
@@ -358,6 +367,11 @@ export function TransactionsScreen({
     fetchRecurringIncomes(token)
       .then((data) => setRecurringIncomes(data))
       .catch(() => {})
+    // The Drafts refetch on every reload too (ADR-0036): the Assistant
+    // writes them from any tab, and a write anywhere bumps the clock.
+    fetchDraftTransactions(token)
+      .then((data) => setDrafts(data))
+      .catch(() => {})
   }, [token, requestFilters, formatMessage])
 
   // Any filter change — or a write anywhere (dataVersion bump, ADR-0022) —
@@ -611,6 +625,24 @@ export function TransactionsScreen({
     pushDeleted({ kind: 'transaction', entity: deleted })
     reload()
     setSavedWarning(null)
+  }
+
+  // Discard (ADR-0036): the row goes at once — a Draft has no history, so
+  // there is nothing to undo and no reason to wait — and the api call
+  // follows; the transport bumps the cache clock on success, so every
+  // other mounted tab refetches (ADR-0022). A failure puts the row back
+  // where it was, with a message.
+  const handleDiscardDraft = (draft: DraftTransaction) => {
+    setDraftError(null)
+    setDrafts((current) => current.filter((d) => d.id !== draft.id))
+    discardDraftTransaction(token, draft.id).catch(() => {
+      setDrafts((current) =>
+        current.some((d) => d.id === draft.id)
+          ? current
+          : [...current, draft].sort((a, b) => a.id - b.id),
+      )
+      setDraftError(formatMessage({ id: 'drafts.error.discard' }))
+    })
   }
 
   // An Undo brought a Transaction back (ADR-0031): the ledger reloads so
@@ -938,6 +970,22 @@ export function TransactionsScreen({
             <p className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
               {formatMessage({ id: 'transactions.frozenBanner' })}
             </p>
+          )}
+
+          {/* The pinned Drafts (ADR-0036): above the ledger, whatever the
+              filters and search say — a Draft is not a Transaction and
+              never filtered as one. Hidden when there is none, and held
+              back until the Wallet and Category lists are loaded: a name
+              lookup against an empty list would mark a resolved field as
+              missing for a moment. */}
+          {wallets !== null && categories !== null && (
+            <DraftTransactionsBlock
+              drafts={drafts}
+              wallets={wallets}
+              categories={categories}
+              error={draftError}
+              onDiscard={handleDiscardDraft}
+            />
           )}
 
           {wallets === null || categories === null || transactions === null ? (

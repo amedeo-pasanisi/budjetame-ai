@@ -100,6 +100,16 @@ export {
 } from './assistantSettings'
 
 export {
+  type DraftTransaction,
+  type DraftTransactionInput,
+  type DraftTransactionType,
+  createDraftTransaction,
+  discardDraftTransaction,
+  fetchDraftTransactions,
+  updateDraftTransaction,
+} from './draftTransactions'
+
+export {
   type IntervalUnit,
   type RecurringDefinition,
   type RecurringDefinitionApi,

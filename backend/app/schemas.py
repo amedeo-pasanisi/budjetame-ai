@@ -931,3 +931,62 @@ class TransactionUndoRequest(BaseModel):
                 raise ValueError("Only Incomes can be linked to a Recurring Income")
         return self
 
+
+
+class DraftTransactionWrite(BaseModel):
+    """Create or patch a Draft Transaction (ADR-0036, issues #122/#123): the
+    fields of `TransactionCreate`, every one of them optional — the
+    Assistant writes what it understood, and the create rules judge the
+    whole at Approve time, never here. What is present must still be
+    well-formed (a known type, a positive amount, a Rome day). On PATCH a
+    field present is applied even when null (clearing it); absent is
+    untouched — the Transaction edit's contract. No location fields: the
+    Assistant never sets them."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    type: Literal["expense", "income", "transfer"] | None = None
+    amount: Decimal | None = Field(default=None, gt=0, le=_MAX_AMOUNT)
+    date: str | None = None
+    wallet_id: int | None = None
+    source_wallet_id: int | None = None
+    destination_wallet_id: int | None = None
+    category_id: int | None = None
+    recurring_cost_id: int | None = None
+    recurring_income_id: int | None = None
+    description: str | None = Field(default=None, max_length=500)
+
+    @field_validator("date")
+    @classmethod
+    def _date_is_a_rome_day(cls, value: str | None) -> str | None:
+        return _valid_rome_day(value) if value is not None else None
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal | None) -> Decimal | None:
+        return value.quantize(Decimal("0.01")) if value is not None else None
+
+
+class DraftTransactionOut(BaseModel):
+    """A Draft Transaction as seen through the API (ADR-0036): the same
+    columns as a Transaction row, each nullable because the Assistant may
+    not have caught it, so the pinned Drafts block can mark what is
+    missing. `date` is the Europe/Rome calendar day."""
+
+    id: int
+    type: TransactionType | None
+    amount: Decimal | None
+    date: str | None
+    wallet_id: int | None
+    source_wallet_id: int | None
+    destination_wallet_id: int | None
+    category_id: int | None
+    recurring_cost_id: int | None
+    recurring_income_id: int | None
+    description: str | None
+    created_at: datetime
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_in_euros(cls, value: Decimal | None) -> Decimal | None:
+        return value.quantize(Decimal("0.01")) if value is not None else None

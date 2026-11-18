@@ -395,3 +395,53 @@ class RecurringIncome(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class DraftTransaction(Base):
+    """A stored, unapproved record of a money movement produced by the
+    Assistant (ADR-0036, issues #122/#123): the fields of a Transaction, any
+    of which may still be missing, scoped to the Account like everything
+    else. It is deliberately its own table, not a Transaction with a flag:
+    every derived read (ADR-0001, ADR-0032, the Budget, the Duplicate check,
+    Export, Backup) sums over `transactions` and never sees this one, so a
+    Draft cannot leak into a Balance. The references are ON DELETE SET
+    NULL: a Wallet deleted, a Category merged away or a Restore that
+    replaced everything leaves the Draft in place with that field missing,
+    and the create rules judge it at Approve time. The location fields are
+    left out — the Assistant never sets them. Drafts never expire.
+    """
+
+    __tablename__ = "draft_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    type: Mapped[str | None] = mapped_column(String(20))
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    # The Europe/Rome calendar day the Assistant understood, or none: a
+    # Draft is never ordered against the ledger, so the day is stored as a
+    # day and becomes the Transaction's UTC timestamp only at Approve time.
+    date: Mapped[OccurrenceDate | None] = mapped_column(Date)
+    wallet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wallets.id", ondelete="SET NULL"), index=True
+    )
+    source_wallet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wallets.id", ondelete="SET NULL"), index=True
+    )
+    destination_wallet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wallets.id", ondelete="SET NULL"), index=True
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"), index=True
+    )
+    recurring_cost_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_costs.id", ondelete="SET NULL"), index=True
+    )
+    recurring_income_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_incomes.id", ondelete="SET NULL"), index=True
+    )
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

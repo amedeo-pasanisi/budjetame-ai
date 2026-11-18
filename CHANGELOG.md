@@ -23,6 +23,19 @@ here and on GitHub Releases.
 - **API:** `GET`/`PUT`/`DELETE /assistant/settings` (status, set-or-replace,
   remove). `BUDJETAME_ASSISTANT_KEY_SECRET` is required by the compose
   files like the JWT secret.
+- **Draft Transactions** (ADR-0036, #122, #123): a stored, Account-scoped
+  record of a money movement the Assistant understood — the fields of a
+  Transaction, any of which may still be missing — that counts for
+  nothing: no Balance, Net Worth, Budget or dashboard figure includes it,
+  no Export or Backup carries it, a Restore neither writes nor removes one,
+  and the import Duplicate check ignores it. A Wallet deleted, a Category
+  merged away or a Restore leaves a Draft that named them in place with
+  that field missing. The Transactions tab pins the Drafts above the
+  ledger, one row per Draft with the same columns as a Transaction row and
+  each missing field marked, with Discard (no Undo). Approve and Edit come
+  with #125; the Assistant that writes Drafts with #128.
+- **API:** `GET`/`POST /draft-transactions`, `PATCH`/`DELETE
+  /draft-transactions/{id}`; a foreign or missing Draft answers 403.
 
 ## [v1.10.0] — 2026-11-17
 

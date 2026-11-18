@@ -32,6 +32,8 @@ vi.mock('./api', () => ({
   fetchRecurringCosts: vi.fn().mockResolvedValue([]),
   fetchRecurringIncomes: vi.fn().mockResolvedValue([]),
   fetchTransactions: vi.fn(),
+  fetchDraftTransactions: vi.fn().mockResolvedValue([]),
+  discardDraftTransaction: vi.fn(),
   fetchDashboardSummary: vi.fn(),
   fetchTrend: vi.fn(),
   fetchBudget: vi.fn().mockResolvedValue({

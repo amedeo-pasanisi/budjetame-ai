@@ -6,6 +6,7 @@ from app.auth import router as auth_router
 from app.categories import router as categories_router
 from app.config import settings
 from app.dashboard import router as dashboard_router
+from app.draft_transactions import router as draft_transactions_router
 from app.db import check_connection, create_db_engine
 from app.google_auth import GoogleIdTokenVerifier, GoogleVerifier
 from app.backup import router as backup_router
@@ -79,6 +80,7 @@ def create_app(
     app.include_router(recurring_incomes_router)
     app.include_router(backup_router)
     app.include_router(assistant_settings_router)
+    app.include_router(draft_transactions_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
