@@ -11,13 +11,15 @@ The Assistant turns a sentence ("trenta euro all'Esselunga con la carta") into D
 - **Hand-written parsing of amounts, dates and names** — rejected: brittle in two languages; the LLM is the point.
 - **One provider, one hardcoded model** — the first cut; rejected once the owner wanted their OpenRouter and Gemini keys and the free models behind them. The app vets only that a model can call tools; acceptance runs on the reference model (Claude Opus 5.5), and a weaker model's misreadings are the user's choice, not a bug.
 - **A user-entered base URL** ("any OpenAI-compatible endpoint") — rejected: the server would send requests, with the user's key, to any host the user names, including machines inside its own network. Providers are a fixed table in code.
-- **A wider toolbox** (ledger reads, Transaction writes, answering "how much did I spend") — rejected: the Assistant reads only Wallet, Category and Recurring names and writes only Draft Transactions, so a misheard sentence or a hostile name in the prompt can at worst produce a Draft nobody approves. Voice queries are a different product.
+- **A wider toolbox** (ledger reads, Transaction writes, answering "how much did I spend") — rejected: the Assistant is given only Wallet, Category and Recurring names and writes only Draft Transactions, so a misheard sentence or a hostile name in the prompt can at worst produce a Draft nobody approves. Voice queries are a different product.
+- **Names fetched through tools** — the first cut, three list tools the model called before every Draft; rejected after the prototype met Gemini's free tier (5 requests per minute per model): a turn cost 3-4 requests and the second turn was refused. The server already holds the names, so it injects them into the system prompt each turn and the toolbox is the four Draft tools; a simple turn is two requests. Same information reaches the provider either way.
 
 ## Consequences
 
 - The Account gains an encrypted key column and a settings endpoint that sets, replaces and removes it and reports only "configured" plus the last characters. The key is excluded from Backup, Export and logs; a Backup restored elsewhere brings no key.
 - The server secret for the key joins the JWT secret in the environment; losing it makes every stored key unreadable and every Account re-enters theirs.
 - The operator, with database access and that secret, can decrypt the keys. For a self-hosted app that operator is the owner.
+- On a provider 429 or 503 the server waits the delay the provider announces and retries once while it fits the turn budget; otherwise the reply says to try again in N seconds. No retry storm.
 - Per-Account bounds live server-side (turns per hour, tool steps per turn, seconds per turn) so a leaked session token cannot burn a key quickly.
 - The conversation is stored nowhere: the client sends the transcript each turn and the server derives from it which Drafts belong to the open conversation; the update and discard tools accept only those ids.
 - A provider rejection of the key surfaces as one message pointing at Settings; there is no retry.

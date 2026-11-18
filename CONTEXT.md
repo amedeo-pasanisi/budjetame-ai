@@ -243,7 +243,7 @@ _Avoid_: language setting, regional format, i18n setting
 - An Export never carries the link either: an exported row has no Recurring link and no Place — coordinates only — and Opening Balance Transactions are not exported.
 - All data is scoped to its owning Account; foreign data gets a 403.
 - A Draft Transaction counts toward nothing: no Balance, Net Worth, Budget or dashboard figure, and no Export, Backup or Restore carries it. Approve creates the Transaction through the same rules as the form — a rejected Draft opens pre-filled in the form instead — and removes the Draft in the same step; a Draft is never approved twice. Discard has no Undo. Drafts never expire.
-- The Assistant never creates, edits or deletes a Transaction, a Wallet or a Category; it only reads the Account's Wallet, Category and Recurring names and writes Draft Transactions. It corrects or discards only the Draft Transactions of the open conversation, which no client or server stores.
+- The Assistant never creates, edits or deletes a Transaction, a Wallet or a Category; it is given only the Account's Wallet, Category and Recurring names and writes only Draft Transactions. It corrects or discards only the Draft Transactions of the open conversation, which no client or server stores.
 - An Assistant Key is stored encrypted, per Account, and is never returned by the API, written to a file or logged. The provider is always one of the fixed list; the app never calls a user-entered endpoint.
 
 ## Non-goals
