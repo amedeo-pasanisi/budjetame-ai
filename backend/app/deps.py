@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.assistant_catalogue import CatalogueFetcher
+from app.assistant_seam import AssistantModelFactory
 from app.google_auth import GoogleVerifier
 from app.mailer import Mailer
 
@@ -45,3 +46,9 @@ def get_catalogue_fetcher(request: Request) -> CatalogueFetcher:
     one in production, whatever tests injected via create_app."""
     fetcher: CatalogueFetcher = request.app.state.catalogue_fetcher
     return fetcher
+def get_assistant_model_factory(request: Request) -> AssistantModelFactory:
+    """The provider seam of the Assistant (ADR-0035, issue #128): the
+    per-provider adapter lookup in production, whatever tests injected via
+    create_app (a scripted fake)."""
+    factory: AssistantModelFactory = request.app.state.assistant_model_factory
+    return factory

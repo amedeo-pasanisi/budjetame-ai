@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.assistant_seam import Message as AssistantMessage
 from app.models import (
     AssistantProvider,
     CategoryType,
@@ -120,6 +121,28 @@ class AssistantModelsOut(BaseModel):
 
     provider: AssistantProvider
     models: list[AssistantModelOut]
+class AssistantTurnIn(BaseModel):
+    """One user turn (ADR-0035, issue #128): the transcript exactly as the
+    client last received it — the previous turns' `transcript_tail`s joined,
+    in the seam's neutral shape — plus the new user text. Nothing is stored
+    server-side, so the transcript is the whole conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transcript: list[AssistantMessage] = Field(default_factory=list)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class AssistantTurnOut(BaseModel):
+    """The turn's answer: the written reply in the Account's Locale and the
+    messages appended this turn (the user message first, then every
+    assistant message and tool-result message), so the client's next
+    transcript is the one it sent plus this tail."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reply: str
+    transcript_tail: list[AssistantMessage]
 
 
 class LanguageUpdate(BaseModel):

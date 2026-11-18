@@ -9,6 +9,21 @@ here and on GitHub Releases.
 
 ### Added
 
+- **Assistant turn** (ADR-0035, #128): `POST /assistant/turns` runs the
+  Assistant on the server, stateless: the client sends the transcript as
+  it last received it plus the new sentence and gets back the written
+  reply and the transcript tail. The system prompt is rebuilt each turn
+  with today's date (Europe/Rome), the Locale and the Account's active
+  Wallets, Categories and active Recurring definitions — never a ledger
+  row, a balance or the Budget — and the model drives four tools bound to
+  the Account: list, create, update and discard Draft Transactions. Update
+  and discard accept only the Drafts the submitted transcript created; the
+  tools clean a lax model's input (string ids, `"None"`, `1,20`) and refuse
+  contradictions with a message naming the field to leave null. The model
+  call is one seam (`app/assistant_seam.py`) with a scripted fake for
+  tests; the Anthropic and OpenAI-compatible adapters are the next
+  tickets, so the endpoint answers 501 for a configured provider until they
+  land, and 409 without Assistant Settings.
 - **Assistant Settings** (ADR-0035, #126): Settings gains an Assistant
   block where an Account picks a provider (Anthropic, OpenRouter, Google
   Gemini), pastes its Assistant Key and optionally types a model id; Save
