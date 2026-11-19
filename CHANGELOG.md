@@ -30,6 +30,26 @@ here and on GitHub Releases.
   attribution headers. No test touches the network: the translation and
   the status mapping run against recorded shapes through an httpx mock
   transport.
+- **Anthropic adapter for the Assistant** (ADR-0035, #130): an Account whose
+  Assistant Settings name Anthropic now gets real turns. The adapter
+  (`backend/app/assistant_anthropic.py`, on the official `anthropic` SDK)
+  implements the provider seam: the system prompt as the `system` field,
+  the four Draft tools with `strict: true`, `tool_choice` auto (none once
+  the step cap asks for the written answer), effort low, the model from
+  the Assistant Settings and `max_tokens` 4096; the seam's transcript goes
+  out as text, `tool_use` and `tool_result` blocks and the reply's text and
+  tool calls come back as the seam's blocks (the model's thinking blocks
+  are dropped, since the prompt is rebuilt each turn). Provider failures
+  become the seam's typed errors — 401 the rejected key, 429/503 (and
+  Anthropic's 529) busy with the delay from `retry-after-ms`, `Retry-After`
+  or the body, the
+  SDK timeout (set to the turn budget, no SDK retries: the loop owns the
+  one retry) the gave-up reply — and anything else a 502 naming the status
+  and the provider's message. The Assistant Key reaches the SDK client
+  only and is scrubbed from every error message. Tests record the request
+  and response shapes through a mock HTTP transport under the real SDK,
+  so no test touches the network; the real-key walkthrough on the
+  reference model is a manual check.
 - **Assistant on every tab** (ADR-0035, #132): an Assistant button in the
   header of every tab, shown only while the Assistant Settings status
   reports configured — it goes the moment the key is removed in Settings,
