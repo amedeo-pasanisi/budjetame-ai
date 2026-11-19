@@ -5,7 +5,7 @@ All notable changes to Budjetame. Format follows
 [SemVer](https://semver.org/). Each release is a `vX.Y.Z` tag, recorded
 here and on GitHub Releases.
 
-## [Unreleased]
+## [v1.11.0] — 2026-11-19
 
 ### Added
 
@@ -601,3 +601,4 @@ behind the live deployment at budjetame.de.
 [v1.9.1]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.9.1
 [v1.9.2]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.9.2
 [v1.10.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.10.0
+[v1.11.0]: https://github.com/amedeo-pasanisi/budjetame-ai/releases/tag/v1.11.0
