@@ -16,12 +16,29 @@ client carries the transcript exactly as these models serialise it and
 hands it back untouched, so the conversation is stored nowhere (ADR-0035).
 
 Seam errors derive from `AssistantSeamError`, which the turn endpoint maps
-to one status; issue #129 adds the typed provider failures (401, 429/503
-with a delay) as subclasses and turns them into replies.
+to 502. Three typed subclasses (issue #129) are what an adapter raises for
+the provider outcomes it only has to map, never handle: `AssistantKeyRejected`
+for a 401 (one reply pointing at Assistant Settings, no retry),
+`AssistantProviderBusy` for a 429 or 503, carrying the delay the provider
+announced — parsed by the adapter from the `Retry-After` header or the
+body's `retryDelay` with the helpers below — which the turn loop waits out
+and retries once while it fits the turn budget, and `AssistantProviderTimeout`
+when the adapter's own request timeout — which it sets to the turn budget,
+`settings.assistant_turn_seconds`, since the loop cannot interrupt a call
+— ran out (the "gave up" reply) (ADR-0035).
+
+The loop reads time through the `Clock` protocol so the seconds-per-turn
+bound is testable without sleeping: production uses `SystemClock`, tests
+inject a `FakeClock` the scripted fake advances by the time a reply "took".
 """
 
-from collections.abc import Sequence
+import re
+import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import ceil
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -133,12 +150,159 @@ class AssistantModel(Protocol):
 
 
 class AssistantSeamError(Exception):
-    """Base of what an adapter raises when the provider cannot answer; the
-    endpoint maps it to one status. Issue #129 adds the typed failures."""
+    """Base of what an adapter raises when the provider cannot answer. An
+    untyped one (a 500, a network failure) reaches the endpoint as a 502;
+    the typed subclasses below become replies of a 200 turn (issue #129)."""
 
 
 class AssistantAdapterMissing(AssistantSeamError):
     """No adapter is registered for the Account's provider (yet)."""
+
+
+class AssistantKeyRejected(AssistantSeamError):
+    """The provider refused the Assistant Key (its 401): the turn answers
+    with one reply pointing at Assistant Settings and never retries
+    (ADR-0035). Adapters raise it as `AssistantKeyRejected()`; the message
+    is for logs and must never carry the key."""
+
+    def __init__(self, message: str = "The provider rejected the Assistant Key") -> None:
+        super().__init__(message)
+
+
+class AssistantProviderBusy(AssistantSeamError):
+    """The provider could not take the request now (its 429 or 503).
+    `retry_after_seconds` is the delay it announced — the adapter parses
+    `Retry-After` or the body's `retryDelay` (see `retry_after_from_header`
+    and `retry_delay_from_body`) — or None when it announced none, in which
+    case the loop waits `AssistantBounds.retry_default_seconds`. The loop
+    retries once while the delay fits the remaining turn budget, otherwise
+    replies that the provider is busy, naming the seconds (ADR-0035)."""
+
+    def __init__(
+        self,
+        message: str = "The provider is busy",
+        *,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+class AssistantProviderTimeout(AssistantSeamError):
+    """The adapter's request timed out. The loop cannot interrupt a call,
+    so each adapter bounds its own request at the turn budget
+    (`settings.assistant_turn_seconds`) and raises this; the turn answers
+    that the Assistant gave up (issue #129)."""
+
+    def __init__(self, message: str = "The provider did not answer in time") -> None:
+        super().__init__(message)
+
+
+# --- Reading the delay a provider announces ---------------------------------
+
+_DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(s|ms)?\s*$", re.IGNORECASE)
+
+
+def retry_after_from_header(value: str | None) -> float | None:
+    """The seconds a `Retry-After` header asks for: a delay in seconds or
+    an HTTP date (RFC 9110); None when absent or unreadable. A date in the
+    past is zero seconds, never negative."""
+    if value is None or not value.strip():
+        return None
+    if value.strip().isdigit():
+        return float(value.strip())
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
+def retry_delay_from_body(body: Mapping[str, Any] | None) -> float | None:
+    """The seconds a Gemini-shaped error body asks for: `retryDelay` as a
+    duration string ("12.5s", "800ms") at the top level, under `error`, or
+    in `error.details[]` (google.rpc.RetryInfo); None when absent."""
+    if not body:
+        return None
+    candidates: list[Any] = [body.get("retryDelay")]
+    error = body.get("error")
+    if isinstance(error, Mapping):
+        candidates.append(error.get("retryDelay"))
+        details = error.get("details")
+        if isinstance(details, list):
+            candidates.extend(
+                detail.get("retryDelay") for detail in details if isinstance(detail, Mapping)
+            )
+    for candidate in candidates:
+        seconds = _duration_seconds(candidate)
+        if seconds is not None:
+            return seconds
+    return None
+
+
+def _duration_seconds(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if value >= 0 else None
+    if isinstance(value, str):
+        match = _DURATION.match(value)
+        if match is None:
+            return None
+        number, unit = match.groups()
+        return float(number) / (1000 if (unit or "s").lower() == "ms" else 1)
+    return None
+
+
+def whole_seconds(seconds: float) -> int:
+    """A delay as the whole seconds a reply or a `Retry-After` header
+    names: rounded up, at least 1."""
+    return max(1, ceil(seconds))
+
+
+# --- The clock the turn budget is measured on ----------------------------------
+
+
+class Clock(Protocol):
+    """Monotonic time plus the wait the loop makes before its one retry.
+    Production is `SystemClock`; tests inject `FakeClock`."""
+
+    def monotonic(self) -> float: ...
+
+    def sleep(self, seconds: float) -> None: ...
+
+
+class SystemClock:
+    """The real clock: `time.monotonic` and `time.sleep`."""
+
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    def sleep(self, seconds: float) -> None:
+        if seconds > 0:
+            time.sleep(seconds)
+
+
+@dataclass
+class FakeClock:
+    """A clock tests move by hand: `advance` is time passing (the fake
+    model reports how long a reply took), `sleep` records the wait the loop
+    asked for and passes it at once, so turn-budget tests are instant."""
+
+    now: float = 0.0
+    sleeps: list[float] = field(default_factory=list)
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += max(0.0, seconds)
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 class AssistantModelFactory(Protocol):
@@ -179,18 +343,34 @@ class CompletionCall:
     tool_choice: ToolChoice
 
 
+@dataclass(frozen=True)
+class Slow:
+    """A scripted step that took `seconds` on the fake clock before its
+    outcome (a reply or an exception): how a test spends the turn budget
+    without sleeping."""
+
+    seconds: float
+    outcome: "AssistantReply | Exception"
+
+
+ScriptedStep = AssistantReply | Exception | Slow
+
+
 @dataclass
 class ScriptedAssistantModel:
     """The test double of the seam: answers each call with the next scripted
-    reply, in order, and records every call. `script(...)` sets the replies
-    (replacing any left over); running past the script is a test bug and
-    raises rather than inventing a reply."""
+    step, in order, and records every call. A step is a reply to return, an
+    exception to raise (a typed seam error, issue #129) or `Slow(seconds,
+    outcome)`, which first advances the `FakeClock` the app was built with.
+    `script(...)` sets the steps (replacing any left over); running past
+    the script is a test bug and raises rather than inventing a reply."""
 
-    replies: list[AssistantReply] = field(default_factory=list)
+    replies: list[ScriptedStep] = field(default_factory=list)
     calls: list[CompletionCall] = field(default_factory=list)
+    clock: FakeClock | None = None
 
-    def script(self, *replies: AssistantReply) -> None:
-        self.replies = list(replies)
+    def script(self, *steps: ScriptedStep) -> None:
+        self.replies = list(steps)
 
     def complete(
         self,
@@ -210,4 +390,12 @@ class ScriptedAssistantModel:
         )
         if not self.replies:
             raise AssertionError("ScriptedAssistantModel: the script ran out of replies")
-        return self.replies.pop(0)
+        step = self.replies.pop(0)
+        if isinstance(step, Slow):
+            if self.clock is None:
+                raise AssertionError("ScriptedAssistantModel: a Slow step needs a FakeClock")
+            self.clock.advance(step.seconds)
+            step = step.outcome
+        if isinstance(step, Exception):
+            raise step
+        return step

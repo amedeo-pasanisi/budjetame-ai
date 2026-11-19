@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.assistant_catalogue import CatalogueFetcher
+from app.assistant_bounds import AssistantRuntime
 from app.assistant_seam import AssistantModelFactory
 from app.google_auth import GoogleVerifier
 from app.mailer import Mailer
@@ -52,3 +53,11 @@ def get_assistant_model_factory(request: Request) -> AssistantModelFactory:
     create_app (a scripted fake)."""
     factory: AssistantModelFactory = request.app.state.assistant_model_factory
     return factory
+
+
+def get_assistant_runtime(request: Request) -> AssistantRuntime:
+    """The Assistant's bounds, clock and turns-per-hour window (ADR-0035,
+    issue #129): settings and the system clock in production, whatever
+    tests injected via create_app."""
+    runtime: AssistantRuntime = request.app.state.assistant_runtime
+    return runtime

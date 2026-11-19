@@ -24,6 +24,33 @@ here and on GitHub Releases.
   close or reload. The server's replies for its bounds and the provider's
   failures read as ordinary Assistant lines; the hourly 429 and a provider
   failure get a line of the client's own.
+- **Assistant bounds and provider failures** (ADR-0035, #129): a turn now
+  stays within three per-Account bounds — 30 turns per hour (the next one
+  answers 429 with `Retry-After` and a message in the Locale), 8 tool
+  steps per turn (then the model is asked for its written answer with no
+  further tools) and 30 s per turn (then the reply says the Assistant gave
+  up on this turn) — each a setting (`BUDJETAME_ASSISTANT_TURNS_PER_HOUR`,
+  `BUDJETAME_ASSISTANT_MAX_TOOL_STEPS`, `BUDJETAME_ASSISTANT_TURN_SECONDS`)
+  and overridable through the app factory for tests. The hourly window is
+  in memory, per process: enough for this single-instance app, and a
+  restart only forgets it. Provider failures become one honest reply of a
+  200 turn instead of a retry storm: a rejected key (401) points at
+  Assistant Settings and is never retried; a busy provider (429 or 503) is
+  waited out for the delay it announced (`Retry-After` or Gemini's
+  `retryDelay`, or `BUDJETAME_ASSISTANT_RETRY_DEFAULT_SECONDS`, 5 s, when
+  it announced none) and retried once while that fits the remaining turn
+  budget, otherwise the reply says the provider is busy and names the
+  seconds to wait; a model that never calls a tool — none in the
+  conversation so far, none this turn — gets the reply that no Draft was
+  written and that, if a money movement was named, this model cannot
+  drive the Assistant; its own text is never shown, so a made-up "done"
+  cannot pass for a Draft. All replies exist in English and Italian. The
+  seam gains the typed errors the adapters raise (`AssistantKeyRejected`,
+  `AssistantProviderBusy(retry_after_seconds=…)`, `AssistantProviderTimeout`
+  for an adapter's own request timeout, which it sets to the turn budget),
+  the helpers that read the announced delay, a `Clock` the turn budget is
+  measured on, and a scripted fake that raises errors and spends time on a
+  fake clock, so every bound is tested through HTTP without sleeping.
 - **Assistant turn** (ADR-0035, #128): `POST /assistant/turns` runs the
   Assistant on the server, stateless: the client sends the transcript as
   it last received it plus the new sentence and gets back the written

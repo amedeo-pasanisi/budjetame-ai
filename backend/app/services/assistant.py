@@ -22,10 +22,29 @@ validator that only says what is wrong sends the model into a junk-filling
 cascade, so every contradiction message names the field to leave null. A
 tool error goes back to the model as an error result and the loop goes on.
 
-Bounds: a tool-step cap per turn (`DEFAULT_MAX_TOOL_STEPS`), past which the
-model is asked for a final answer with no tools. Issue #129 makes it
-configurable and adds the turns-per-hour and seconds-per-turn bounds and
-the provider-failure replies.
+Bounds (ADR-0035, issue #129; `app.assistant_bounds`): the turns-per-hour
+window is checked by `admit_turn` before the loop runs (the next turn is
+`TurnLimitReached`, a 429); the tool-step cap asks the model for a final
+answer with no tools; the seconds-per-turn budget is checked between model
+calls — a tool round that ends past it yields the "gave up" reply instead
+of another call, and an adapter whose request timed out raises the seam's
+`AssistantProviderTimeout` for the same reply. A slow final answer is still
+returned: it is complete. Time is read through the seam's `Clock`, so
+tests spend the budget on a fake clock.
+
+Provider failures reach the loop as the seam's typed errors and become one
+honest reply in the Account's Locale, status 200, never a retry storm: a
+rejected key (401) points at Assistant Settings and is never retried; a
+busy provider (429/503) is waited out for the delay it announced and
+retried once per turn while that fits the remaining budget, otherwise the
+reply names the seconds to wait. A model that never calls a tool — none in
+the transcript, none this turn — gets the "cannot drive the Assistant"
+reply in place of its text, so a text-only model cannot pass for a working
+one, and a made-up "done" is never shown. The server cannot tell that case
+from a correct model answering a first sentence that names no money
+movement, so the reply says what was observed (no tool used, no Draft)
+and what to do if a money movement was named. Any other seam error stays
+a 502.
 """
 
 import json
@@ -41,16 +60,22 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.assistant_bounds import AssistantBounds, TurnWindow
 from app.assistant_providers import provider_spec
 from app.assistant_seam import (
+    AssistantKeyRejected,
     AssistantModel,
     AssistantModelFactory,
+    AssistantProviderBusy,
+    AssistantProviderTimeout,
     AssistantReply,
+    Clock,
     Message,
     TextBlock,
     ToolCallBlock,
     ToolResultBlock,
     ToolSpec,
+    whole_seconds,
 )
 from app.dates import ROME
 from app.models import (
@@ -65,9 +90,73 @@ from app.services import draft_transactions as draft_service
 from app.services.assistant_settings import assistant_key_for
 from app.services.scoping import NotOwned
 
-# The step cap of ADR-0035, until issue #129 makes it a setting: after this
-# many rounds of tool calls the model is asked for its written answer.
-DEFAULT_MAX_TOOL_STEPS = 8
+# What the server itself answers, keyed by the Account's Locale (CONTEXT.md:
+# every client formats and speaks in the Locale; a server-written reply too).
+_REPLIES: dict[str, dict[str, str]] = {
+    "en": {
+        "key_rejected": "The provider rejected the Assistant Key: check it in Assistant Settings.",
+        "busy": "The provider is busy, try again in {seconds} s.",
+        "gave_up": "The Assistant gave up on this turn: it took longer than {seconds} s.",
+        "cannot_drive": (
+            "No Draft was written: this model answered without using the Assistant's tools. "
+            "If you named a money movement, this model cannot drive the Assistant: pick "
+            "another one in Assistant Settings."
+        ),
+        "turn_limit": (
+            "The Assistant's limit of {per_hour} turns per hour is reached, "
+            "try again in {seconds} s."
+        ),
+    },
+    "it": {
+        "key_rejected": (
+            "Il provider ha rifiutato la chiave dell'Assistente: controllala nelle "
+            "Impostazioni dell'Assistente."
+        ),
+        "busy": "Il provider è occupato, riprova tra {seconds} s.",
+        "gave_up": "L'Assistente ha rinunciato a questo turno: ha superato i {seconds} s.",
+        "cannot_drive": (
+            "Nessuna bozza scritta: questo modello ha risposto senza usare gli strumenti "
+            "dell'Assistente. Se hai nominato un movimento di denaro, questo modello non può "
+            "guidare l'Assistente: scegline un altro nelle Impostazioni dell'Assistente."
+        ),
+        "turn_limit": (
+            "Il limite dell'Assistente di {per_hour} turni all'ora è stato raggiunto, "
+            "riprova tra {seconds} s."
+        ),
+    },
+}
+
+
+def reply_text(locale: str, key: str, **values: object) -> str:
+    """One server-written reply in the Account's Locale (English unless
+    Italian), like the password-reset mail picks its language."""
+    catalog = _REPLIES.get(locale, _REPLIES["en"])
+    return catalog[key].format(**values)
+
+
+class TurnLimitReached(Exception):
+    """The Account has used its turns for the hour; `wait_seconds` is how
+    long until one frees. The handler answers 429 with the message as
+    `detail` and the seconds as `Retry-After`."""
+
+    def __init__(self, message: str, *, wait_seconds: int) -> None:
+        super().__init__(message)
+        self.wait_seconds = wait_seconds
+
+
+def admit_turn(account: Account, window: TurnWindow, *, now: float, bounds: AssistantBounds) -> None:
+    """The turns-per-hour bound (ADR-0035): record this turn, or refuse it
+    with `TurnLimitReached` in the Account's Locale."""
+    wait = window.admit(account.id, now=now, limit=bounds.turns_per_hour)
+    if wait is not None:
+        seconds = whole_seconds(wait)
+        raise TurnLimitReached(
+            reply_text(
+                account.language, "turn_limit", per_hour=bounds.turns_per_hour, seconds=seconds
+            ),
+            wait_seconds=seconds,
+        )
+
 
 _DRAFT_TYPES = ("expense", "income", "transfer")
 _ID_FIELDS = (
@@ -663,15 +752,19 @@ def run_turn(
     model: AssistantModel,
     transcript: Sequence[Message],
     text: str,
-    max_tool_steps: int = DEFAULT_MAX_TOOL_STEPS,
+    bounds: AssistantBounds,
+    clock: Clock,
 ) -> TurnResult:
     """One user turn through the loop: the prompt is rebuilt, the user text
-    appended, the model asked until it stops calling tools or the step cap
-    asks it to answer. Every tool call gets a result (an error one when the
-    tool refused), so the transcript the client gets back is always
-    well-formed for the next turn."""
+    appended, the model asked until it stops calling tools, the step cap
+    asks it to answer, or a bound or a provider failure ends the turn with
+    a server-written reply (module docstring). Every tool call gets a
+    result (an error one when the tool refused) and every server reply is
+    an assistant text message, so the transcript the client gets back is
+    always well-formed for the next turn."""
     catalog = load_catalog(session, account.id)
-    system = build_system_prompt(locale=account.language, today=today_in_rome(), catalog=catalog)
+    locale = account.language
+    system = build_system_prompt(locale=locale, today=today_in_rome(), catalog=catalog)
     tools = AccountTools(
         session=session,
         account_id=account.id,
@@ -685,20 +778,50 @@ def run_turn(
         messages.append(message)
         tail.append(message)
 
+    def server_reply(key: str, **values: object) -> TurnResult:
+        """End the turn with a server-written assistant message."""
+        text = reply_text(locale, key, **values)
+        append(Message(role="assistant", content=[TextBlock(text=text)]))
+        return TurnResult(reply=text, transcript_tail=tail, steps=steps)
+
     append(Message(role="user", content=[TextBlock(text=text)]))
+    deadline = clock.monotonic() + bounds.turn_seconds
+    retried = False
     steps = 0
     reply: AssistantReply
     while True:
-        tools_allowed = steps < max_tool_steps
-        reply = model.complete(
-            system=system,
-            tools=TOOLS,
-            messages=messages,
-            tool_choice="auto" if tools_allowed else "none",
-        )
+        tools_allowed = steps < bounds.max_tool_steps
+        try:
+            reply = model.complete(
+                system=system,
+                tools=TOOLS,
+                messages=messages,
+                tool_choice="auto" if tools_allowed else "none",
+            )
+        except AssistantKeyRejected:
+            return server_reply("key_rejected")
+        except AssistantProviderTimeout:
+            return server_reply("gave_up", seconds=whole_seconds(bounds.turn_seconds))
+        except AssistantProviderBusy as error:
+            delay = error.retry_after_seconds
+            if delay is None:
+                delay = bounds.retry_default_seconds
+            if retried or delay > deadline - clock.monotonic():
+                return server_reply("busy", seconds=whole_seconds(delay))
+            # Holds this request's worker thread for the delay: bounded by
+            # the turn budget and the turns per hour, fine for one instance.
+            clock.sleep(delay)
+            retried = True
+            continue
         append(Message(role="assistant", content=list(reply.content)))
         calls = reply.tool_calls
         if not calls:
+            if steps == 0 and not _has_tool_calls(transcript):
+                # Replace the text of a model that never drove a tool: the
+                # tail keeps one assistant message, so roles still alternate.
+                tail.pop()
+                messages.pop()
+                return server_reply("cannot_drive")
             break
         if not tools_allowed:
             # The model ignored "no more tools": answer the calls with an
@@ -719,5 +842,18 @@ def run_turn(
             break
         steps += 1
         append(Message(role="user", content=[_tool_result(call, tools) for call in calls]))
+        if clock.monotonic() >= deadline:
+            # The tools ran (Drafts are Drafts), but no further model call:
+            # the turn is over budget and says so instead of answering.
+            return server_reply("gave_up", seconds=whole_seconds(bounds.turn_seconds))
     return TurnResult(reply=reply.text, transcript_tail=tail, steps=steps)
+
+
+def _has_tool_calls(transcript: Sequence[Message]) -> bool:
+    return any(
+        isinstance(block, ToolCallBlock)
+        for message in transcript
+        if message.role == "assistant"
+        for block in message.content
+    )
 

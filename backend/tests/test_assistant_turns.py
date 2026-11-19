@@ -7,6 +7,7 @@ the network.
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from itertools import count
 from typing import Any
@@ -15,7 +16,19 @@ from zoneinfo import ZoneInfo
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.assistant_seam import AssistantReply, ScriptedAssistantModel, TextBlock, ToolCallBlock
+from app.assistant_bounds import AssistantBounds
+from app.assistant_seam import (
+    AssistantKeyRejected,
+    AssistantProviderBusy,
+    AssistantProviderTimeout,
+    AssistantReply,
+    AssistantSeamError,
+    FakeClock,
+    ScriptedAssistantModel,
+    Slow,
+    TextBlock,
+    ToolCallBlock,
+)
 from app.main import create_app
 from conftest import SEED_EMAIL, SEED_PASSWORD
 
@@ -28,22 +41,36 @@ def _name(prefix: str) -> str:
     return f"Turn {prefix} {next(_UNIQUE)}"
 
 
-@pytest.fixture
-async def turn_client(database_url: str) -> AsyncIterator[tuple[AsyncClient, ScriptedAssistantModel]]:
-    """The app with the provider seam replaced by one scripted fake, handed
-    to the test so each case scripts the fake's replies and reads what the
-    loop sent it."""
-    fake = ScriptedAssistantModel()
+@asynccontextmanager
+async def _scripted_app(
+    database_url: str, *, bounds: AssistantBounds | None = None
+) -> AsyncIterator[tuple[AsyncClient, ScriptedAssistantModel]]:
+    """The app with the provider seam replaced by one scripted fake and the
+    turn clock by a `FakeClock` the fake shares (`fake.clock`), so a test
+    scripts the replies, spends the turn budget and reads the waits without
+    sleeping. `bounds` overrides the settings' bounds (issue #129)."""
+    clock = FakeClock()
+    fake = ScriptedAssistantModel(clock=clock)
     app = create_app(
         database_url,
         seed_email=SEED_EMAIL,
         seed_password=SEED_PASSWORD,
         assistant_model_factory=lambda *, provider, model, key: fake,
+        assistant_clock=clock,
+        assistant_bounds=bounds,
     )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client, fake
     app.state.engine.dispose()
+
+
+@pytest.fixture
+async def turn_client(database_url: str) -> AsyncIterator[tuple[AsyncClient, ScriptedAssistantModel]]:
+    """The scripted app under the default bounds, handed to the test so each
+    case scripts the fake's replies and reads what the loop sent it."""
+    async with _scripted_app(database_url) as pair:
+        yield pair
 
 
 async def _login(client: AsyncClient) -> str:
@@ -550,12 +577,13 @@ async def test_english_locale_asks_for_english(
     client, fake = turn_client
     token = await _login(client)
     await _configure(client, token)
+    _, transcript = await _create_turn(client, fake, token, amount=30)
     fake.script(_say("No money movement heard."))
 
-    result = await _turn(client, token, "hello")
+    result = await _turn(client, token, "hello", transcript)
 
     assert result["reply"] == "No money movement heard."
-    assert "The user's language is English" in fake.calls[0].system
+    assert "The user's language is English" in fake.calls[-1].system
 
 
 # --- The step cap -----------------------------------------------------------------
@@ -702,3 +730,421 @@ async def test_update_with_a_nullish_id_is_refused_as_missing(
     outcome = result["transcript_tail"][2]["content"][0]
     assert outcome["is_error"] is True
     assert "id is required" in outcome["content"]
+
+
+# --- Provider failures (issue #129) -----------------------------------------------
+
+
+def _clock(fake: ScriptedAssistantModel) -> FakeClock:
+    assert fake.clock is not None
+    return fake.clock
+
+
+async def test_a_rejected_key_yields_the_settings_reply_and_no_retry(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    before = {d["id"] for d in await _list_drafts(client, token)}
+    fake.script(AssistantKeyRejected(), _say("never reached"))
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == (
+        "The provider rejected the Assistant Key: check it in Assistant Settings."
+    )
+    assert len(fake.calls) == 1
+    assert _clock(fake).sleeps == []
+    # The tail stays well-formed: the user message, then the reply as an
+    # assistant message, so the client can carry it into the next turn.
+    assert [m["role"] for m in result["transcript_tail"]] == ["user", "assistant"]
+    assert result["transcript_tail"][1]["content"] == [{"type": "text", "text": result["reply"]}]
+    assert {d["id"] for d in await _list_drafts(client, token)} == before
+
+
+async def test_an_untyped_seam_error_is_still_a_502(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    fake.script(AssistantSeamError("connection reset"))
+
+    response = await client.post(
+        "/assistant/turns", json={"transcript": [], "text": "x"}, headers=_auth(token)
+    )
+
+    assert response.status_code == 502, response.text
+    assert len(fake.calls) == 1
+
+
+async def test_a_busy_provider_is_retried_once_after_its_announced_delay(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    before = {d["id"] for d in await _list_drafts(client, token)}
+    fake.script(
+        AssistantProviderBusy(retry_after_seconds=2.5),
+        _tool_call("create_draft_transaction", _draft_input(amount=30)),
+        _say("Spesa 30,00"),
+    )
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "Spesa 30,00"
+    assert len(fake.calls) == 3
+    assert _clock(fake).sleeps == [2.5]
+    # The retry re-asks the same conversation.
+    assert fake.calls[1].messages == fake.calls[0].messages
+    assert len({d["id"] for d in await _list_drafts(client, token)} - before) == 1
+
+
+async def test_a_busy_provider_with_a_delay_beyond_the_budget_names_the_seconds(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    fake.script(AssistantProviderBusy(retry_after_seconds=42.2), _say("never reached"))
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "The provider is busy, try again in 43 s."
+    assert len(fake.calls) == 1
+    assert _clock(fake).sleeps == []
+    assert [m["role"] for m in result["transcript_tail"]] == ["user", "assistant"]
+
+
+async def test_a_busy_provider_that_announced_no_delay_waits_the_default(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    fake.script(AssistantProviderBusy(), _say("ok"))
+
+    await _turn(client, token, "x")
+
+    assert _clock(fake).sleeps == [5.0]
+    assert len(fake.calls) == 2
+
+
+async def test_a_busy_provider_is_retried_only_once_per_turn(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    fake.script(
+        AssistantProviderBusy(retry_after_seconds=1),
+        _tool_call("create_draft_transaction", _draft_input(amount=30)),
+        AssistantProviderBusy(retry_after_seconds=1),
+        _say("never reached"),
+    )
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "The provider is busy, try again in 1 s."
+    assert len(fake.calls) == 3
+    assert _clock(fake).sleeps == [1]
+    roles = [m["role"] for m in result["transcript_tail"]]
+    assert roles == ["user", "assistant", "user", "assistant"]
+
+
+async def test_the_delay_must_fit_the_remaining_budget_not_the_whole_one(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    # 20 s spent on the first call; a 15 s delay would end past the 30 s budget.
+    fake.script(
+        Slow(20, _tool_call("create_draft_transaction", _draft_input(amount=30))),
+        AssistantProviderBusy(retry_after_seconds=15),
+        _say("never reached"),
+    )
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "The provider is busy, try again in 15 s."
+    assert len(fake.calls) == 2
+    assert _clock(fake).sleeps == []
+
+
+# --- The turn budget ----------------------------------------------------------------
+
+
+async def test_a_turn_over_budget_yields_the_gave_up_reply_without_another_call(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    before = {d["id"] for d in await _list_drafts(client, token)}
+    fake.script(
+        Slow(31, _tool_call("create_draft_transaction", _draft_input(amount=30))),
+        _say("never reached"),
+    )
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "The Assistant gave up on this turn: it took longer than 30 s."
+    assert len(fake.calls) == 1
+    tail = result["transcript_tail"]
+    assert [m["role"] for m in tail] == ["user", "assistant", "user", "assistant"]
+    assert tail[2]["content"][0]["type"] == "tool_result"
+    assert tail[3]["content"] == [{"type": "text", "text": result["reply"]}]
+    # The tool had already run: the Draft stays, as a Draft.
+    assert len({d["id"] for d in await _list_drafts(client, token)} - before) == 1
+
+
+async def test_an_adapter_timeout_yields_the_gave_up_reply(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    fake.script(
+        _tool_call("create_draft_transaction", _draft_input(amount=30)),
+        AssistantProviderTimeout(),
+        _say("never reached"),
+    )
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "The Assistant gave up on this turn: it took longer than 30 s."
+    assert len(fake.calls) == 2
+    assert [m["role"] for m in result["transcript_tail"]] == ["user", "assistant", "user", "assistant"]
+
+
+async def test_a_slow_final_answer_is_still_returned(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    fake.script(
+        _tool_call("create_draft_transaction", _draft_input(amount=30)),
+        Slow(40, _say("Spesa 30,00")),
+    )
+
+    result = await _turn(client, token, "trenta euro")
+
+    assert result["reply"] == "Spesa 30,00"
+    assert len(fake.calls) == 2
+
+
+# --- A model that never calls a tool ---------------------------------------------
+
+
+async def test_a_model_that_never_calls_a_tool_cannot_drive_the_assistant(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    before = {d["id"] for d in await _list_drafts(client, token)}
+    fake.script(_say("I cannot create transactions, but here is a tip: ..."))
+
+    result = await _turn(client, token, "trenta euro all'Esselunga")
+
+    assert result["reply"] == (
+        "No Draft was written: this model answered without using the Assistant's tools. "
+        "If you named a money movement, this model cannot drive the Assistant: pick "
+        "another one in Assistant Settings."
+    )
+    assert len(fake.calls) == 1
+    assert result["transcript_tail"] == [
+        {"role": "user", "content": [{"type": "text", "text": "trenta euro all'Esselunga"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": result["reply"]}]},
+    ]
+    assert {d["id"] for d in await _list_drafts(client, token)} == before
+
+
+async def test_a_text_only_answer_passes_through_once_the_conversation_used_a_tool(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    _, transcript = await _create_turn(client, fake, token, amount=30)
+    fake.script(_say("No money movement heard."))
+
+    result = await _turn(client, token, "thanks!", transcript)
+
+    assert result["reply"] == "No money movement heard."
+
+
+# --- Turns per hour -------------------------------------------------------------------
+
+
+async def test_the_31st_turn_in_an_hour_answers_429_and_another_account_is_unaffected(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    for _ in range(30):
+        fake.script(_tool_call("create_draft_transaction", _draft_input(amount=1)), _say("ok"))
+        await _turn(client, token, "uno")
+    calls_before = len(fake.calls)
+
+    response = await client.post(
+        "/assistant/turns", json={"transcript": [], "text": "uno"}, headers=_auth(token)
+    )
+
+    assert response.status_code == 429, response.text
+    assert response.headers["Retry-After"] == "3600"
+    assert response.json()["detail"] == (
+        "The Assistant's limit of 30 turns per hour is reached, try again in 3600 s."
+    )
+    assert len(fake.calls) == calls_before
+
+    other = await _login(client)
+    await _configure(client, other)
+    fake.script(_tool_call("create_draft_transaction", _draft_input(amount=1)), _say("ok"))
+    assert (await _turn(client, other, "uno"))["reply"] == "ok"
+
+    # An hour later the window has slid and the first Account turns again.
+    _clock(fake).advance(3600)
+    fake.script(_tool_call("create_draft_transaction", _draft_input(amount=1)), _say("ok"))
+    assert (await _turn(client, token, "uno"))["reply"] == "ok"
+
+
+async def test_a_turn_that_ran_and_failed_still_counts(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    for i in range(29):
+        fake.script(_tool_call("create_draft_transaction", _draft_input(amount=1)), _say("ok"))
+        await _turn(client, token, "uno")
+    fake.script(AssistantKeyRejected())
+    await _turn(client, token, "uno")  # the 30th: a turn, even though it failed
+
+    response = await client.post(
+        "/assistant/turns", json={"transcript": [], "text": "uno"}, headers=_auth(token)
+    )
+
+    assert response.status_code == 429, response.text
+
+
+async def test_a_refused_turn_is_not_counted(database_url: str) -> None:
+    bounds = AssistantBounds(
+        turns_per_hour=2, max_tool_steps=8, turn_seconds=30, retry_default_seconds=5
+    )
+    async with _scripted_app(database_url, bounds=bounds) as (client, fake):
+        token = await _login(client)
+        await _configure(client, token)
+        fake.script(AssistantKeyRejected())
+        await _turn(client, token, "uno")  # t=0
+        _clock(fake).advance(100)
+        fake.script(AssistantKeyRejected())
+        await _turn(client, token, "due")  # t=100
+        refused = await client.post(
+            "/assistant/turns", json={"transcript": [], "text": "tre"}, headers=_auth(token)
+        )
+        assert refused.status_code == 429, refused.text
+        assert refused.headers["Retry-After"] == "3500"
+
+        # At t=3600 only the first turn has aged out: one slot is free. Had
+        # the refused attempt been recorded at t=100, there would be none.
+        _clock(fake).advance(3500)
+        fake.script(AssistantKeyRejected())
+        await _turn(client, token, "quattro")
+        again = await client.post(
+            "/assistant/turns", json={"transcript": [], "text": "cinque"}, headers=_auth(token)
+        )
+        assert again.status_code == 429, again.text
+
+
+# --- Bounds are configurable -----------------------------------------------------------
+
+
+async def test_bounds_come_from_the_app_factory(database_url: str) -> None:
+    bounds = AssistantBounds(
+        turns_per_hour=2, max_tool_steps=3, turn_seconds=10, retry_default_seconds=1
+    )
+    async with _scripted_app(database_url, bounds=bounds) as (client, fake):
+        token = await _login(client)
+        await _configure(client, token)
+
+        # Three tool steps, then the model is asked for a final answer.
+        fake.script(
+            *[
+                _tool_call("create_draft_transaction", _draft_input(amount=i + 1), f"b{i}")
+                for i in range(3)
+            ],
+            _say("Tre bozze."),
+        )
+        result = await _turn(client, token, "tante")
+        assert result["reply"] == "Tre bozze."
+        assert [c.tool_choice for c in fake.calls] == ["auto"] * 3 + ["none"]
+
+        # The default retry delay and the turn budget are the app's too.
+        fake.script(
+            AssistantProviderBusy(),
+            Slow(11, _tool_call("create_draft_transaction", _draft_input(amount=9))),
+        )
+        result = await _turn(client, token, "nove")
+        assert _clock(fake).sleeps == [1]
+        assert result["reply"] == "The Assistant gave up on this turn: it took longer than 10 s."
+
+        # Two turns per hour: the third is refused.
+        response = await client.post(
+            "/assistant/turns", json={"transcript": [], "text": "x"}, headers=_auth(token)
+        )
+        assert response.status_code == 429, response.text
+
+
+# --- Replies in the Locale -------------------------------------------------------------
+
+
+async def test_server_replies_are_italian_for_an_italian_account(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token)
+    await _set_language(client, token, "it")
+
+    fake.script(AssistantKeyRejected())
+    assert (await _turn(client, token, "x"))["reply"] == (
+        "Il provider ha rifiutato la chiave dell'Assistente: controllala nelle "
+        "Impostazioni dell'Assistente."
+    )
+
+    fake.script(AssistantProviderBusy(retry_after_seconds=60))
+    assert (await _turn(client, token, "x"))["reply"] == (
+        "Il provider è occupato, riprova tra 60 s."
+    )
+
+    fake.script(Slow(31, _tool_call("create_draft_transaction", _draft_input(amount=1))))
+    assert (await _turn(client, token, "x"))["reply"] == (
+        "L'Assistente ha rinunciato a questo turno: ha superato i 30 s."
+    )
+
+    fake.script(_say("Non posso."))
+    assert (await _turn(client, token, "x"))["reply"] == (
+        "Nessuna bozza scritta: questo modello ha risposto senza usare gli strumenti "
+        "dell'Assistente. Se hai nominato un movimento di denaro, questo modello non può "
+        "guidare l'Assistente: scegline un altro nelle Impostazioni dell'Assistente."
+    )
+
+    for _ in range(26):
+        fake.script(AssistantKeyRejected())
+        await _turn(client, token, "x")
+    response = await client.post(
+        "/assistant/turns", json={"transcript": [], "text": "x"}, headers=_auth(token)
+    )
+    assert response.status_code == 429, response.text
+    # The slow turn above moved the clock, so the wait is a little under an hour.
+    assert response.json()["detail"] == (
+        "Il limite dell'Assistente di 30 turni all'ora è stato raggiunto, "
+        f"riprova tra {response.headers['Retry-After']} s."
+    )
+    assert 3500 < int(response.headers["Retry-After"]) <= 3600

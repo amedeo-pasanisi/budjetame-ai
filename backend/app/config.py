@@ -17,6 +17,17 @@ class Settings(BaseSettings):
     # unreadable and every Account re-enters theirs.
     assistant_key_secret: str = "dev-assistant-key-secret-change-me-please"
 
+    # The Assistant's per-Account bounds (ADR-0035, issue #129), so a leaked
+    # session token cannot burn a key quickly: turns per Account per hour
+    # (the next one answers 429), tool steps per turn (past the cap the
+    # model is asked for its written answer), seconds per turn (past the
+    # budget the reply says the Assistant gave up), and the wait before
+    # the one retry of a provider 429/503 that announced no delay.
+    assistant_turns_per_hour: int = 30
+    assistant_max_tool_steps: int = 8
+    assistant_turn_seconds: float = 30.0
+    assistant_retry_default_seconds: float = 5.0
+
     # Google sign-in (issue #81): the OAuth client id is public (it ships to
     # the browser); empty disables the Google button.
     google_oauth_client_id: str = ""
