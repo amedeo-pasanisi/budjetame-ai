@@ -85,6 +85,15 @@ class ToolResultBlock(BaseModel):
 
 Block = Annotated[TextBlock | ToolCallBlock | ToolResultBlock, Field(discriminator="type")]
 
+# A tool call whose arguments the provider sent as a string that is not a
+# JSON object (a chat-completions model can truncate or garble them, issue
+# #131): the adapter cannot crash the turn on it, so it hands the loop a
+# `ToolCallBlock` whose input is `{INVALID_TOOL_INPUT_KEY: <raw string>}`,
+# and the loop's tool-input hygiene answers that call with an error result
+# telling the model to send a JSON object. The call keeps its id, so the
+# transcript stays well-formed for the next turn.
+INVALID_TOOL_INPUT_KEY = "__invalid_json"
+
 
 class Message(BaseModel):
     """One transcript entry. A user message carries text or tool results;

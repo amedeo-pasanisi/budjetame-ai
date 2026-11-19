@@ -63,6 +63,7 @@ from sqlalchemy.orm import Session
 from app.assistant_bounds import AssistantBounds, TurnWindow
 from app.assistant_providers import provider_spec
 from app.assistant_seam import (
+    INVALID_TOOL_INPUT_KEY,
     AssistantKeyRejected,
     AssistantModel,
     AssistantModelFactory,
@@ -170,6 +171,8 @@ _ID_FIELDS = (
 _NULLISH = re.compile(r"^(|none|null|nil|n/a)$", re.IGNORECASE)
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MAX_DESCRIPTION = 500
+# How much of an undecodable arguments string the error result quotes back.
+_INVALID_INPUT_CHARS = 300
 
 
 class AssistantNotConfigured(Exception):
@@ -646,6 +649,14 @@ class AccountTools:
     conversation_ids: set[int] = field(default_factory=set)
 
     def call(self, name: str, raw_input: dict[str, Any]) -> Any:
+        if INVALID_TOOL_INPUT_KEY in raw_input:
+            # The adapter could not decode the call's arguments (issue
+            # #131): tell the model, quoting what it sent, and go on.
+            raw = str(raw_input[INVALID_TOOL_INPUT_KEY])[:_INVALID_INPUT_CHARS]
+            raise ToolError(
+                f"the arguments of {name} were not a JSON object ({raw!r}); "
+                "send one JSON object with the tool's fields"
+            )
         if name == LIST_TOOL:
             return self._list()
         if name == CREATE_TOOL:

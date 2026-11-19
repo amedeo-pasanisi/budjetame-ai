@@ -18,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.assistant_bounds import AssistantBounds
 from app.assistant_seam import (
+    INVALID_TOOL_INPUT_KEY,
     AssistantKeyRejected,
     AssistantProviderBusy,
     AssistantProviderTimeout,
@@ -513,6 +514,37 @@ async def test_a_tool_error_is_answered_and_the_loop_continues(
     assert len(fake.calls) == 3
     assert _tool_results(fake, 1)[0]["is_error"] is True
     assert _tool_results(fake, 2)[0]["is_error"] is False
+
+
+async def test_unparsable_tool_arguments_are_answered_with_a_tool_error_not_a_500(
+    turn_client: tuple[AsyncClient, ScriptedAssistantModel],
+) -> None:
+    """An OpenAI-compatible adapter (issue #131) hands the loop a call whose
+    arguments were not a JSON object as `{INVALID_TOOL_INPUT_KEY: raw}`;
+    the loop answers it with an error result and goes on."""
+    client, fake = turn_client
+    token = await _login(client)
+    await _configure(client, token, "openrouter")
+
+    raw = '{"type": "expense", "amount": 30, "wallet_id": '
+    fake.script(
+        _tool_call("create_draft_transaction", {INVALID_TOOL_INPUT_KEY: raw}, "bad-1"),
+        _tool_call("list_draft_transactions", {INVALID_TOOL_INPUT_KEY: "[]"}, "bad-2"),
+        _say("Riprovo."),
+    )
+    result = await _turn(client, token, "30 euro all'Esselunga")
+
+    assert result["reply"] == "Riprovo."
+    assert len(fake.calls) == 3
+    first = _tool_results(fake, 1)[0]
+    assert first["tool_call_id"] == "bad-1"
+    assert first["is_error"] is True
+    assert "JSON" in first["content"]
+    assert raw in first["content"]
+    second = _tool_results(fake, 2)[0]
+    assert second["tool_call_id"] == "bad-2"
+    assert second["is_error"] is True
+    assert await _list_drafts(client, token) == []
 
 
 # --- The prompt --------------------------------------------------------------------

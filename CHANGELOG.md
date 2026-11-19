@@ -9,6 +9,27 @@ here and on GitHub Releases.
 
 ### Added
 
+- **OpenAI-compatible adapter for OpenRouter and Google Gemini** (ADR-0035,
+  #131): an Account whose Assistant Settings name OpenRouter or Gemini now
+  gets real turns through one chat-completions adapter
+  (`app/assistant_openai_compatible.py`), parameterized by the base URL of
+  the fixed provider table — never a user-entered URL. It translates the
+  seam's shape both ways (the system prompt as the system message, one
+  `tool` message per tool result keyed by call id, tool calls as
+  `tool_calls` with JSON-encoded arguments, the four Draft tools as
+  `function` tools with their schemas as-is, `tool_choice` passed through;
+  back, `tool_calls` become tool-call blocks and `content` a text block,
+  stopping with tool use, max tokens on `length`, else end of turn). An
+  arguments string the model garbled is answered with a tool error that
+  quotes it, never a 500; provider statuses map to the typed seam errors
+  (401/403 and Gemini's 400 "API key" as a rejected key; 429/503 as busy
+  with the delay from `Retry-After` or the body's `retryDelay`; the
+  adapter's own timeout, set to the turn budget, as the timeout; anything
+  else a 502 naming the provider's message with the key redacted). The key
+  travels as a bearer token and is never logged; OpenRouter gets the app's
+  attribution headers. No test touches the network: the translation and
+  the status mapping run against recorded shapes through an httpx mock
+  transport.
 - **Assistant on every tab** (ADR-0035, #132): an Assistant button in the
   header of every tab, shown only while the Assistant Settings status
   reports configured — it goes the moment the key is removed in Settings,

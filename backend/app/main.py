@@ -6,6 +6,10 @@ from app.assistant_models import router as assistant_models_router
 from app.assistant import router as assistant_router
 from app.assistant_bounds import AssistantBounds, AssistantRuntime
 from app.assistant_seam import AssistantModelFactory, Clock, SystemClock, assistant_model_for
+
+# The provider adapters register themselves in `ADAPTERS` on import (ADR-0035):
+# the OpenAI-compatible one for OpenRouter and Gemini (issue #131).
+import app.assistant_openai_compatible
 from app.assistant_settings import router as assistant_settings_router
 from app.auth import router as auth_router
 from app.categories import router as categories_router
