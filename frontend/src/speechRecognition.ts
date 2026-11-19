@@ -1,11 +1,10 @@
 /** The browser's speech recognition behind one small seam (ADR-0035,
- * issues #122/#132): the Assistant modal's microphone fills the text box
- * through `window.SpeechRecognition` (Chrome ships it prefixed as
- * `webkitSpeechRecognition`), in the Account's Locale, and never sends on
- * its own. TypeScript's DOM lib declares the event types but not the
- * constructor, so the minimal surface the modal uses is declared here;
- * where the browser has no recognizer the modal shows no microphone. Tests
- * put a fake constructor on `window`. */
+ * issues #122/#132/#133): the Assistant modal's Dictation listens through
+ * `window.SpeechRecognition` (Chrome ships it prefixed as
+ * `webkitSpeechRecognition`) in the Account's Locale. TypeScript's DOM lib
+ * declares the event types but not the constructor, so the minimal surface
+ * the modal uses is declared here; where the browser has no recognizer the
+ * modal shows no microphone. Tests put a fake constructor on `window`. */
 
 export type SpeechRecognizer = {
   lang: string
@@ -14,6 +13,9 @@ export type SpeechRecognizer = {
   onresult: ((event: SpeechRecognitionEvent) => void) | null
   onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
   onend: (() => void) | null
+  /** The recognizer has begun listening. Chrome fires it once the
+   * microphone is granted, never for a refused one. */
+  onstart: (() => void) | null
   start(): void
   stop(): void
   abort(): void
@@ -36,6 +38,22 @@ export function speechRecognizerConstructor(): SpeechRecognizerConstructor | nul
  * Italian is `it-IT`, everything else `en-US`. */
 export function recognitionLanguage(locale: string): string {
   return locale === 'it' ? 'it-IT' : 'en-US'
+}
+
+/** The recognizer errors that are the user's own choice — the microphone
+ * refused, now or for good (the browser cannot tell the two apart), or a
+ * Dictation the app dropped — and silence: none is a failure worth a line
+ * (issue #133). */
+const QUIET_ERRORS = new Set<SpeechRecognitionErrorCode>([
+  'not-allowed',
+  'service-not-allowed',
+  'aborted',
+  'no-speech',
+])
+
+/** Whether a recognizer error is a failure the user did not choose. */
+export function isDictationFailure(error: SpeechRecognitionErrorCode): boolean {
+  return !QUIET_ERRORS.has(error)
 }
 
 /** The sentence a result event carries: the best alternative of every

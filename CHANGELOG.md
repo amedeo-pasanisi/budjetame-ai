@@ -9,6 +9,18 @@ here and on GitHub Releases.
 
 ### Added
 
+- **The Assistant listens on open and sends each Dictation** (ADR-0035,
+  #133): tapping the Assistant button now starts a Dictation at once, with
+  no microphone tap. A rising tone marks when the microphone is really
+  listening and a falling one its end (synthesised in the browser, no audio
+  file). When the user falls silent, or taps the microphone, what was heard
+  is sent as the next turn after anything typed — reversing #132's "fills
+  the box, never sends". Typing or pressing Send while it listens cancels it, closing drops
+  it, a Dictation that heard nothing sends nothing, and the microphone is
+  disabled while a reply is pending. A refused or blocked microphone shows
+  no error and makes no sound; "Dictation did not work" is kept for failures
+  the user did not choose.
+
 - **OpenAI-compatible adapter for OpenRouter and Google Gemini** (ADR-0035,
   #131): an Account whose Assistant Settings name OpenRouter or Gemini now
   gets real turns through one chat-completions adapter

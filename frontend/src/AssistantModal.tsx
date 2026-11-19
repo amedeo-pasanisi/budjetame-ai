@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useIntl } from 'react-intl'
 
 import { ApiError, TOKEN_KEY, sendAssistantTurn, type AssistantMessage } from './api'
+import { playStartTone, playStopTone, primeTones } from './dictationTones'
 import { ModalShell } from './ModalShell'
 import {
+  isDictationFailure,
   recognitionLanguage,
   recognizedText,
   speechRecognizerConstructor,
@@ -32,6 +34,13 @@ type Line = {
 
 let nextLineId = 0
 
+/** The running Dictation: its recognizer, to stop it and send what was
+ * heard, and how to drop it — end it without sending or sounding its end. */
+type Dictation = {
+  recognizer: SpeechRecognizer
+  drop: () => void
+}
+
 /** The Assistant modal (ADR-0035, issues #122/#132): a thin chat screen,
  * centered like every modal (ADR-0008). The transcript the server needs —
  * every message as last received, tool calls and results included — is
@@ -51,9 +60,11 @@ let nextLineId = 0
  * line, since it is the server's bound speaking, anything else as a
  * failure line. On a failed turn the sentence goes back into the box.
  *
- * The microphone fills the text box through the browser's speech
- * recognition in the Account's Locale (`it-IT` / `en-US`) and never sends
- * on its own; where the browser has no recognizer there is no microphone. */
+ * Dictation (issue #133; its rules are the CONTEXT.md term) listens through
+ * the browser's speech recognition in the Account's Locale and is sent as
+ * an ordinary turn, so a phone-like "open and speak" needs no Send. Where
+ * the browser has no recognizer there is no microphone and the modal opens
+ * to the box alone. */
 export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModalProps) {
   const { formatMessage } = useIntl()
   const [transcript, setTranscript] = useState<AssistantMessage[]>([])
@@ -62,14 +73,19 @@ export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModal
   const [busy, setBusy] = useState(false)
   const [listening, setListening] = useState(false)
   const [dictationFailed, setDictationFailed] = useState(false)
-  const recognizerRef = useRef<SpeechRecognizer | null>(null)
+  const dictationRef = useRef<Dictation | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
 
   const token = localStorage.getItem(TOKEN_KEY) ?? ''
   const Recognizer = speechRecognizerConstructor()
 
-  // A dictation still running when the modal closes is dropped with it.
-  useEffect(() => () => recognizerRef.current?.abort(), [])
+  // Opening the Assistant starts a Dictation (issue #133); one still running
+  // when the modal closes is dropped with it.
+  useEffect(() => {
+    startDictation()
+    return () => dictationRef.current?.drop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per open
+  }, [])
 
   // Keep the newest line in view as the conversation grows.
   useEffect(() => {
@@ -77,9 +93,16 @@ export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModal
     if (log) log.scrollTop = log.scrollHeight
   }, [lines, busy])
 
-  const handleSend = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSend = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const sentence = text.trim()
+    // Sending the box is choosing the box: the Dictation gives way.
+    dictationRef.current?.drop()
+    void sendSentence(text.trim())
+  }
+
+  /** One turn: the sentence typed or dictated goes to the server with the
+   * transcript as last received. */
+  const sendSentence = async (sentence: string) => {
     if (sentence === '' || busy) return
     const userLine: Line = { id: ++nextLineId, role: 'user', text: sentence }
     setLines((current) => [...current, userLine])
@@ -115,33 +138,77 @@ export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModal
     }
   }
 
+  // A Dictation outlives the render that started it: its end reads the box
+  // and sends through the latest render's state.
+  const textRef = useRef(text)
+  textRef.current = text
+  const sendRef = useRef(sendSentence)
+  sendRef.current = sendSentence
+
   const toggleDictation = () => {
-    if (listening) {
-      recognizerRef.current?.stop()
+    if (dictationRef.current !== null) {
+      dictationRef.current.recognizer.stop()
       return
     }
+    startDictation()
+  }
+
+  function startDictation() {
     if (Recognizer === null) return
+    // Within the tap that opened the Assistant or pressed the microphone, so
+    // the browser lets the tones play once the microphone is open.
+    primeTones()
     const recognizer = new Recognizer()
     recognizer.lang = recognitionLanguage(locale)
     recognizer.continuous = false
     recognizer.interimResults = false
+    let heard = ''
+    let dropped = false
+    let started = false
+    const release = () => {
+      dictationRef.current = null
+      setListening(false)
+    }
+    recognizer.onstart = () => {
+      if (dropped) return
+      started = true
+      playStartTone()
+    }
     recognizer.onresult = (event) => {
-      const heard = recognizedText(event)
-      if (heard === '') return
-      setText((current) => (current.trim() === '' ? heard : `${current.trim()} ${heard}`))
+      heard = recognizedText(event)
     }
     recognizer.onerror = (event) => {
-      // Silence and a user stop are not failures worth a line.
-      if (event.error !== 'no-speech' && event.error !== 'aborted') setDictationFailed(true)
+      if (!dropped && isDictationFailure(event.error)) setDictationFailed(true)
     }
     recognizer.onend = () => {
-      setListening(false)
-      recognizerRef.current = null
+      // A dropped recognizer was released when it was dropped and ends late
+      // (Chrome fires `end` after `abort` returns; StrictMode drops the
+      // first recognizer of every open): its end must not touch the
+      // Dictation running now.
+      if (dropped) return
+      release()
+      // The end tone answers a start tone: a refused microphone sounds nothing.
+      if (started) playStopTone()
+      // What was heard is the next turn, after anything already typed.
+      if (heard !== '') void sendRef.current(`${textRef.current.trim()} ${heard}`.trim())
     }
-    recognizerRef.current = recognizer
+    dictationRef.current = {
+      recognizer,
+      drop: () => {
+        dropped = true
+        release()
+        recognizer.abort()
+      },
+    }
     setDictationFailed(false)
     setListening(true)
-    recognizer.start()
+    try {
+      recognizer.start()
+    } catch {
+      // A recognizer that will not start is a failure the user did not choose.
+      release()
+      setDictationFailed(true)
+    }
   }
 
   const title = formatMessage({ id: 'assistant.title' })
@@ -205,7 +272,11 @@ export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModal
         <input
           type="text"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            // Typing means the user chose the box: the Dictation gives way.
+            dictationRef.current?.drop()
+            setText(event.target.value)
+          }}
           aria-label={formatMessage({ id: 'assistant.input' })}
           placeholder={formatMessage({ id: 'assistant.input.placeholder' })}
           autoComplete="off"
@@ -215,6 +286,7 @@ export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModal
           <button
             type="button"
             onClick={toggleDictation}
+            disabled={busy}
             aria-pressed={listening}
             aria-label={formatMessage({
               id: listening ? 'assistant.dictation.stop' : 'assistant.dictation.start',
@@ -223,7 +295,7 @@ export function AssistantModal({ locale, onClose, onNoSettings }: AssistantModal
               listening
                 ? 'border-red-300 bg-red-50 text-red-700'
                 : 'border-slate-300 text-slate-600'
-            }`}
+            } disabled:opacity-60`}
           >
             🎤
           </button>
