@@ -107,13 +107,17 @@ does, for review and for when you want to do it manually.
 
 ## Domain & TLS
 
-One domain serves all three environments (ADR-0018, ADR-0019):
+One domain serves every environment (ADR-0018, ADR-0019):
 
 | Environment | Hostname | DNS A record |
 |---|---|---|
-| prod | `budjetame.de` (+ `www`, redirects to the apex) | 89.168.30.119 |
-| stage | `stage.budjetame.de` | 130.110.1.224 |
+| prod | `budjetame.de` (+ `www`, redirects to the apex) | 130.110.1.136 |
 | dev | `dev.budjetame.de` | 92.4.163.113 |
+| stage | `stage.budjetame.de` | none — VM retired 2026-11-11 (ADR-0023 addendum) |
+
+Checked against the live records on 2026-11-19; the prod VM's address
+changed when prod moved VMs, so trust `Resolve-DnsName` / `dig` over this
+table if they disagree.
 
 - The domain is registered at Aruba (~€10/yr). DNS lives in Aruba's panel.
 - Caddy in the frontend image terminates TLS with Let's Encrypt certificates
@@ -164,6 +168,13 @@ signup and one key upload; this is the record of what it does.
    curl -fsSL https://get.docker.com | sh
    sudo usermod -aG docker ubuntu
    ```
+   Leave Docker's DNS at its default: no `dns` key in
+   `/etc/docker/daemon.json` (the file absent, or `{}`). Docker then
+   forwards the containers' lookups to systemd-resolved's upstream, Oracle's
+   VCN resolver `169.254.169.254`. The backend needs it to reach the
+   Assistant's providers (OpenRouter, Gemini, Anthropic); the site itself
+   keeps working without DNS, so a broken setting goes unnoticed until the
+   Assistant is used (see Troubleshooting).
 6. **Code + secrets** — get the repo onto the VM (see below), then
    `cp .env.example .env` and fill it (`openssl rand -hex 32` for the two
    secrets; your real login for the seed account).
@@ -214,5 +225,22 @@ git remote add origin https://github.com/amedeo-pasanisi/budjetame-ai.git
   the first start; the Account was seeded with the original values. Wipe the
   `db_data` volume (`docker compose -f compose.prod.yaml down -v`) and start
   again with the intended values.
+- **The Assistant cannot reach its provider** — OpenRouter's or Gemini's
+  model list stays empty in Settings (`GET /api/assistant/models` answers
+  502 "model list is unavailable"), and every turn shows "The Assistant
+  could not answer" (`POST /api/assistant/turns` answers 502 "could not
+  reach …: Temporary failure in name resolution") → the backend container
+  cannot resolve hostnames. Check
+  `sudo docker exec budjetame-ai-backend-1 cat /etc/resolv.conf`: the
+  `ExtServers` line must name a resolver that answers (Oracle's
+  `169.254.169.254`), not a Docker bridge gateway like `172.19.0.1`, where
+  nothing listens. The usual cause is a `dns` key in
+  `/etc/docker/daemon.json`; empty it to `{}` and
+  `sudo systemctl restart docker` (the services come back by their
+  `restart: unless-stopped`; seconds of downtime, no data touched).
+  On 2026-11-19 prod had `{"dns": ["172.19.0.1"]}`, left from the hand
+  rebuild of 2026-11-09 (ADR-0024 addendum); it was emptied, the old file
+  kept as `/etc/docker/daemon.json.bak-2026-11-19`. Dev never had it, which
+  is why the same release worked there.
 - **Migrations didn't run** → check `BUDJETAME_DATABASE_URL` is set for the
   backend service; `alembic/env.py` refuses to guess when it's absent.
